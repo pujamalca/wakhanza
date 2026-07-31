@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --primary: 158 64% 32%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --card: 0 0% 100%;
+    --ring: 158 64% 32%;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 222 47% 9%;
+    --foreground: 210 40% 96%;
+    --primary: 158 55% 45%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --destructive: 0 70% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 33% 20%;
+    /* Sedikit lebih terang dari --background -- di halaman terang cukup
+       border, tapi di gelap card butuh beda kecerahan supaya panel
+       kelihatan "terangkat", bukan menyatu jadi satu bidang gelap. */
+    --card: 222 40% 13%;
+    --ring: 158 55% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+}
