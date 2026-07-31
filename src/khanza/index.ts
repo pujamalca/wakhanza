@@ -7,3 +7,4 @@ export * from './farmasi';
 export * from './billing';
 export * from './booking';
 export * from './pasienSegment';
+export * from './broadcastSchedule';

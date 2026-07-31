@@ -80,7 +80,9 @@ GRANT UPDATE, DELETE ON wakhanza.send_log          TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.app_user          TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.app_setting       TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.schema_migrations TO 'wakhanza_rw'@'localhost';
--- audit_log sengaja TIDAK PERNAH diberi UPDATE/DELETE, di level mana pun.
+GRANT UPDATE, DELETE ON wakhanza.broadcast_schedule TO 'wakhanza_rw'@'localhost';
+-- audit_log dan broadcast_campaign sengaja TIDAK PERNAH diberi UPDATE/DELETE,
+-- di level mana pun -- keduanya insert-only by design (jejak akuntabilitas).
 ```
 
 Kalau suatu hari ada kode yang keliru menjalankan `UPDATE sik.pasien`, MariaDB menolaknya dengan error hak akses. Keselamatan database rumah sakit tidak boleh bergantung pada ingatan programmer.

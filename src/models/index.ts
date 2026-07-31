@@ -9,3 +9,4 @@ export { AppUser, type AppUserRole } from './AppUser';
 export { AuditLog, logAudit } from './AuditLog';
 export { AppSetting, getSetting, getSettingNumber, getSettingJson, setSetting } from './AppSetting';
 export { BroadcastCampaign } from './BroadcastCampaign';
+export { BroadcastSchedule } from './BroadcastSchedule';

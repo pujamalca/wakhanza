@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/nomor-bermasalah', label: 'Nomor bermasalah' },
   { href: '/daftar-tolak', label: 'Daftar tolak' },
   { href: '/broadcast', label: 'Broadcast', adminOnly: true },
+  { href: '/broadcast-terjadwal', label: 'Broadcast terjadwal', adminOnly: true },
   { href: '/pengaturan', label: 'Pengaturan', adminOnly: true },
   { href: '/log', label: 'Log' },
   { href: '/audit', label: 'Audit', adminOnly: true },
