@@ -1,0 +1,25 @@
+# Rahasia — JANGAN pernah di-commit
+.env
+.env.local
+.env.*.local
+
+# Sesi WhatsApp aktif. Berisi kredensial.
+# WAJIB dicadangkan bersama database, TAPI di luar git.
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Dependensi & hasil build
+node_modules/
+.next/
+out/
+dist/
+
+# Runtime
+logs/
+*.log
+npm-debug.log*
+coverage/
+
+# OS
+Thumbs.db
+.DS_Store
