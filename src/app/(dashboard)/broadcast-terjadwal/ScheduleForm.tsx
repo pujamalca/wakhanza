@@ -2,8 +2,9 @@
 
 import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
-import { Input, Textarea, Button, cardClassName } from '@/components/ui';
+import { Input, Textarea, Select, Button, cardClassName } from '@/components/ui';
 import { createScheduleAction } from './actions';
+import type { BroadcastTemplateOption } from '../broadcast/ComposeForm';
 
 const DEFAULT_BODY =
   'Bpk/Ibu {nama_pasien}, kami dari {nama_rs} ingin menyampaikan informasi terkait kunjungan Anda sebelumnya. Silakan hubungi {kontak_rs} bila ada pertanyaan.';
@@ -16,6 +17,7 @@ export function ScheduleForm({
   total,
   uniqueCodeFooter,
   isFollowup,
+  templates,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
@@ -24,6 +26,8 @@ export function ScheduleForm({
   uniqueCodeFooter: string | null;
   /** Mode jendela terpilih di filter di atas -- menentukan peringatan pengulangan di bawah. */
   isFollowup: boolean;
+  /** Template broadcast tersimpan yang aktif (dikelola di /template). */
+  templates: BroadcastTemplateOption[];
 }) {
   const [state, formAction, isPending] = useActionState(
     (_prev: { error?: string }, formData: FormData) => createScheduleAction(_prev, formData),
@@ -49,6 +53,30 @@ export function ScheduleForm({
 
       <div className="space-y-1">
         <label className="text-sm font-medium">Isi pesan</label>
+        {templates.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pb-1">
+            <span className="text-xs text-muted-foreground">Pakai template:</span>
+            <Select
+              fieldSize="sm"
+              defaultValue=""
+              // Teks template DISALIN ke kotak isi, bukan diacu -- jadwal
+              // menyimpan salinan pesannya sendiri (message_body), jadi
+              // template yang belakangan diubah/dihapus tidak mengubah jadwal
+              // yang sudah berjalan.
+              onChange={(e) => {
+                const picked = templates.find((t) => String(t.id) === e.target.value);
+                if (picked) setBody(picked.body);
+              }}
+            >
+              <option value="">-- pilih --</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <Textarea
           name="messageBody"
           value={body}

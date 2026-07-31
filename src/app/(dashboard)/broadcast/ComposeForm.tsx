@@ -3,7 +3,13 @@
 import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
 import { sendBroadcastAction } from './actions';
-import { Textarea, Button, cardClassName } from '@/components/ui';
+import { Textarea, Select, Button, cardClassName } from '@/components/ui';
+
+export interface BroadcastTemplateOption {
+  id: number;
+  name: string;
+  body: string;
+}
 
 const DEFAULT_BODY =
   'Bpk/Ibu {nama_pasien}, kami dari {nama_rs} ingin menyampaikan informasi terkait kunjungan Anda sebelumnya. Silakan hubungi {kontak_rs} bila ada pertanyaan.';
@@ -14,6 +20,7 @@ export function ComposeForm({
   total,
   reachable,
   uniqueCodeFooter,
+  templates,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
@@ -21,6 +28,8 @@ export function ComposeForm({
   reachable: number;
   /** Contoh baris kode unik yang ditambahkan otomatis; null bila fitur dimatikan. */
   uniqueCodeFooter: string | null;
+  /** Template broadcast tersimpan yang aktif (dikelola di /template). */
+  templates: BroadcastTemplateOption[];
 }) {
   const [state, formAction, isPending] = useActionState(
     (_prev: { error?: string }, formData: FormData) => sendBroadcastAction(_prev, formData),
@@ -45,6 +54,30 @@ export function ComposeForm({
 
       {Object.entries(hiddenFilters).map(([name, values]) =>
         values.map((v) => <input key={`${name}-${v}`} type="hidden" name={name} value={v} />),
+      )}
+
+      {templates.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs text-muted-foreground">Pakai template:</label>
+          <Select
+            fieldSize="sm"
+            defaultValue=""
+            // Teks template DISALIN ke kotak isi, bukan diacu -- staf bebas
+            // menyuntingnya setelah memilih, dan template yang belakangan
+            // diubah/dihapus tidak mengubah pesan yang sudah disusun/terkirim.
+            onChange={(e) => {
+              const picked = templates.find((t) => String(t.id) === e.target.value);
+              if (picked) setBody(picked.body);
+            }}
+          >
+            <option value="">-- pilih --</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        </div>
       )}
 
       <Textarea

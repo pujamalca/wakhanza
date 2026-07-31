@@ -134,6 +134,16 @@ Mode `followup` diverifikasi terpisah: `resolveScheduleWindow` diuji unit 10 kas
 
 **Gotcha uji manual, dicatat supaya tidak terulang**: baris `broadcast_schedule` yang `next_run_at`-nya di-INSERT lewat `mysql` mentah (mis. `NOW() - INTERVAL 10 SECOND`) TIDAK cocok dengan query `Op.lte` Sequelize milik worker, walau `SELECT next_run_at <= NOW()` lewat SQL biasa menunjukkan `1` (benar). Sequelize/mysql2 menerjemahkan `Date` JS dan nilai `DATETIME` MySQL secara konsisten satu sama lain (tulis-lewat-Sequelize lalu baca-lewat-Sequelize cocok), tapi TIDAK konsisten dengan nilai yang ditulis langsung lewat klien `mysql` di luar Sequelize. Saat menguji fitur berbasis tanggal/jam secara manual, buat baris ujinya lewat kode aplikasi (`Model.create()` atau server action/skrip yang memanggilnya), jangan lewat `INSERT` SQL mentah untuk kolom yang nanti dibandingkan lewat Sequelize.
 
+### Dua tabel template yang sengaja TIDAK digabung
+
+`template` (PK `trigger_code`, tepat tujuh baris) dipilih **otomatis oleh worker** lewat `Template.findByPk(triggerCode)` saat pemicunya terdeteksi di `sik` -- staf tidak pernah memilihnya. `broadcast_template` (PK `id` auto-increment, sebanyak yang staf mau, `migrations/008`) dipilih **manual** dari dropdown di `/broadcast` dan `/broadcast-terjadwal`. Keduanya dikelola di halaman `/template` yang sama tapi di dua bagian berlabel jelas.
+
+Menggabungkannya akan memaksa `trigger_code` palsu untuk baris broadcast, dan membuat `findByPk()` milik worker bisa tidak sengaja mengambil pesan broadcast. Variabel yang divalidasi juga beda: `template` memakai `KNOWN_TEMPLATE_VARIABLES` penuh, `broadcast_template` dibatasi `BROADCAST_TEMPLATE_VARIABLES` (lima) -- keduanya ditolak SAAT DISIMPAN, bukan saat kirim.
+
+**Template broadcast DISALIN, bukan diacu.** Memilih template mengisi kotak teks; `broadcast_campaign.message_body` dan `broadcast_schedule.message_body` menyimpan salinannya sendiri. Tidak ada foreign key ke `broadcast_template`, jadi menyunting atau menghapus template TIDAK mengubah jadwal yang sedang berjalan maupun pesan yang sudah terkirim -- template murni alat bantu penyusunan. Itu sebabnya `deleteBroadcastTemplateAction` aman tanpa pemeriksaan "sedang dipakai jadwal mana".
+
+`broadcast_template` butuh grant `UPDATE`/`DELETE` per-tabel (sunting/hapus staf), sama seperti `broadcast_schedule` -- dan sekali lagi terbukti tidak diwarisi: `INSERT` lolos lewat grant skema-lebar, `UPDATE` ditolak `ERROR 1142` sampai grant eksplisitnya diterapkan lewat root.
+
 ### Privasi ditegakkan lewat kolom yang tidak pernah diambil
 Query di `src/khanza/` tidak men-`SELECT` kolom sensitif sama sekali (nama pemeriksaan lab dari `jns_perawatan_lab`, nama obat, hasil, diagnosis) — bukan mengambil lalu menyaring saat render. `core/privacy.ts`'s `checkPrivacy()` menerima `kdJenisPrw` sebagai **kode** (bukan nama) dan bisa berupa larik (RESULT_READY yang digabung per kunjungan bisa punya beberapa kode sekaligus -- satu kode sensitif saja cukup membuat seluruh pesan diganti generik). Lihat ARCHITECTURE §5.2 dan PRD §F4 sebelum menambah variabel template baru atau mengambil kolom baru dari `sik`.
 

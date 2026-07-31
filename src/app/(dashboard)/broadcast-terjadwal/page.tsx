@@ -4,7 +4,7 @@ import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/
 import { scheduleFiltersToSegment, isFollowupSchedule, DEFAULT_FOLLOWUP_OFFSET_DAYS, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
 import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
-import { BroadcastSchedule } from '@/models';
+import { BroadcastSchedule, BroadcastTemplate } from '@/models';
 import { parseScheduleFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from '../broadcast/segment';
 import { toggleScheduleAction, deleteScheduleAction } from './actions';
@@ -71,12 +71,13 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
   const selectedKec = toSet(sp.kec);
   const selectedPj = toSet(sp.pj);
 
-  const [schedules, regionOptions, paymentOptions, recipients, identity] = await Promise.all([
+  const [schedules, regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
     BroadcastSchedule.findAll({ order: [['id', 'DESC']] }),
     fetchRegionOptions(),
     fetchPaymentOptions(),
     fetchPatientSegment(scheduleFiltersToSegment(filterConfig)),
     getHospitalIdentity(),
+    BroadcastTemplate.findAll({ where: { isActive: true }, order: [['name', 'ASC']] }),
   ]);
   const summary = await summarizeSegment(recipients);
 
@@ -276,6 +277,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
         total={summary.total}
         uniqueCodeFooter={uniqueCodeFooter}
         isFollowup={isFollowupSchedule(filterConfig)}
+        templates={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
       />
     </div>
   );

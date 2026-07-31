@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
-import { Outbox, BroadcastCampaign } from '@/models';
+import { Outbox, BroadcastCampaign, BroadcastTemplate } from '@/models';
 import { parseFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
 import { ComposeForm } from './ComposeForm';
@@ -30,11 +30,12 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   const selectedKec = toSet(sp.kec);
   const selectedPj = toSet(sp.pj);
 
-  const [regionOptions, paymentOptions, recipients, identity] = await Promise.all([
+  const [regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
     fetchRegionOptions(),
     fetchPaymentOptions(),
     fetchPatientSegment(filters),
     getHospitalIdentity(),
+    BroadcastTemplate.findAll({ where: { isActive: true }, order: [['name', 'ASC']] }),
   ]);
   const summary = await summarizeSegment(recipients);
 
@@ -211,6 +212,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
         total={summary.total}
         reachable={summary.reachable}
         uniqueCodeFooter={uniqueCodeFooter}
+        templates={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
       />
     </div>
   );

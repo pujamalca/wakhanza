@@ -81,6 +81,7 @@ GRANT UPDATE, DELETE ON wakhanza.app_user          TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.app_setting       TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.schema_migrations TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.broadcast_schedule TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.broadcast_template TO 'wakhanza_rw'@'localhost';
 -- audit_log dan broadcast_campaign sengaja TIDAK PERNAH diberi UPDATE/DELETE,
 -- di level mana pun -- keduanya insert-only by design (jejak akuntabilitas).
 ```
