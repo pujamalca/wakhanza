@@ -34,6 +34,17 @@ export async function getSettingNumber(key: string, fallback: number): Promise<n
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Halaman Pengaturan menyimpan SEMUA nilai sebagai teks bebas (satu `<Input>`
+ * per kunci), jadi staf bisa saja mengetik 'ya'/'true'/'on' alih-alih '1'.
+ * Diterima semuanya; apa pun selain daftar ini dianggap mati.
+ */
+export async function getSettingBool(key: string, fallback: boolean): Promise<boolean> {
+  const raw = await getSetting(key);
+  if (raw === undefined) return fallback;
+  return ['1', 'true', 'ya', 'on', 'aktif'].includes(raw.trim().toLowerCase());
+}
+
 export async function getSettingJson<T>(key: string, fallback: T): Promise<T> {
   const raw = await getSetting(key);
   if (raw === undefined) return fallback;

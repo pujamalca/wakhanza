@@ -75,6 +75,15 @@ Otorisasi API ditegakkan DUA lapis dan keduanya perlu diperiksa saat menambah ro
 ### Pipeline bersama: `src/worker/pipeline.ts` dan `src/worker/sisipCycle.ts`
 `POLL → COALESCE → RESOLVE nomor → NORMALIZE → GATE (opt-out/invalid/nonaktif) → PRIVACY → RENDER → ENQUEUE` (langkah [3]-[8] ada di `pipeline.ts`'s `enqueueMessage()`, dipakai SEMUA pemicu -- jangan duplikasi logika ini saat menambah pemicu baru). Pemicu kelas sisip (QUEUE_REG, RESULT_READY, PHARMACY_READY, BILLING_READY) berbagi `runSisipCycle()` generik di `sisipCycle.ts`, dibedakan lewat parameter fetch/mapping per pemicu di `src/worker/poller*.ts`. `DISPATCH → SEND → LOG` (`dispatcher.ts`) mengambil dari `outbox` dengan `FOR UPDATE SKIP LOCKED`, terpisah total dari langkah enqueue -- kegagalan kirim tidak pernah menghapus jejak bahwa pemicunya terdeteksi.
 
+**Kode unik per pesan disisipkan di langkah RENDER, bukan SEND.** `core/uniqueCode.ts` menambahkan satu baris pendek (`Ref: 3BBDNH`, default `dispatch.unique_code_template`) ke SETIAP pesan keluar, termasuk BROADCAST -- karena laju rendah (jeda acak 3-8 detik + kuota per jam, PRD F5.2) hanya menangani separuh pemicu deteksi spam WhatsApp; separuh lainnya adalah banyak pesan berteks IDENTIK, dan template tetap membuat puluhan pesan sehari nyaris sama. Dua keputusan yang menempel di sini dan gampang dirusak tanpa sadar:
+
+- **Diturunkan dari `idempotency_key`, bukan acak.** Dispatcher mencoba ulang sampai beberapa kali (`core/retry.ts`); kode acak akan membuat percobaan kedua tampak sebagai pesan BARU bagi pasien maupun bagi WhatsApp -- persis kebalikan dari tujuannya.
+- **Disisipkan saat ENQUEUE (`pipeline.ts`), bukan saat SEND (`dispatcher.ts`).** Menyisipkannya di dispatcher akan membuat `outbox.body` berbeda dari yang benar-benar terkirim -- halaman Log berhenti menunjukkan teks sungguhan, dan kode yang disebut pasien lewat telepon tidak bisa lagi dicari (`outbox.body LIKE '%KODE%'`, satu-satunya cara -- kodenya sengaja TIDAK disimpan di kolom terpisah).
+
+Substitusi footer-nya SENGAJA terpisah dari `renderTemplate()`: menggabungkan footer ke body lalu merender ulang sekali lagi akan melanggar aturan satu-lintasan (§ substitusi template di bawah). Alfabetnya Crockford Base32 -- tepat 32 karakter (tanpa bias modulo) dan tanpa I/L/O/U supaya tidak tertukar saat dibacakan lewat telepon. Kalau admin menghapus `{kode}` dari templatenya, kodenya TETAP ditempelkan di akhir (`buildUniqueCodeFooter`) -- tanpa itu seluruh pesan berakhiran teks identik dan fitur ini mati diam-diam tanpa satu pun pesan error.
+
+Pratinjau `/broadcast`, `/broadcast-terjadwal`, dan `npm run poll:dryrun` semuanya membaca pengaturannya lewat `loadUniqueCodeTemplate()`/`previewUniqueCodeFooter()` yang SAMA dipakai `enqueueMessage()` -- pratinjau tidak boleh menampilkan bentuk pesan yang berbeda dari yang benar-benar terkirim.
+
 RESULT_READY punya DUA watermark terpisah (`RESULT_READY_LAB`, `RESULT_READY_RADIOLOGI` di `poll_cursor`) walau satu `trigger_code` -- mencampur watermark dua sumber independen bisa membuat salah satunya melompati baris yang belum diproses.
 
 ### Kendala indeks yang membentuk setiap query poller

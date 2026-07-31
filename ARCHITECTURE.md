@@ -69,7 +69,7 @@ Konsekuensi yang harus diterima: tindakan petugas terasa lambat, tertunda hingga
        │
   [6] PRIVACY       layanan sensitif → ganti dengan pesan generik
        │
-  [7] RENDER        isi variabel ke template
+  [7] RENDER        isi variabel ke template, sisipkan kode unik (§6.1)
        │
   [8] ENQUEUE       INSERT ke outbox (ditolak bila kunci idempoten sudah ada)
        │
@@ -489,6 +489,15 @@ tiap 5 detik:
 
 Satu pesan per iterasi, tidak berkelompok. Mengirim beruntun cepat adalah pola yang memicu deteksi spam WhatsApp.
 
+Laju rendah menangani separuh masalah. Separuh lainnya adalah **isi yang identik**: puluhan pesan `QUEUE_REG` dalam satu pagi hanya berbeda di nama dan nomor antrian, dan broadcast tanpa `{nama_pasien}` bisa sama persis karakter per karakter untuk ratusan pasien. Karena itu setiap pesan mendapat kode singkat di baris terakhir (`src/core/uniqueCode.ts`, default `Ref: {kode}`).
+
+Kodenya **diturunkan dari `idempotency_key`, bukan acak**, dan disisipkan saat **ENQUEUE** (langkah [8]) alih-alih saat SEND (langkah [10]). Dua konsekuensi yang keduanya disengaja:
+
+- Percobaan kirim ulang (§6.4) mengirim **teks yang sama persis**. Kode acak akan membuat percobaan kedua tampak sebagai pesan baru — baik bagi pasien maupun bagi WhatsApp — persis kebalikan dari yang diinginkan.
+- `outbox.body` tetap sama dengan yang benar-benar terkirim, sehingga halaman Log dan jejak audit menunjukkan teks sungguhan, dan kode yang disebut pasien lewat telepon bisa dicari langsung (`outbox.body LIKE '%KODE%'`) tanpa kolom tambahan.
+
+Alfabetnya Crockford Base32 (32 karakter tepat — tanpa bias modulo — dan tanpa I, L, O, U, jadi 0/O maupun 1/I/L tidak bisa tertukar saat dibacakan lewat telepon).
+
 `FOR UPDATE SKIP LOCKED` didukung MariaDB 10.4 dan menjaga kebenaran seandainya kelak ada lebih dari satu dispatcher. Saat ini hanya satu, tetapi biayanya nol dan menghilangkan seluruh kelas bug balapan.
 
 ### 6.2 Jam tenang
@@ -568,7 +577,9 @@ pesan masuk cocok /^\s*(stop|berhenti|unsubscribe)\s*$/i
 
 Pesan masuk lain diabaikan tanpa balasan. Membalas otomatis untuk hal medis memerlukan tanggung jawab klinis yang berada di luar cakupan perangkat lunak ini.
 
-Setiap pesan keluar menyertakan cara berhenti pada baris terakhir. Selain kewajiban etis, ini juga pengaman praktis: pasien yang tidak punya cara berhenti akan menekan **"Laporkan spam"** di WhatsApp — dan cukup beberapa laporan untuk memblokir nomor rumah sakit.
+Setiap pesan keluar menyertakan cara berhenti sebagai kalimat penutup isi pesannya. Selain kewajiban etis, ini juga pengaman praktis: pasien yang tidak punya cara berhenti akan menekan **"Laporkan spam"** di WhatsApp — dan cukup beberapa laporan untuk memblokir nomor rumah sakit.
+
+Sejak kode unik ditambahkan (§6.1), baris paling akhir secara harfiah adalah `Ref: <kode>`, bukan kalimat berhentinya. Ini disengaja dan tidak menggeser prioritas: kalimat berhenti tetap menutup **prosa** yang dibaca pasien, sementara kode adalah satu baris metadata pendek di bawahnya. Menaruh kode di atas isi pesan akan membuat kalimat pertama yang dibaca pasien tampak seperti sampah otomatis — justru memperbesar peluang dilaporkan sebagai spam.
 
 ---
 

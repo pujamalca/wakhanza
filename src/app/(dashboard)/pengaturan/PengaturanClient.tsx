@@ -29,6 +29,16 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: 'dispatch.send_max_delay_ms', label: 'Jeda kirim maksimum (ms)' },
       { key: 'dispatch.max_per_hour', label: 'Kuota kirim per jam' },
       { key: 'dispatch.stale_threshold_hours_default', label: 'Ambang basi default (jam)' },
+      {
+        key: 'dispatch.unique_code_enabled',
+        label: 'Kode unik tiap pesan',
+        hint: '1 = aktif. Membuat setiap pesan berbeda supaya kiriman massal tidak terbaca sebagai spam oleh WhatsApp.',
+      },
+      {
+        key: 'dispatch.unique_code_template',
+        label: 'Format kode unik',
+        hint: 'Wajib memuat {kode}. Ditambahkan sebagai baris terakhir, mis. "Ref: {kode}".',
+      },
     ],
   },
   {

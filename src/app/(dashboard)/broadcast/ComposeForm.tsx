@@ -13,11 +13,14 @@ export function ComposeForm({
   sampleVars,
   total,
   reachable,
+  uniqueCodeFooter,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
   total: number;
   reachable: number;
+  /** Contoh baris kode unik yang ditambahkan otomatis; null bila fitur dimatikan. */
+  uniqueCodeFooter: string | null;
 }) {
   const [state, formAction, isPending] = useActionState(
     (_prev: { error?: string }, formData: FormData) => sendBroadcastAction(_prev, formData),
@@ -59,7 +62,13 @@ export function ComposeForm({
       {preview && (
         <div className="rounded-md bg-muted/50 p-2 text-xs">
           <p className="mb-1 text-muted-foreground">Pratinjau (contoh pasien pertama):</p>
-          <p className="whitespace-pre-wrap">{preview}</p>
+          <p className="whitespace-pre-wrap">{uniqueCodeFooter ? `${preview}\n\n${uniqueCodeFooter}` : preview}</p>
+          {uniqueCodeFooter && (
+            <p className="mt-2 text-muted-foreground">
+              Baris terakhir ditambahkan otomatis dan BERBEDA untuk setiap pasien — supaya kiriman massal tidak berisi teks
+              yang identik, yang terbaca sebagai spam oleh WhatsApp. Atur atau matikan di Pengaturan.
+            </p>
+          )}
         </div>
       )}
 

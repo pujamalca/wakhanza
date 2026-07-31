@@ -9,8 +9,10 @@ import { PatientContact, Template, getSettingNumber, getSettingJson } from '../s
 import { normalizePhone, type PhoneResult } from '../src/core/phone';
 import { checkPrivacy } from '../src/core/privacy';
 import { renderTemplate, type TemplateVariable } from '../src/core/template';
+import { appendUniqueCode } from '../src/core/uniqueCode';
+import { buildIdempotencyKey } from '../src/core/idempotency';
 import { getHospitalIdentity } from '../src/khanza/common';
-import { identityVars } from '../src/worker/pipeline';
+import { identityVars, loadUniqueCodeTemplate } from '../src/worker/pipeline';
 import { sik } from '../src/db/sik';
 import { db } from '../src/db/wakhanza';
 import { pollQueueReg } from '../src/khanza/antrian';
@@ -21,6 +23,14 @@ import { pollUpcomingBookings } from '../src/khanza/booking';
 
 const SAMPLE_SIZE = 5;
 const DISTANT_PAST = new Date('2000-01-01');
+
+/**
+ * Diisi sekali di main(). Dibaca lewat fungsi produksi yang sama
+ * (loadUniqueCodeTemplate) supaya pratinjau ikut mati saat fitur kode unik
+ * dimatikan di Pengaturan -- dryrun tidak boleh menampilkan baris yang tidak
+ * akan benar-benar terkirim.
+ */
+let uniqueCodeTemplate = '';
 
 interface Preview {
   phoneE164: string | null;
@@ -74,10 +84,19 @@ async function reportSection(
   console.log(`  layanan sensitif  : ${sensitive} / ${rows.length}`);
 
   console.log(`  contoh (maks ${SAMPLE_SIZE}):`);
-  for (const row of rows.slice(0, SAMPLE_SIZE)) {
+  for (const [i, row] of rows.slice(0, SAMPLE_SIZE).entries()) {
     const preview = await previewPhone(row.noRkmMedis, row.rawPhone);
     const privacy = checkPrivacy({ kdPoli: row.kdPoli, kdJenisPrw: row.kdJenisPrw }, sensitivePoli, sensitiveExam);
-    const body = renderTemplate(privacy.safe ? template.body : '(pesan generik privasi)', row.vars);
+    // Kunci idempoten sungguhan dibangun dari kolom alami tiap pemicu (no_rawat
+    // dsb.) yang tidak ikut dibawa ke sini, jadi kode di bawah SEBENTUK tapi
+    // bukan nilai yang nanti benar-benar terkirim. Nomor urut baris ikut
+    // di-seed supaya sifat yang dibuktikan tetap benar: dua pesan berbeda --
+    // termasuk dua pesan untuk pasien yang SAMA -- mendapat kode berbeda.
+    const body = appendUniqueCode(
+      renderTemplate(privacy.safe ? template.body : '(pesan generik privasi)', row.vars),
+      buildIdempotencyKey(triggerCode, row.noRkmMedis, i),
+      uniqueCodeTemplate,
+    );
     console.log(`  - RM ${row.noRkmMedis} -> ${preview.phoneE164 ?? 'TIDAK ADA NOMOR'} [${preview.note}]${privacy.safe ? '' : ' [PRIVASI: diganti generik]'}`);
     console.log(`      "${body}"`);
   }
@@ -91,6 +110,12 @@ async function main() {
   const sensitiveExam = await getSettingJson<string[]>('privacy.sensitive_exam_codes', []);
   const identity = await getHospitalIdentity();
   const idVars = identityVars(identity);
+  uniqueCodeTemplate = await loadUniqueCodeTemplate();
+  console.log(
+    uniqueCodeTemplate
+      ? `kode unik per pesan: AKTIF (format "${uniqueCodeTemplate}") -- baris terakhir tiap contoh di bawah`
+      : 'kode unik per pesan: MATI (dispatch.unique_code_enabled)',
+  );
 
   const queueRows = await pollQueueReg(DISTANT_PAST, lookbackDays);
   await reportSection(

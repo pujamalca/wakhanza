@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
-import { identityVars } from '@/worker/pipeline';
+import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
 import { Outbox, BroadcastCampaign } from '@/models';
 import { parseFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
@@ -53,6 +53,10 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   const sampleVars = firstPreview
     ? { ...identityVars(identity), nama_pasien: firstPreview.row.nm_pasien ?? '', no_rm: firstPreview.row.no_rkm_medis }
     : null;
+  // Seed tetap (bukan acak/waktu) supaya kode contoh tidak berubah tiap kali
+  // halaman dimuat ulang -- kode SUNGGUHAN diturunkan dari idempotency_key
+  // masing-masing pesan saat enqueue, jadi ini murni contoh bentuknya.
+  const uniqueCodeFooter = await previewUniqueCodeFooter(`preview|${firstPreview?.row.no_rkm_medis ?? ''}`);
 
   return (
     <div>
@@ -206,6 +210,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
         sampleVars={sampleVars}
         total={summary.total}
         reachable={summary.reachable}
+        uniqueCodeFooter={uniqueCodeFooter}
       />
     </div>
   );

@@ -13,6 +13,8 @@ const EDITABLE_KEYS = [
   'dispatch.send_max_delay_ms',
   'dispatch.max_per_hour',
   'dispatch.stale_threshold_hours_default',
+  'dispatch.unique_code_enabled',
+  'dispatch.unique_code_template',
   'privacy.sensitive_poli_codes',
   'privacy.sensitive_exam_codes',
   'privacy.generic_template',

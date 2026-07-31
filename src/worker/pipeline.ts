@@ -1,7 +1,8 @@
-import { Outbox, OptOut, Template, getSettingNumber, getSettingJson, getSetting } from '@/models';
+import { Outbox, OptOut, Template, getSettingNumber, getSettingBool, getSettingJson, getSetting } from '@/models';
 import type { OutboxStatus } from '@/models';
 import { getHospitalIdentity, type HospitalIdentity } from '@/khanza/common';
 import { renderTemplate, type TemplateVariable } from '@/core/template';
+import { appendUniqueCode, buildUniqueCodeFooter, DEFAULT_UNIQUE_CODE_TEMPLATE } from '@/core/uniqueCode';
 import { checkPrivacy } from '@/core/privacy';
 import { computeScheduledAt } from '@/core/quietHours';
 import { resolvePhone } from './contactResolver';
@@ -22,18 +23,47 @@ export interface PipelineContext {
   quietEnd: number;
   sensitivePoli: string[];
   sensitiveExam: string[];
+  /** Berlaku untuk SEMUA pemicu, termasuk BROADCAST -- lihat core/uniqueCode.ts. */
+  uniqueCodeTemplate: string;
+}
+
+/**
+ * Sakelar dan teks digabung jadi SATU nilai: template kosong sudah berarti
+ * "tidak ada footer" di appendUniqueCode, jadi tidak perlu dua cabang terpisah
+ * di enqueueMessage yang bisa tidak sinkron satu sama lain.
+ */
+export async function loadUniqueCodeTemplate(): Promise<string> {
+  const [enabled, template] = await Promise.all([
+    getSettingBool('dispatch.unique_code_enabled', true),
+    getSetting('dispatch.unique_code_template', DEFAULT_UNIQUE_CODE_TEMPLATE),
+  ]);
+  return enabled ? (template ?? DEFAULT_UNIQUE_CODE_TEMPLATE) : '';
+}
+
+/**
+ * Pratinjau dashboard (BROADCAST dan BROADCAST TERJADWAL) harus menampilkan
+ * pesan yang SAMA dengan yang diterima pasien, termasuk baris kode unik yang
+ * ditambahkan otomatis. Membaca pengaturan lewat fungsi yang sama dengan
+ * enqueueMessage supaya pratinjau tidak bisa menyimpang dari kenyataan saat
+ * pengaturannya diubah.
+ *
+ * @returns null bila fitur sedang dimatikan.
+ */
+export async function previewUniqueCodeFooter(seed: string): Promise<string | null> {
+  return buildUniqueCodeFooter(seed, await loadUniqueCodeTemplate());
 }
 
 async function loadSharedSettings() {
-  const [quietStart, quietEnd, sensitivePoli, sensitiveExam, genericTemplate, identity] = await Promise.all([
+  const [quietStart, quietEnd, sensitivePoli, sensitiveExam, genericTemplate, identity, uniqueCodeTemplate] = await Promise.all([
     getSettingNumber('dispatch.quiet_hours_start', 21),
     getSettingNumber('dispatch.quiet_hours_end', 7),
     getSettingJson<string[]>('privacy.sensitive_poli_codes', []),
     getSettingJson<string[]>('privacy.sensitive_exam_codes', []),
     getSetting('privacy.generic_template'),
     getHospitalIdentity(),
+    loadUniqueCodeTemplate(),
   ]);
-  return { quietStart, quietEnd, sensitivePoli, sensitiveExam, genericTemplate, identity };
+  return { quietStart, quietEnd, sensitivePoli, sensitiveExam, genericTemplate, identity, uniqueCodeTemplate };
 }
 
 export async function loadPipelineContext(triggerCode: string): Promise<PipelineContext | null> {
@@ -51,6 +81,7 @@ export async function loadPipelineContext(triggerCode: string): Promise<Pipeline
     quietEnd: shared.quietEnd,
     sensitivePoli: shared.sensitivePoli,
     sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
   };
 }
 
@@ -73,6 +104,7 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
     quietEnd: shared.quietEnd,
     sensitivePoli: shared.sensitivePoli,
     sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
   };
 }
 
@@ -101,7 +133,12 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     ctx.sensitivePoli,
     ctx.sensitiveExam,
   );
-  const body = renderTemplate(privacyCheck.safe ? ctx.template.body : ctx.genericTemplate, input.vars);
+  const rendered = renderTemplate(privacyCheck.safe ? ctx.template.body : ctx.genericTemplate, input.vars);
+  // Kode unik disisipkan di sini (ENQUEUE), bukan di dispatcher (SEND),
+  // supaya `outbox.body` tetap persis sama dengan yang benar-benar dikirim --
+  // halaman Log menampilkan teks sungguhan, dan percobaan kirim ulang
+  // mengirim teks yang identik alih-alih pesan yang tampak baru.
+  const body = appendUniqueCode(rendered, input.idempotencyKey, ctx.uniqueCodeTemplate);
 
   let status: OutboxStatus = 'pending';
   if (!contact.phoneE164) {

@@ -157,6 +157,8 @@ Tingkat yang dipilih: **sedang — sebut layanan, jangan sebut hasil.**
 
 **F5.2 Pembatasan laju.** Jeda acak 3–8 detik antar pesan, dan batas maksimum per jam yang dapat dikonfigurasi. Ini melindungi nomor dari deteksi spam WhatsApp.
 
+**F5.2b Kode unik per pesan.** *(ditambahkan saat implementasi — lihat "Penyesuaian Implementasi")* F5.2 menekan **laju** kirim, tetapi tidak menyentuh pemicu deteksi spam yang kedua: banyak pesan dengan **teks yang identik**. Template tetap membuat puluhan pesan sehari hanya berbeda di nama dan nomor antrian, dan broadcast tanpa `{nama_pasien}` bisa benar-benar identik karakter per karakter untuk ratusan pasien. Setiap pesan keluar karena itu diberi kode singkat pada baris terakhir (default `Ref: {kode}`, mis. `Ref: FS3E5G`), diturunkan dari kunci idempoten pesan itu sehingga percobaan kirim ulang mengirim teks yang sama persis. Dapat diubah formatnya atau dimatikan dari dashboard Pengaturan.
+
 **F5.3 Ambang basi.** Pesan yang pemicunya lebih tua dari ambang tertentu (default 6 jam) dibatalkan dengan status `expired`. Ini mencegah pasien menerima "nomor antrian Anda 12" keesokan paginya setelah layanan mati semalam.
 
 **F5.4 Percobaan ulang.** Kegagalan sementara diulang maksimum 3 kali dengan jeda menaik. Kegagalan permanen (nomor tidak terdaftar di WhatsApp) langsung ditandai `failed_permanent` tanpa diulang.

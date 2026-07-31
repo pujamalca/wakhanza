@@ -7,6 +7,6 @@ export { WaSession, type WaSessionStatus, type WaSessionCommand } from './WaSess
 export { SendLog } from './SendLog';
 export { AppUser, type AppUserRole } from './AppUser';
 export { AuditLog, logAudit } from './AuditLog';
-export { AppSetting, getSetting, getSettingNumber, getSettingJson, setSetting } from './AppSetting';
+export { AppSetting, getSetting, getSettingNumber, getSettingBool, getSettingJson, setSetting } from './AppSetting';
 export { BroadcastCampaign } from './BroadcastCampaign';
 export { BroadcastSchedule } from './BroadcastSchedule';
