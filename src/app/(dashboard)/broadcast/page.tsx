@@ -7,7 +7,7 @@ import { Outbox, BroadcastCampaign } from '@/models';
 import { parseFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
 import { ComposeForm } from './ComposeForm';
-import { PageHeader, Card, cardClassName, Button, CheckboxList, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PageHeader, Card, cardClassName, Button, Input, CheckboxList, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 interface SearchParams extends RawFilterInput {
   sent?: string;
@@ -58,7 +58,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
     <div>
       <PageHeader
         title="Broadcast"
-        description="Pilih segmen pasien dari riwayat kunjungan (tanggal, wilayah, cara bayar), lalu kirim WhatsApp ke semuanya sekaligus. Tetap menghormati jam tenang, kuota per jam, dan daftar berhenti yang sama seperti notifikasi otomatis -- lihat ARCHITECTURE §2/§5/§6."
+        description="Pilih segmen pasien dari riwayat kunjungan (tanggal, wilayah, cara bayar, nama/no. RM/no. pendaftaran), lalu kirim WhatsApp ke semuanya sekaligus. Tetap menghormati jam tenang, kuota per jam, dan daftar berhenti yang sama seperti notifikasi otomatis -- lihat ARCHITECTURE §2/§5/§6."
       />
 
       {sentCampaign && (
@@ -102,6 +102,19 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
               className="rounded-md border bg-background px-2 py-1 text-xs text-foreground"
             />
           </div>
+        </div>
+
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            Cari nama, no. RM (tabel pasien), atau no. pendaftaran (tabel reg_periksa) -- kosong = semua
+          </p>
+          <Input
+            name="cari"
+            defaultValue={filters.cari ?? ''}
+            placeholder="mis. Budi, TESTWA00001, atau 2026/07/31/000001..."
+            className="w-full sm:w-1/2"
+            fieldSize="sm"
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -188,6 +201,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           kab: [...selectedKab],
           kec: [...selectedKec],
           pj: [...selectedPj],
+          cari: filters.cari ? [filters.cari] : [],
         }}
         sampleVars={sampleVars}
         total={summary.total}

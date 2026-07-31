@@ -9,6 +9,7 @@ export interface PatientSegmentFilters {
   kdKec?: string[];
   kdKel?: string[];
   kdPj?: string[];
+  cari?: string;
 }
 
 export interface PatientSegmentRow {
@@ -64,6 +65,23 @@ function buildPatientSegmentSql(filters: PatientSegmentFilters) {
   if (filters.kdKel && filters.kdKel.length > 0) {
     outerFilter += ' AND p.kd_kel IN (:kdKel)';
     replacements.kdKel = filters.kdKel;
+  }
+  // Satu kotak pencarian menjangkau dua tabel sekaligus, karena staf bisa
+  // cuma tahu SALAH SATU: nama (fuzzy, tabel pasien -- tidak terindeks,
+  // LIKE berwildcard-depan tidak bisa pakai indeks apa pun), no. RM (persis,
+  // tabel pasien -- ID permanen pasien lintas kunjungan), atau no. pendaftaran
+  // (persis, tabel reg_periksa -- ID per kunjungan, beda dari no. RM; hanya
+  // cocok bila itu KUNJUNGAN TERBARU pasien dalam rentang tanggal terpilih,
+  // karena lv mewakili satu kunjungan terpilih per pasien lewat MAX(no_rawat)
+  // di atas, bukan seluruh riwayat kunjungannya). Aman diterapkan di sini
+  // (bukan di subquery dalam) karena berjalan SETELAH subquery mempersempit
+  // lewat prefix no_rawat -- scan hanya atas hasil yang sudah kecil, pola
+  // sama seperti kdKab/kdKec/kdKel di atas.
+  if (filters.cari && filters.cari.trim()) {
+    const term = filters.cari.trim();
+    outerFilter += ' AND (p.nm_pasien LIKE :cariLike OR p.no_rkm_medis = :cariExact OR lv.no_rawat = :cariExact)';
+    replacements.cariLike = `%${term}%`;
+    replacements.cariExact = term;
   }
 
   const sql = `
@@ -127,10 +145,17 @@ export async function fetchPaymentOptions(): Promise<RegionOption[]> {
   return rows.map((r) => ({ kode: r.kd_pj, nama: r.png_jawab }));
 }
 
+const PLAN_CHECK_FILTERS: PatientSegmentFilters = {
+  dateFrom: lookbackDate(90),
+  dateTo: new Date(),
+  kdKab: ['1'],
+  kdPj: ['BPJ'],
+  cari: 'a',
+};
+
 registerPlanCheck({
   name: 'BROADCAST_SEGMENT',
-  sql: buildPatientSegmentSql({ dateFrom: lookbackDate(90), dateTo: new Date(), kdKab: ['1'], kdPj: ['BPJ'] }).sql,
-  replacements: buildPatientSegmentSql({ dateFrom: lookbackDate(90), dateTo: new Date(), kdKab: ['1'], kdPj: ['BPJ'] })
-    .replacements,
+  sql: buildPatientSegmentSql(PLAN_CHECK_FILTERS).sql,
+  replacements: buildPatientSegmentSql(PLAN_CHECK_FILTERS).replacements,
   maxRows: 2000,
 });

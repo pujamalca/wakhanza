@@ -36,6 +36,7 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
     kab: formData.getAll('kab').map(String),
     kec: formData.getAll('kec').map(String),
     pj: formData.getAll('pj').map(String),
+    cari: String(formData.get('cari') ?? ''),
   };
   const filters = parseFilters(raw);
   if (filters.dateFrom > filters.dateTo) {
@@ -65,6 +66,7 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
       kdKab: filters.kdKab,
       kdKec: filters.kdKec,
       kdPj: filters.kdPj,
+      cari: filters.cari,
     }),
     messageBody,
     recipientCount: recipients.length,

@@ -15,6 +15,7 @@ export interface RawFilterInput {
   kab?: string | string[];
   kec?: string | string[];
   pj?: string | string[];
+  cari?: string | string[];
 }
 
 function single(value: string | string[] | undefined): string | undefined {
@@ -66,5 +67,6 @@ export function parseFilters(input: RawFilterInput): PatientSegmentFilters {
     kdKab: toArray(input.kab),
     kdKec: toArray(input.kec),
     kdPj: toArray(input.pj),
+    cari: single(input.cari)?.trim() || undefined,
   };
 }
