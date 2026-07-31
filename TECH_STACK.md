@@ -32,6 +32,7 @@ MariaDB 10.4 penting dicatat: **tidak mendukung CTE rekursif dengan baik, tidak 
 | Pengiriman WA | **whatsapp-web.js 1.23** | Ditetapkan: gratis, tanpa verifikasi badan usaha, bebas kirim tanpa template yang perlu persetujuan Meta |
 | Dashboard | **Next.js 14 App Router** | Ditetapkan. Stack yang sudah dikuasai dari apiwa |
 | Autentikasi | **NextAuth v4, provider Credentials** | Pengguna internal RS saja. Tidak perlu OAuth |
+| Hashing sandi | **`bcrypt` binding native** (bukan `bcryptjs`) | `bcryptjs` adalah JavaScript murni sehingga hashing berjalan di event loop. Pada apiwa, cost 12 terbukti menahan event loop cukup lama sampai login berbarengan menggantung hingga timeout. Binding native menjalankannya di thread pool libuv. Cost 12 tetap — yang berubah tempat eksekusinya |
 | UI | **Tailwind 3 + shadcn/ui + Radix** | Sama dengan apiwa |
 | Ambil data di klien | **TanStack Query 5** | Halaman antrean dan QR butuh polling berkala — inilah yang dilakukan TanStack Query dengan baik |
 | Validasi | **Zod 3** | Memvalidasi baris mentah dari `sik` sebelum masuk template. Data `sik` kotor (`no_tlp` berisi `-`, `jns_perawatan_lab` berisi `1111111111111111`) |
@@ -68,6 +69,9 @@ GRANT SELECT ON sik.* TO 'wakhanza_ro'@'localhost';
 
 CREATE USER 'wakhanza_rw'@'localhost' IDENTIFIED BY '...';
 GRANT ALL PRIVILEGES ON wakhanza.* TO 'wakhanza_rw'@'localhost';
+
+-- Riwayat audit tidak boleh dapat diubah oleh aplikasi itu sendiri.
+REVOKE DELETE, UPDATE ON wakhanza.audit_log FROM 'wakhanza_rw'@'localhost';
 ```
 
 Kalau suatu hari ada kode yang keliru menjalankan `UPDATE sik.pasien`, MariaDB menolaknya dengan error hak akses. Keselamatan database rumah sakit tidak boleh bergantung pada ingatan programmer.
@@ -207,17 +211,50 @@ WA_SEND_MAX_DELAY_MS=8000
 WA_MAX_PER_HOUR=200
 
 # Pemicu
-POLL_INTERVAL_MS=60000
+POLL_INTERVAL_MS=60000          # pemicu kelas sisip
+SCAN_INTERVAL_MS=300000         # pemicu kelas pindai (booking) — lebih longgar
+LOOKBACK_DAYS=30                # jendela mundur pemangkas indeks, ARCHITECTURE §4.4
+QUERY_TIMEOUT_SEC=5
 QUIET_HOURS_START=21
 QUIET_HOURS_END=7
 STALE_THRESHOLD_HOURS=6
 
 # Dashboard
-NEXTAUTH_SECRET=
-NEXTAUTH_URL=http://localhost:3100
+NEXTAUTH_SECRET=                # minimal 32 byte acak
+NEXTAUTH_URL=http://127.0.0.1:3100
+SESSION_MAX_AGE_HOURS=8         # satu giliran kerja, bukan 30 hari
+LOGIN_MAX_ATTEMPTS=5
+LOGIN_LOCKOUT_MINUTES=15
+HOST=127.0.0.1
 PORT=3100
 ```
 
 Port 3100 dipilih agar tidak bertabrakan dengan project lain di mesin yang sama (apiwa memakai 3000/3001).
+
+`LOOKBACK_DAYS` bukan pengaturan kinerja belaka. Nilai yang terlalu kecil membuat pemicu untuk pasien rawat inap lama **hilang tanpa error** — kegagalan senyap yang hanya ketahuan dari keluhan pasien. Sesuaikan dengan lama rawat terpanjang di rumah sakit, lalu lebihkan.
+
+`HOST=127.0.0.1` juga bukan sekadar kerapian. Next.js yang dijalankan tanpa `-H` mengikat ke seluruh antarmuka jaringan, sehingga dashboard berisi nama dan nomor telepon pasien langsung terbuka bagi seluruh jaringan rumah sakit — tanpa ada yang menyadarinya. Lihat ARCHITECTURE §9.4.
+
+## Pengerasan Puppeteer
+
+```ts
+puppeteer: {
+  headless: true,
+  args: ['--disable-dev-shm-usage'],   // TIDAK ADA --no-sandbox
+}
+```
+
+apiwa memakai `--no-sandbox`. wakhanza tidak boleh. Flag itu penanganan darurat untuk kontainer Linux; di Windows sandbox Chromium bekerja tanpa perlu diapa-apakan. Chromium di sini memuat `web.whatsapp.com` — konten jarak jauh — pada server yang satu jaringan dengan basis data rekam medis. Lihat ARCHITECTURE §9.6.
+
+Worker dijalankan sebagai akun layanan khusus, bukan Administrator.
+
+## Izin Berkas
+
+```powershell
+icacls .env            /inheritance:r /grant:r "$env:USERNAME:(R)"
+icacls .wwebjs_auth    /inheritance:r /grant:r "$env:USERNAME:(F)" /T
+```
+
+`.wwebjs_auth` berisi sesi WhatsApp aktif — setara kredensial. Siapa pun yang menyalinnya dapat menyamar sebagai nomor WhatsApp rumah sakit.
 
 Saat proses mulai, worker **wajib memverifikasi** bahwa `SIK_DB_USER` benar-benar tidak punya hak tulis, dengan mencoba operasi tulis pada tabel sementara dan memastikan operasi itu ditolak. Bila justru berhasil, worker berhenti dan menolak jalan. Salah konfigurasi kredensial adalah satu-satunya cara prinsip read-only bisa bocor — jadi periksa, jangan percaya.

@@ -16,24 +16,39 @@ Alasannya: bila membangun semua poller dulu, lalu semua template, lalu dispatche
 |---|---|---|
 | 0.1 | Inisiasi proyek Next.js 14 + TypeScript + Tailwind | `npm run dev` menyala di port 3100 |
 | 0.2 | `.gitignore` — wajib memuat `.env`, `.wwebjs_auth/`, `node_modules/`, `.next/`, `logs/` | — |
-| 0.3 | Buat pengguna MySQL `wakhanza_ro` (SELECT saja) dan `wakhanza_rw` | — |
+| 0.3 | Buat pengguna MySQL `wakhanza_ro` (SELECT saja) dan `wakhanza_rw`, lalu `REVOKE DELETE, UPDATE ON wakhanza.audit_log` | — |
 | 0.4 | `CREATE DATABASE wakhanza` + pelari migrasi + `001_init.sql` | 10 tabel terbentuk |
-| 0.5 | `src/db/sik.ts` + `src/db/wakhanza.ts`, `dateStrings: true`, `pool.max: 2` untuk `sik` | — |
+| 0.5 | `src/db/sik.ts` + `src/db/wakhanza.ts`, `dateStrings: true`, `pool.max: 2`, batas waktu query 5 detik | — |
 | 0.6 | **Pengaman read-only**: saat mulai, coba `CREATE TEMPORARY TABLE` di `sik`; berhenti bila berhasil | — |
 | 0.7 | Pemeriksa skema: pastikan seluruh kolom yang dibutuhkan ada di `sik` | — |
-| 0.8 | pino + berkas log berputar | — |
+| 0.8 | pino + berkas log berputar + penyamar nomor telepon | — |
+| 0.9 | **`verify:plans`** — jalankan `EXPLAIN` pada tiap query poller, gagalkan bila `type: ALL` | ARCHITECTURE §4.8 |
+| 0.10 | `npm audit` bersih; versi Chromium Puppeteer disematkan | — |
+| 0.11 | Batasi izin `.env` dan `.wwebjs_auth/` lewat `icacls` | — |
 
 **Definition of Done**
 
 ```bash
 npm run verify:db
 # harus mencetak:
-#   [ok] sik   : tersambung, 1234 tabel, kolom lengkap
-#   [ok] sik   : tulis DITOLAK (benar)
-#   [ok] wakhanza: tersambung, 10 tabel
+#   [ok] sik      : tersambung, 1234 tabel, kolom lengkap
+#   [ok] sik      : tulis DITOLAK (benar)
+#   [ok] wakhanza : tersambung, 10 tabel
+#   [ok] audit_log: DELETE/UPDATE DITOLAK (benar)
+
+npm run verify:plans
+#   [ok] QUEUE_REG      range PRIMARY  rows~3
+#   [ok] RESULT_READY   range PRIMARY  rows~1   (Using index)
+#   [ok] PHARMACY_READY range PRIMARY
+#   [ok] BILLING_READY  range tanggal
+#   [--] BOOK_CANCEL    ALL — pemindaian penuh yang disengaja, §4.4
+
+npm audit --omit=dev      # 0 kerentanan tinggi/kritis
 ```
 
 Langkah 0.6 adalah bagian terpenting seluruh fase ini. Prinsip read-only yang hanya ditulis di dokumen akan bocor pada hari seseorang menyalin kredensial root ke `.env` karena "biar cepat". Pemeriksaan saat mulai membuat kesalahan itu mustahil lolos ke produksi.
+
+Langkah 0.9 melindungi hal yang berbeda tetapi dengan cara yang sama. Menulis `WHERE tgl_registrasi >= …` terlihat lebih jelas dibaca daripada `WHERE no_rawat >= …`, tidak menghasilkan error, dan lolos seluruh uji — sambil membuat query 11.000 kali lebih mahal di basis data rumah sakit. Satu-satunya yang menangkapnya adalah pemeriksaan rencana query yang berjalan otomatis.
 
 ---
 
@@ -150,7 +165,7 @@ Uji khusus yang wajib ada di fase ini:
 
 | # | Halaman | Isi |
 |---|---|---|
-| 3.1 | Autentikasi | NextAuth Credentials + `app_user`, peran `admin`/`operator` |
+| 3.1 | Autentikasi | NextAuth Credentials + `app_user`, peran `admin`/`operator`, `bcrypt` native cost 12, sesi 8 jam, kunci 15 menit setelah 5 kegagalan, ikat ke `127.0.0.1` |
 | 3.2 | Koneksi | QR, status, sambung ulang, keluar |
 | 3.3 | Antrean | tabel `outbox` dengan saringan status, kirim ulang manual |
 | 3.4 | Template | sunting per pemicu, pratinjau data contoh, validasi nama variabel |
@@ -170,7 +185,20 @@ npm run lint                 # 0 error
 npm run build                # exit 0
 ```
 
-Ditambah pemeriksaan manual: buka setiap halaman sebagai `operator`, pastikan halaman Pengaturan dan Audit **tidak** dapat diakses.
+Ditambah pemeriksaan yang harus benar-benar dijalankan, bukan diasumsikan:
+
+| Diuji | Cara | Harapan |
+|---|---|---|
+| Otorisasi peran | Buka Pengaturan dan Audit sebagai `operator` | Ditolak |
+| Otorisasi di API, bukan hanya UI | Panggil endpoint pengaturan langsung dengan cookie `operator` | 403, bukan 200 |
+| Kunci tebak paksa | 6 kali login salah | Terkunci pada percobaan ke-6, tercatat di audit |
+| Pengikatan jaringan | `curl http://<IP-LAN>:3100` dari komputer lain | Tidak terhubung |
+| Sesi kedaluwarsa | Majukan jam 9 jam | Diminta masuk ulang |
+| Penyuntikan template | Ubah `nm_pasien` uji menjadi `{kontak_rs}`, pratinjau | Tercetak apa adanya, tidak tergantikan |
+
+Baris terakhir menguji ARCHITECTURE §9.2. Bila nomor telepon rumah sakit muncul di tempat nama pasien, mesin template melakukan penggantian berulang dan harus diperbaiki sebelum lanjut.
+
+Baris kedua penting karena menyembunyikan tombol di antarmuka bukan otorisasi. Pemeriksaan peran harus ada di sisi server pada setiap route yang mengubah data.
 
 ---
 
@@ -188,8 +216,12 @@ Semua yang membuat sistem selamat di dunia nyata.
 | 4.6 | Penyaring layanan sensitif + template generik |
 | 4.7 | Denyut jantung + pemeriksaan kesehatan + restart otomatis saat Chromium menggantung |
 | 4.8 | node-cron pembersihan berkala |
-| 4.9 | `ecosystem.config.js` — `wakhanza-worker` **wajib** `instances: 1, exec_mode: 'fork'` |
-| 4.10 | Skrip cadangan: database `wakhanza` **dan** direktori `.wwebjs_auth` |
+| 4.9 | `ecosystem.config.js` — `wakhanza-worker` **wajib** `instances: 1, exec_mode: 'fork'`, `max_memory_restart: '800M'` |
+| 4.10 | Skrip cadangan **terenkripsi**: database `wakhanza` **dan** direktori `.wwebjs_auth`, plus uji pemulihan |
+| 4.11 | Pemeriksaan daftar tolak kedua, tepat sebelum kirim (ARCHITECTURE §9.8) |
+| 4.12 | Resolusi kontak berkelompok + muat `poliklinik`/`dokter`/`setting` ke memori (§12.2) |
+| 4.13 | Paginasi sisi basis data untuk outbox, log, dan nomor bermasalah (§12.5) |
+| 4.14 | Puppeteer tanpa `--no-sandbox`; worker berjalan sebagai akun layanan non-Administrator (§9.6) |
 
 **Definition of Done** — masing-masing dibuktikan, bukan diasumsikan:
 
@@ -201,8 +233,14 @@ Semua yang membuat sistem selamat di dunia nyata.
 | Layanan sensitif | masukkan satu poli ke daftar, pastikan isi pesan berubah generik |
 | Percobaan ulang | matikan jaringan saat mengirim, pastikan diulang lalu berhasil |
 | Restart | `pm2 restart wakhanza-worker` di tengah antrean — tidak ada pesan hilang, tidak ada yang ganda |
+| Berhenti saat tertunda | Balas `STOP` selagi ada pesan tertahan jam tenang, pastikan tidak terkirim saat jendela buka |
+| Batas memori | Biarkan worker jalan semalam, pastikan restart karena memori pulih tanpa scan QR ulang |
+| Anggaran query | `poll_cursor.last_run_at` sepanjang sehari — tidak ada siklus melampaui 500 ms |
+| Pemulihan cadangan | Pulihkan ke mesin bersih, pastikan sesi WhatsApp hidup tanpa scan ulang |
 
-Baris terakhir adalah uji yang paling banyak menemukan bug.
+Baris "restart" adalah uji yang paling banyak menemukan bug. Baris "berhenti saat tertunda" menguji hal yang mudah terlewat: daftar tolak diperiksa saat memasukkan ke antrean, tetapi pesan bisa menunggu berjam-jam sebelum terkirim.
+
+Baris "pemulihan cadangan" adalah satu-satunya bukti bahwa cadangan benar-benar berfungsi. Cadangan yang tidak pernah diuji bukan cadangan.
 
 ---
 

@@ -185,13 +185,20 @@ Tingkat yang dipilih: **sedang — sebut layanan, jangan sebut hasil.**
 
 | Kode | Kebutuhan | Ukuran |
 |---|---|---|
-| N1 | Tidak menulis apa pun ke `sik` | Ditegakkan oleh hak akses MySQL, bukan konvensi kode |
-| N2 | Beban query ke `sik` tidak mengganggu SIMRS | Setiap siklus polling < 500 ms; query hanya menyentuh indeks tanggal |
+| N1 | Tidak menulis apa pun ke `sik` | Ditegakkan hak akses MySQL, diperiksa saat proses mulai — bukan konvensi kode |
+| N2 | Beban query ke `sik` tidak mengganggu SIMRS | Siklus polling < 500 ms. **Tidak ada query yang memindai tabel penuh** kecuali `booking_registrasi` — dijaga otomatis oleh `verify:plans` |
 | N3 | Sesi WhatsApp bertahan melewati pembaruan dashboard | Proses web dan proses WhatsApp terpisah |
 | N4 | Bertahan saat server reboot | PM2 dengan resurrect saat startup |
 | N5 | Layanan mati tidak menyebabkan kehilangan pemicu | Watermark tersimpan permanen; pemicu basi dibatalkan sesuai F5.3 |
 | N6 | Berjalan di server Windows RS | Node.js LTS + Chromium bundel Puppeteer |
 | N7 | Data pasien tidak keluar jaringan RS | Tanpa layanan pihak ketiga, tanpa telemetri keluar |
+| N8 | Query lambat tidak menumpuk di basis data RS | Batas waktu eksekusi 5 detik; siklus yang melewati batas dilewati, bukan mengantre |
+| N9 | Data dari `sik` tidak dapat mengubah struktur pesan | Penggantian template satu lintasan + pembersihan nilai. Nama pasien diisi manusia dan tidak tepercaya |
+| N10 | Dashboard tahan tebak paksa dari dalam jaringan RS | Kunci 15 menit setelah 5 kegagalan per nama pengguna; setiap penguncian tercatat di audit |
+| N11 | Riwayat audit tidak dapat diubah aplikasi | `REVOKE DELETE, UPDATE` pada `audit_log` di tingkat MariaDB |
+| N12 | Log tidak memuat data yang dapat mengidentifikasi pasien | Nomor disamarkan, nama tidak pernah dicatat, objek kesalahan Sequelize tidak pernah dicatat utuh |
+| N13 | Sesi WhatsApp tidak dapat dicuri dari server | `.wwebjs_auth` berizin terbatas, dicadangkan terenkripsi, tidak pernah masuk git |
+| N14 | Batas pengaman Chromium tetap aktif | Dilarang memakai `--no-sandbox`; worker berjalan sebagai akun layanan non-Administrator |
 
 ---
 
@@ -206,6 +213,9 @@ Tingkat yang dipilih: **sedang — sebut layanan, jangan sebut hasil.**
 | **Chromium Puppeteer mati/menggantung** | Pesan menumpuk di outbox | Pemeriksaan kesehatan berkala; outbox bersifat permanen sehingga tidak ada pesan hilang saat proses direstart |
 | **Sesi putus karena HP tidak online** | Perlu scan QR ulang | whatsapp-web.js butuh ponsel tertaut aktif berkala. Dashboard memberi peringatan status sebelum sesi benar-benar mati |
 | **Nomor pasien salah → pesan ke orang lain** | Kebocoran data ke pihak tak berhak | F4 membatasi isi sehingga dampak kebocoran minimal. Koreksi manual dicatat pelakunya |
+| **Query polling memperlambat SIMRS** | Petugas merasakannya saat melayani pasien | Kolom tanggal Khanza tidak terindeks; query karena itu disaring lewat primary key yang memuat tanggal. Dijaga `verify:plans` agar tidak diam-diam berubah kembali (ARCHITECTURE §4.4, §4.8) |
+| **Dashboard diakses dari jaringan RS tanpa TLS** | Cookie sesi dan nama pasien terbaca di jaringan | Diikat ke `127.0.0.1` secara bawaan. Akses dari loket memerlukan reverse proxy ber-TLS — keputusan sadar rumah sakit (ARCHITECTURE §9.4) |
+| **Chromium dieksploitasi lewat konten jarak jauh** | Eksekusi kode di server yang satu jaringan dengan rekam medis | Sandbox Chromium wajib aktif, akun layanan non-Administrator, versi Chromium disematkan dan diperbarui secara sengaja |
 
 ---
 
