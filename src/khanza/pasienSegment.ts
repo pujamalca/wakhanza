@@ -14,6 +14,8 @@ export interface PatientSegmentFilters {
 
 export interface PatientSegmentRow {
   no_rkm_medis: string;
+  /** No. pendaftaran kunjungan terpilih (bukan ID pasien) -- dipakai jadwal tindak-lanjut sebagai kunci idempoten per KUNJUNGAN. */
+  no_rawat: string;
   nm_pasien: string | null;
   no_tlp: string | null;
   kd_poli: string | null;
@@ -86,7 +88,7 @@ function buildPatientSegmentSql(filters: PatientSegmentFilters) {
 
   const sql = `
     SELECT p.no_rkm_medis, p.nm_pasien, p.no_tlp,
-           lv.kd_poli, lv.kd_pj, pj.png_jawab,
+           lv.no_rawat, lv.kd_poli, lv.kd_pj, pj.png_jawab,
            kb.nm_kab, kc.nm_kec, kl.nm_kel,
            lv.tgl_registrasi AS tgl_kunjungan_terakhir
     FROM (

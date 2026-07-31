@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
 import { fetchPatientSegment } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment } from '@/khanza/broadcastSchedule';
+import { scheduleFiltersToSegment, isFollowupSchedule } from '@/khanza/broadcastSchedule';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { computeNextRunAt, type RepeatKind } from '@/core/schedule';
 import { BroadcastSchedule, logAudit } from '@/models';
@@ -74,7 +74,13 @@ export async function createScheduleAction(_prev: { error?: string }, formData: 
     return { error: 'Waktu jalan berikutnya tidak valid atau sudah lewat -- periksa kembali tanggal/jam.' };
   }
 
+  // Field baru di filter WAJIB ditambahkan di sini juga: objek ini dibangun
+  // satu per satu dari FormData, bukan diteruskan apa adanya -- filter yang
+  // lupa didaftarkan akan benar di pratinjau tapi diam-diam hilang saat
+  // jadwalnya disimpan.
   const raw: RawFilterInput = {
+    windowMode: String(formData.get('windowMode') ?? ''),
+    offset: String(formData.get('offset') ?? ''),
     lookback: String(formData.get('lookback') ?? ''),
     kab: formData.getAll('kab').map(String),
     kec: formData.getAll('kec').map(String),
@@ -86,8 +92,14 @@ export async function createScheduleAction(_prev: { error?: string }, formData: 
   // Pemeriksaan kewarasan SEKALI di awal (bukan jaminan tiap kali jalan --
   // segmen dihitung ulang saat itu juga oleh worker, bisa berubah seiring
   // waktu) supaya staf tidak menyimpan jadwal yang filternya jelas 0 hasil.
+  //
+  // TIDAK berlaku untuk mode tindak lanjut: jendelanya cuma SATU hari
+  // kalender, jadi nol hasil hari ini sering wajar belaka (hari libur, atau
+  // H+N kebetulan jatuh di hari sepi) dan sama sekali bukan tanda filternya
+  // keliru. Menolak simpan di situ akan membuat jadwal yang benar mustahil
+  // dibuat pada hari yang salah.
   const preview = await fetchPatientSegment(scheduleFiltersToSegment(filterConfig));
-  if (preview.length === 0) {
+  if (preview.length === 0 && !isFollowupSchedule(filterConfig)) {
     return { error: 'Tidak ada pasien yang cocok dengan filter ini saat ini -- periksa kembali filter sebelum menyimpan jadwal.' };
   }
 

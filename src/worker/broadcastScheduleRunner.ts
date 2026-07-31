@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
-import { BroadcastSchedule, BroadcastCampaign, getSettingNumber, logAudit } from '@/models';
-import { fetchPatientSegment } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
+import { BroadcastSchedule, BroadcastCampaign, Outbox, getSettingNumber, logAudit } from '@/models';
+import { fetchPatientSegment, type PatientSegmentRow } from '@/khanza/pasienSegment';
+import { scheduleFiltersToSegment, isFollowupSchedule, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
 import { loadBroadcastContext, enqueueMessage, identityVars } from './pipeline';
 import { buildIdempotencyKey } from '@/core/idempotency';
@@ -32,6 +32,25 @@ export async function runDueBroadcastSchedules(): Promise<void> {
   }
 }
 
+/**
+ * Buang kunjungan yang kunci idempotennya sudah ada di outbox. Kuncinya
+ * dihitung dengan rumus yang SAMA dipakai saat enqueue di bawah -- kalau
+ * keduanya sampai berbeda, penyaringan ini cuma jadi tidak berguna (semua
+ * lolos) dan UNIQUE KEY tetap menahan pesan gandanya; tidak ada kasus di mana
+ * perbedaan itu justru melewatkan pesan yang seharusnya terkirim.
+ */
+async function filterAlreadySent(scheduleId: number, rows: PatientSegmentRow[]): Promise<PatientSegmentRow[]> {
+  if (rows.length === 0) return rows;
+
+  const keyOf = (row: PatientSegmentRow) => buildIdempotencyKey('BROADCAST_FOLLOWUP', scheduleId, row.no_rawat);
+  const existing = await Outbox.findAll({
+    where: { idempotencyKey: { [Op.in]: rows.map(keyOf) } },
+    attributes: ['idempotencyKey'],
+  });
+  const sent = new Set(existing.map((o) => o.idempotencyKey));
+  return rows.filter((row) => !sent.has(keyOf(row)));
+}
+
 async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<void> {
   // Pagar keselamatan: berhenti otomatis lewat stop_after_date walau
   // is_active masih 1 -- supaya "atur lalu lupa" tidak berjalan tanpa batas.
@@ -45,12 +64,26 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
   }
 
   const filterConfig: ScheduleFilterConfig = JSON.parse(schedule.filterJson);
+  const followup = isFollowupSchedule(filterConfig);
   const segmentFilters = scheduleFiltersToSegment(filterConfig);
-  const recipients = await fetchPatientSegment(segmentFilters);
+  const matched = await fetchPatientSegment(segmentFilters);
   const maxRecipients = await getSettingNumber('broadcast.max_recipients', 500);
 
+  // Mode tindak lanjut: buang lebih dulu kunjungan yang PERNAH dikirimi oleh
+  // jadwal ini. UNIQUE KEY uq_idem tetap penjaga terakhirnya, tapi menyaring
+  // di sini membuat broadcast_campaign jujur -- tanpa ini, jadwal harian
+  // menumpuk baris kampanye yang mengaku punya penerima padahal tidak satu pun
+  // pesan baru masuk outbox (broadcast_campaign insert-only, jadi angka yang
+  // sudah terlanjur salah tidak bisa dikoreksi belakangan).
+  const recipients = followup ? await filterAlreadySent(schedule.id, matched) : matched;
+
   if (recipients.length === 0) {
-    logger.info({ scheduleId: schedule.id, name: schedule.name }, 'broadcast_schedule: tidak ada pasien cocok pada siklus ini, lewati');
+    logger.info(
+      { scheduleId: schedule.id, name: schedule.name, matched: matched.length },
+      matched.length > 0
+        ? 'broadcast_schedule: semua kunjungan yang cocok sudah pernah dikirimi, lewati'
+        : 'broadcast_schedule: tidak ada pasien cocok pada siklus ini, lewati',
+    );
   } else if (recipients.length > maxRecipients) {
     // TIDAK mengirim sebagian -- sama seperti sendBroadcastAction (kirim
     // manual), kesalahan filter tidak boleh diam-diam terpotong jadi
@@ -77,10 +110,24 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
       recipientCount: recipients.length,
     });
 
+    // Kunci idempoten berbeda per mode, dan bedanya menentukan berapa kali
+    // seorang pasien bisa menerima pesan dari jadwal ini:
+    //
+    // - rolling : mengandung campaign.id yang BARU tiap kali jalan, jadi tiap
+    //   siklus memang mengirim ulang ke siapa pun yang saat itu masuk jendela.
+    //   Itu memang yang diminta pola "pengumuman berkala ke segmen".
+    // - followup: mengandung schedule.id + no_rawat, TANPA campaign.id -- satu
+    //   kunjungan hanya pernah memicu satu pesan tindak lanjut, selamanya.
+    //   Ini jaring pengaman yang sungguhan: jadwal yang tidak sengaja jalan
+    //   dua kali (worker restart, jam server mundur, staf menekan aktifkan
+    //   berulang) TIDAK mengirimi pasien pesan kedua -- INSERT-nya ditolak
+    //   UNIQUE KEY uq_idem di mesin database, bukan oleh disiplin kode.
     for (const row of recipients) {
       await enqueueMessage(
         {
-          idempotencyKey: buildIdempotencyKey('BROADCAST', campaign.id, row.no_rkm_medis),
+          idempotencyKey: followup
+            ? buildIdempotencyKey('BROADCAST_FOLLOWUP', schedule.id, row.no_rawat)
+            : buildIdempotencyKey('BROADCAST', campaign.id, row.no_rkm_medis),
           noRkmMedis: row.no_rkm_medis,
           rawPhone: row.no_tlp,
           eventAt: now,
@@ -92,7 +139,10 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
       );
     }
 
-    logger.info({ scheduleId: schedule.id, name: schedule.name, campaignId: campaign.id, recipients: recipients.length }, 'broadcast_schedule terkirim');
+    logger.info(
+      { scheduleId: schedule.id, name: schedule.name, campaignId: campaign.id, recipients: recipients.length, mode: followup ? 'followup' : 'rolling' },
+      'broadcast_schedule terkirim',
+    );
     await logAudit(SCHEDULE_ACTOR, 'broadcast_schedule_run', String(schedule.id), `kampanye #${campaign.id}, ${recipients.length} penerima`);
     await schedule.update({ lastRunAt: now, lastCampaignId: campaign.id });
   }

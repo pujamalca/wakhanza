@@ -12,6 +12,54 @@ export interface ScheduleTiming {
   runOnceAt?: Date | null;
 }
 
+/**
+ * Dua cara menafsirkan "pasien mana" pada jadwal broadcast berulang. Bedanya
+ * menentukan berapa kali SATU pasien menerima pesan, jadi ini bukan sekadar
+ * preferensi tampilan:
+ *
+ * - `rolling`  : jendela berjalan `lookbackDays` terakhir sampai HARI INI.
+ *                Pasien yang sama tetap masuk kriteria selama masih di dalam
+ *                jendela, jadi jadwal harian dengan lookback 30 hari mengirim
+ *                ke orang yang sama 30 kali. Masuk akal untuk pengumuman
+ *                berkala ke seluruh segmen, berbahaya untuk yang lain.
+ * - `followup` : TEPAT satu hari kalender, `offsetDays` hari yang lalu.
+ *                Dipasangkan dengan pengulangan harian, tiap pasien melewati
+ *                jendela ini persis SEKALI -- inilah bentuk "pasien yang
+ *                daftar hari ini, dikirimi 3 hari lagi".
+ */
+export type ScheduleWindowMode = 'rolling' | 'followup';
+
+export const DEFAULT_FOLLOWUP_OFFSET_DAYS = 3;
+
+export interface ScheduleWindowInput {
+  windowMode?: ScheduleWindowMode;
+  /** Dipakai mode 'rolling'. */
+  lookbackDays: number;
+  /** Dipakai mode 'followup'. 0 = pasien yang berkunjung hari ini juga. */
+  offsetDays?: number;
+}
+
+/**
+ * Rentang tanggal kunjungan yang disasar, dihitung ULANG dari `now` setiap
+ * kali dipanggil -- jadwal berulang tidak boleh membekukan tanggal saat
+ * dibuat, karena "30 hari terakhir" berarti jendela yang berbeda tiap minggu.
+ *
+ * Untuk 'followup', dateFrom == dateTo (satu hari kalender penuh, bukan
+ * jendela kosong): pemanggilnya memangkas lewat prefix no_rawat [hari, hari+1).
+ */
+export function resolveScheduleWindow(input: ScheduleWindowInput, now: Date): { dateFrom: Date; dateTo: Date } {
+  if (input.windowMode === 'followup') {
+    const day = new Date(now);
+    day.setDate(day.getDate() - (input.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS));
+    day.setHours(0, 0, 0, 0);
+    return { dateFrom: day, dateTo: new Date(day) };
+  }
+
+  const from = new Date(now);
+  from.setDate(from.getDate() - input.lookbackDays);
+  return { dateFrom: from, dateTo: new Date(now) };
+}
+
 function parseTimeOfDay(timeOfDay: string): { hour: number; minute: number } {
   const [h, m] = timeOfDay.split(':').map(Number);
   return { hour: h || 0, minute: m || 0 };

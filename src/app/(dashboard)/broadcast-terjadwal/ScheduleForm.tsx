@@ -15,12 +15,15 @@ export function ScheduleForm({
   sampleVars,
   total,
   uniqueCodeFooter,
+  isFollowup,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
   total: number;
   /** Contoh baris kode unik yang ditambahkan otomatis; null bila fitur dimatikan. */
   uniqueCodeFooter: string | null;
+  /** Mode jendela terpilih di filter di atas -- menentukan peringatan pengulangan di bawah. */
+  isFollowup: boolean;
 }) {
   const [state, formAction, isPending] = useActionState(
     (_prev: { error?: string }, formData: FormData) => createScheduleAction(_prev, formData),
@@ -148,6 +151,19 @@ export function ScheduleForm({
         </div>
       )}
 
+      {/* Kombinasi paling gampang keliru: jendela berjalan + pengulangan.
+          Pasien yang sama tetap masuk kriteria selama masih di dalam jendela,
+          jadi ia menerima pesan LAGI tiap kali jadwal jalan -- jendela 30 hari
+          + harian berarti 30 pesan ke orang yang sama. */}
+      {!isFollowup && repeatKind !== 'once' && (
+        <div className="rounded-md border border-amber-600/40 bg-amber-50 p-2 text-xs dark:border-amber-500/40 dark:bg-amber-950">
+          Filter di atas memakai <span className="font-medium">jendela berjalan</span>, dan jadwal ini berulang. Pasien yang sama
+          akan dikirimi <span className="font-medium">setiap kali</span> jadwal jalan selama ia masih di dalam jendela. Untuk
+          &ldquo;kirim sekali, sekian hari setelah kunjungan&rdquo;, pilih <span className="font-medium">Tindak lanjut</span> di
+          filter di atas.
+        </div>
+      )}
+
       {repeatKind !== 'once' && (
         <div className="space-y-1">
           <label className="text-sm font-medium">Berhenti otomatis setelah tanggal (opsional)</label>
@@ -160,9 +176,18 @@ export function ScheduleForm({
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
-      <Button type="submit" variant="primary" size="sm" disabled={isPending || total === 0}>
+      {/* total === 0 tidak menghalangi mode tindak lanjut: jendelanya satu hari
+          kalender, jadi nol hasil HARI INI sering wajar (hari libur) dan bukan
+          tanda filternya keliru -- lihat createScheduleAction. */}
+      <Button type="submit" variant="primary" size="sm" disabled={isPending || (total === 0 && !isFollowup)}>
         {isPending ? 'Menyimpan...' : 'Simpan jadwal'}
       </Button>
+      {total === 0 && isFollowup && (
+        <p className="text-xs text-muted-foreground">
+          Nol pasien hari ini wajar untuk tindak lanjut — jendelanya satu hari kalender. Jadwal tetap bisa disimpan dan akan
+          mengirim pada hari-hari yang ada kunjungannya.
+        </p>
+      )}
     </form>
   );
 }

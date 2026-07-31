@@ -1,4 +1,4 @@
-import { computeNextRunAt } from './schedule';
+import { computeNextRunAt, resolveScheduleWindow, DEFAULT_FOLLOWUP_OFFSET_DAYS } from './schedule';
 
 // 31 Juli 2026 = Jumat (getDay() === 5).
 const at = (h: number, m = 0) => new Date(2026, 6, 31, h, m, 0, 0);
@@ -93,5 +93,77 @@ describe('computeNextRunAt: monthly', () => {
 
   it('tanpa dayOfMonth -> null', () => {
     expect(computeNextRunAt({ repeatKind: 'monthly', timeOfDay: '09:00' }, at(10))).toBeNull();
+  });
+});
+
+describe('resolveScheduleWindow: rolling', () => {
+  it('jendela berjalan N hari terakhir sampai sekarang', () => {
+    const now = at(10);
+    const { dateFrom, dateTo } = resolveScheduleWindow({ lookbackDays: 30 }, now);
+    expect(dateTo.getTime()).toBe(now.getTime());
+    expect(dateFrom.getDate()).toBe(1); // 31 Juli - 30 hari = 1 Juli
+    expect(dateFrom.getMonth()).toBe(6);
+  });
+
+  it('windowMode absen (baris jadwal lama) diperlakukan sebagai rolling', () => {
+    const { dateFrom, dateTo } = resolveScheduleWindow({ lookbackDays: 7 }, at(10));
+    expect(dateTo.getDate()).toBe(31);
+    expect(dateFrom.getDate()).toBe(24);
+  });
+
+  it('tidak memangkas jam -- rentangnya sampai detik ini', () => {
+    const now = at(14, 37);
+    const { dateTo } = resolveScheduleWindow({ lookbackDays: 3 }, now);
+    expect(dateTo.getHours()).toBe(14);
+    expect(dateTo.getMinutes()).toBe(37);
+  });
+});
+
+describe('resolveScheduleWindow: followup', () => {
+  it('tepat SATU hari kalender, N hari yang lalu', () => {
+    const { dateFrom, dateTo } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 3 }, at(10));
+    expect(dateFrom.getDate()).toBe(28); // 31 Juli - 3 hari
+    expect(dateTo.getDate()).toBe(28);
+    expect(dateFrom.getTime()).toBe(dateTo.getTime());
+  });
+
+  it('dipangkas ke tengah malam, bukan jam saat jadwal jalan', () => {
+    // Kalau jamnya ikut terbawa, jadwal yang jalan pukul 09:00 akan melewatkan
+    // pasien yang mendaftar pukul 07:00 di hari yang sama.
+    const { dateFrom } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 1 }, at(9, 30));
+    expect(dateFrom.getHours()).toBe(0);
+    expect(dateFrom.getMinutes()).toBe(0);
+    expect(dateFrom.getSeconds()).toBe(0);
+    expect(dateFrom.getMilliseconds()).toBe(0);
+  });
+
+  it('offsetDays 0 = pasien yang berkunjung hari ini', () => {
+    const { dateFrom, dateTo } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 0 }, at(10));
+    expect(dateFrom.getDate()).toBe(31);
+    expect(dateTo.getDate()).toBe(31);
+  });
+
+  it('mengabaikan lookbackDays sepenuhnya', () => {
+    const a = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 1, offsetDays: 5 }, at(10));
+    const b = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 365, offsetDays: 5 }, at(10));
+    expect(a.dateFrom.getTime()).toBe(b.dateFrom.getTime());
+  });
+
+  it('offsetDays absen -> default', () => {
+    const { dateFrom } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30 }, at(10));
+    expect(dateFrom.getDate()).toBe(31 - DEFAULT_FOLLOWUP_OFFSET_DAYS);
+  });
+
+  it('lewat pergantian bulan', () => {
+    const awalAgustus = new Date(2026, 7, 2, 9, 0);
+    const { dateFrom } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 5 }, awalAgustus);
+    expect(dateFrom.getMonth()).toBe(6); // Juli
+    expect(dateFrom.getDate()).toBe(28);
+  });
+
+  it('dateFrom dan dateTo adalah objek berbeda (tidak saling mengubah)', () => {
+    const { dateFrom, dateTo } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 3 }, at(10));
+    dateTo.setDate(dateTo.getDate() + 10);
+    expect(dateFrom.getDate()).toBe(28);
   });
 });

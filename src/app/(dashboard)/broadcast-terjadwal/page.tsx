@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment } from '@/khanza/broadcastSchedule';
+import { scheduleFiltersToSegment, isFollowupSchedule, DEFAULT_FOLLOWUP_OFFSET_DAYS, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
 import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
 import { BroadcastSchedule } from '@/models';
@@ -9,6 +9,7 @@ import { parseScheduleFilters, DATE_PRESETS, type RawFilterInput } from './filte
 import { summarizeSegment } from '../broadcast/segment';
 import { toggleScheduleAction, deleteScheduleAction } from './actions';
 import { ScheduleForm } from './ScheduleForm';
+import { WindowModeFields } from './WindowModeFields';
 import {
   PageHeader,
   Card,
@@ -41,6 +42,23 @@ function describeRepeat(s: BroadcastSchedule): string {
   if (s.repeatKind === 'daily') return `Harian, ${time}`;
   if (s.repeatKind === 'weekly') return `Mingguan, ${DAY_LABELS[s.dayOfWeek ?? 0]} ${time}`;
   return `Bulanan, tgl ${s.dayOfMonth} ${time}`;
+}
+
+/**
+ * Mode jendela disimpan di dalam filter_json, jadi harus diurai untuk
+ * ditampilkan. Baris lama (dibuat sebelum mode ini ada) tidak punya field-nya
+ * dan terbaca sebagai 'rolling' -- sesuai perilakunya selama ini.
+ */
+function describeWindow(s: BroadcastSchedule): string {
+  let config: ScheduleFilterConfig;
+  try {
+    config = JSON.parse(s.filterJson);
+  } catch {
+    return '-';
+  }
+  return isFollowupSchedule(config)
+    ? `Tindak lanjut, H+${config.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS}`
+    : `Jendela ${config.lookbackDays} hari`;
 }
 
 export default async function BroadcastTerjadwalPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -92,6 +110,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
               <tr>
                 <th className={cellClass}>Nama</th>
                 <th className={cellClass}>Pola</th>
+                <th className={cellClass}>Sasaran</th>
                 <th className={cellClass}>Jalan berikutnya</th>
                 <th className={cellClass}>Terakhir jalan</th>
                 <th className={cellClass}>Status</th>
@@ -103,6 +122,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
                 <tr key={s.id} className={rowClass}>
                   <td className={cellClass}>{s.name}</td>
                   <td className={`${cellClass} text-xs`}>{describeRepeat(s)}</td>
+                  <td className={`${cellClass} text-xs`}>{describeWindow(s)}</td>
                   <td className={`${cellClass} text-xs`}>{s.nextRunAt ? s.nextRunAt.toLocaleString('id-ID') : '-'}</td>
                   <td className={`${cellClass} text-xs`}>
                     {s.lastRunAt ? s.lastRunAt.toLocaleString('id-ID') : 'Belum pernah'}
@@ -138,7 +158,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
               ))}
               {schedules.length === 0 && (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <EmptyState>Belum ada jadwal broadcast.</EmptyState>
                   </td>
                 </tr>
@@ -151,31 +171,12 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
       <h2 className="mb-2 font-medium">Buat jadwal baru</h2>
 
       <form method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
-        <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">Jendela kunjungan (dihitung ulang relatif tiap kali jalan)</p>
-          <div className="flex flex-wrap items-center gap-2">
-            {Object.entries(DATE_PRESETS).map(([key, preset]) => (
-              <button
-                key={key}
-                type="submit"
-                name="preset"
-                value={key}
-                className="rounded-full border px-3 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-              >
-                {preset.label} terakhir
-              </button>
-            ))}
-            <span className="text-xs text-muted-foreground">atau</span>
-            <input
-              type="number"
-              name="lookback"
-              min={1}
-              defaultValue={filterConfig.lookbackDays}
-              className="w-20 rounded-md border bg-background px-2 py-1 text-xs text-foreground"
-            />
-            <span className="text-xs text-muted-foreground">hari terakhir</span>
-          </div>
-        </div>
+        <WindowModeFields
+          presets={Object.entries(DATE_PRESETS).map(([key, preset]) => ({ key, label: preset.label }))}
+          defaultMode={filterConfig.windowMode ?? 'rolling'}
+          defaultLookback={filterConfig.lookbackDays}
+          defaultOffset={filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS}
+        />
 
         <div>
           <p className="mb-1 text-xs font-medium text-muted-foreground">
@@ -215,7 +216,9 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
         <Stat label="Layanan sensitif" value={summary.sensitive} />
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        Angka ini pratinjau HARI INI -- jumlah sesungguhnya saat jadwal jalan bisa berbeda karena jendela tanggal dihitung ulang.
+        {isFollowupSchedule(filterConfig)
+          ? `Ini pasien yang berkunjung ${filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS} hari lalu -- yakni yang akan dikirimi SEANDAINYA jadwal jalan hari ini. Tiap hari isinya berbeda, dan tiap pasien hanya pernah masuk sekali.`
+          : 'Angka ini pratinjau HARI INI -- jumlah sesungguhnya saat jadwal jalan bisa berbeda karena jendela tanggal dihitung ulang.'}
       </p>
 
       <div className={tableWrapperClass}>
@@ -261,7 +264,9 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
 
       <ScheduleForm
         hiddenFilters={{
+          windowMode: [filterConfig.windowMode ?? 'rolling'],
           lookback: [String(filterConfig.lookbackDays)],
+          offset: [String(filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS)],
           kab: [...selectedKab],
           kec: [...selectedKec],
           pj: [...selectedPj],
@@ -270,6 +275,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
         sampleVars={sampleVars}
         total={summary.total}
         uniqueCodeFooter={uniqueCodeFooter}
+        isFollowup={isFollowupSchedule(filterConfig)}
       />
     </div>
   );
