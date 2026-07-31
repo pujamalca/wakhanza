@@ -1,0 +1,75 @@
+import { sikSelect } from '@/db/sik';
+import { registerPlanCheck } from './planChecks';
+import { formatRawatPrefix, lookbackDate } from './common';
+
+export type PenunjangJenis = 'lab' | 'radiologi';
+
+export interface ResultReadyRow {
+  no_rawat: string;
+  tgl_periksa: string;
+  jam_terakhir: string;
+  jumlah_item: number;
+  kd_jenis_prw_list: string | null;
+  no_rkm_medis: string;
+  kd_poli: string | null;
+  nm_pasien: string | null;
+  no_tlp: string | null;
+  nm_poli: string | null;
+}
+
+const TABLE_BY_JENIS: Record<PenunjangJenis, string> = {
+  lab: 'periksa_lab',
+  radiologi: 'periksa_radiologi',
+};
+
+/**
+ * ARCHITECTURE §4.3: satu baris per (no_rawat, tgl_periksa), BUKAN per baris
+ * periksa_lab -- pasien dengan panel darah lengkap punya belasan baris
+ * (kd_jenis_prw berbeda) untuk satu kunjungan. Tanpa penggabungan, pasien
+ * menerima belasan WhatsApp beruntun untuk satu kunjungan.
+ *
+ * `kd_jenis_prw_list` (kode, BUKAN nama dari jns_perawatan_lab/radiologi)
+ * dikumpulkan untuk pemeriksaan privasi F4.3 -- lihat core/privacy.ts. Nama
+ * pemeriksaan TIDAK PERNAH diambil di sini sama sekali (§5.2).
+ */
+function buildResultReadySql(jenis: PenunjangJenis) {
+  const table = TABLE_BY_JENIS[jenis];
+  return `
+    SELECT g.no_rawat, g.tgl_periksa, g.jam_terakhir, g.jumlah_item, g.kd_jenis_prw_list,
+           r.no_rkm_medis, r.kd_poli,
+           p.nm_pasien, p.no_tlp,
+           pk.nm_poli
+    FROM (
+      SELECT no_rawat, tgl_periksa,
+             MAX(jam) AS jam_terakhir,
+             COUNT(*) AS jumlah_item,
+             GROUP_CONCAT(DISTINCT kd_jenis_prw) AS kd_jenis_prw_list
+      FROM ${table}
+      WHERE no_rawat >= :lookbackPrefix
+      GROUP BY no_rawat, tgl_periksa
+      HAVING MAX(TIMESTAMP(tgl_periksa, jam)) >= :cursorTs
+    ) g
+    JOIN reg_periksa r ON r.no_rawat = g.no_rawat
+    LEFT JOIN pasien p ON p.no_rkm_medis = r.no_rkm_medis
+    LEFT JOIN poliklinik pk ON pk.kd_poli = r.kd_poli
+    ORDER BY g.jam_terakhir
+    LIMIT 200
+  `;
+}
+
+export async function pollResultReady(jenis: PenunjangJenis, cursorTs: Date, lookbackDays: number): Promise<ResultReadyRow[]> {
+  const replacements = {
+    lookbackPrefix: formatRawatPrefix(lookbackDate(lookbackDays)),
+    cursorTs,
+  };
+  return sikSelect<ResultReadyRow>(buildResultReadySql(jenis), replacements);
+}
+
+for (const jenis of Object.keys(TABLE_BY_JENIS) as PenunjangJenis[]) {
+  registerPlanCheck({
+    name: `RESULT_READY(${jenis})`,
+    sql: buildResultReadySql(jenis),
+    replacements: { lookbackPrefix: formatRawatPrefix(lookbackDate(30)), cursorTs: new Date() },
+    maxRows: 500,
+  });
+}

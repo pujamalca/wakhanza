@@ -29,9 +29,9 @@ MariaDB 10.4 penting dicatat: **tidak mendukung CTE rekursif dengan baik, tidak 
 | Bahasa | **TypeScript 5.9** | Baris di `sik` punya bentuk tak intuitif (`stts`, `stts_daftar`, `status_lanjut` — tiga kolom status berbeda di satu tabel). Tipe eksplisit mencegah salah pakai kolom |
 | Database aplikasi | **MariaDB** (skema `wakhanza`) | Sudah berjalan di server RS untuk Khanza. Menambah PostgreSQL berarti menambah layanan yang harus dirawat |
 | Akses DB | **Sequelize 6 + mysql2** | Sama seperti apiwa, sehingga pola dan potongan kode bisa dipakai ulang. Dua koneksi terpisah — lihat di bawah |
-| Pengiriman WA | **whatsapp-web.js 1.23** | Ditetapkan: gratis, tanpa verifikasi badan usaha, bebas kirim tanpa template yang perlu persetujuan Meta |
-| Dashboard | **Next.js 14 App Router** | Ditetapkan. Stack yang sudah dikuasai dari apiwa |
-| Autentikasi | **NextAuth v4, provider Credentials** | Pengguna internal RS saja. Tidak perlu OAuth |
+| Pengiriman WA | **whatsapp-web.js ^1.34** | Ditetapkan: gratis, tanpa verifikasi badan usaha, bebas kirim tanpa template yang perlu persetujuan Meta. Versi dinaikkan dari 1.23 ke rilis terbaru saat implementasi (31 Juli 2026) — lihat "Penyesuaian Implementasi" di bawah |
+| Dashboard | **Next.js 16 App Router** | Dinaikkan dari rencana awal 14 saat implementasi — lihat "Penyesuaian Implementasi" |
+| Autentikasi | **NextAuth v5 (Auth.js, beta), provider Credentials** | Pengguna internal RS saja, tidak perlu OAuth. Naik dari v4 karena mengikuti Next.js 16/React 19 — lihat "Penyesuaian Implementasi" |
 | Hashing sandi | **`bcrypt` binding native** (bukan `bcryptjs`) | `bcryptjs` adalah JavaScript murni sehingga hashing berjalan di event loop. Pada apiwa, cost 12 terbukti menahan event loop cukup lama sampai login berbarengan menggantung hingga timeout. Binding native menjalankannya di thread pool libuv. Cost 12 tetap — yang berubah tempat eksekusinya |
 | UI | **Tailwind 3 + shadcn/ui + Radix** | Sama dengan apiwa |
 | Ambil data di klien | **TanStack Query 5** | Halaman antrean dan QR butuh polling berkala — inilah yang dilakukan TanStack Query dengan baik |
@@ -68,10 +68,19 @@ CREATE USER 'wakhanza_ro'@'localhost' IDENTIFIED BY '...';
 GRANT SELECT ON sik.* TO 'wakhanza_ro'@'localhost';
 
 CREATE USER 'wakhanza_rw'@'localhost' IDENTIFIED BY '...';
-GRANT ALL PRIVILEGES ON wakhanza.* TO 'wakhanza_rw'@'localhost';
-
--- Riwayat audit tidak boleh dapat diubah oleh aplikasi itu sendiri.
-REVOKE DELETE, UPDATE ON wakhanza.audit_log FROM 'wakhanza_rw'@'localhost';
+-- TIDAK "GRANT ALL PRIVILEGES" — lihat "Penyesuaian Implementasi" di bawah untuk alasannya.
+GRANT SELECT, INSERT, CREATE, ALTER, INDEX, DROP, REFERENCES ON wakhanza.* TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.poll_cursor       TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.outbox            TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.template          TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.patient_contact   TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.opt_out           TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.wa_session        TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.send_log          TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.app_user          TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.app_setting       TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.schema_migrations TO 'wakhanza_rw'@'localhost';
+-- audit_log sengaja TIDAK PERNAH diberi UPDATE/DELETE, di level mana pun.
 ```
 
 Kalau suatu hari ada kode yang keliru menjalankan `UPDATE sik.pasien`, MariaDB menolaknya dengan error hak akses. Keselamatan database rumah sakit tidak boleh bergantung pada ingatan programmer.
@@ -258,3 +267,29 @@ icacls .wwebjs_auth    /inheritance:r /grant:r "$env:USERNAME:(F)" /T
 `.wwebjs_auth` berisi sesi WhatsApp aktif — setara kredensial. Siapa pun yang menyalinnya dapat menyamar sebagai nomor WhatsApp rumah sakit.
 
 Saat proses mulai, worker **wajib memverifikasi** bahwa `SIK_DB_USER` benar-benar tidak punya hak tulis, dengan mencoba operasi tulis pada tabel sementara dan memastikan operasi itu ditolak. Bila justru berhasil, worker berhenti dan menolak jalan. Salah konfigurasi kredensial adalah satu-satunya cara prinsip read-only bisa bocor — jadi periksa, jangan percaya.
+
+---
+
+## Penyesuaian Implementasi (31 Juli 2026)
+
+Dicatat saat Fase 0 benar-benar dikerjakan, karena beberapa pilihan "Ditetapkan" di atas ternyata tidak lagi berlaku pada hari implementasi — sesuai prinsip pembuka dokumen ini: *"Bila alasan itu tidak lagi berlaku, pilihannya boleh ditinjau ulang."*
+
+**Next.js 14 → 16, React 18 → 19, NextAuth v4 → v5 (Auth.js, beta).** `npm audit` pada Next.js 14.2.35 (rilis 14.x terbaru yang ada) menunjukkan 8 kerentanan tingkat tinggi tanpa patch lanjutan di jalur 14.x — perbaikannya hanya tersedia di Next 16. Menaikkan Next otomatis menaikkan React ke 19, dan NextAuth v4 tidak dibangun untuk internal App Router/React 19 sehingga ikut naik ke v5. NextAuth v5 masih bertanda `beta` di npm (belum ada rilis stabil) — diterima sebagai risiko sadar karena alternatifnya (bertahan di v4) berarti tidak kompatibel ke depan dengan Next 16. Konsekuensi konkret bagi siapa pun yang menyentuh `src/app/`: `params`, `searchParams`, `cookies()`, dan `headers()` bersifat `Promise`/asinkron di Next 15+, berbeda dari contoh kode Next 14 di dokumen lain.
+
+**`middleware.ts` → `proxy.ts`.** Next.js 16 mengganti nama konvensi berkas gerbang autentikasi tingkat-request dari `middleware.ts` menjadi `proxy.ts` (fungsinya sama). Ditambah satu jebakan tersendiri: Next.js mendeteksi export lewat analisis statis berkas itu, dan pola destructuring `export const { auth: proxy } = NextAuth(...)` TIDAK terdeteksi meski valid saat runtime -- wajib lewat variabel antara (`const { auth } = NextAuth(...); export const proxy = auth;`). Auth.js v5 sendiri juga mengharuskan config dipecah dua: `auth.config.ts` tanpa provider (aman untuk Edge Runtime tempat proxy.ts berjalan) dan `auth.ts` penuh dengan provider Credentials (butuh Sequelize/bcrypt, Node.js runtime biasa) -- menyatukan keduanya di satu berkas membuat build gagal karena Edge Runtime tidak mendukung modul native yang diseret Sequelize.
+
+**ESLint 8 → 9, konfigurasi flat (`eslint.config.mjs`).** `eslint-config-next@16` mensyaratkan `eslint >= 9`, yang berarti format lama `.eslintrc.json` diganti `eslint.config.mjs` (via `FlatCompat`).
+
+**Grant `wakhanza_rw` bukan lagi `ALL PRIVILEGES`.** Rencana awal (`GRANT ALL PRIVILEGES` lalu `REVOKE DELETE, UPDATE ON audit_log`) terbukti tidak menegakkan apa pun saat dicoba langsung — MariaDB menyatukan hak akses lintas tingkatan, jadi `REVOKE` di tingkat tabel tidak bisa mencabut hak dari grant di tingkat database. Diganti model yang benar-benar diverifikasi bekerja: tanpa `UPDATE`/`DELETE` di tingkat database, diberikan satu per satu di tingkat tabel, `audit_log` dikecualikan selamanya. Detail di ARCHITECTURE §9.5.
+
+**whatsapp-web.js 1.23 → rilis terbaru (^1.34).** Angka "1.23" di rencana awal bersifat ilustratif, bukan hasil verifikasi seperti tabel "Lingkungan Terverifikasi". whatsapp-web.js sangat bergantung pada versi `web.whatsapp.com` yang sedang live — rilis lama berisiko tidak bisa autentikasi sama sekali. Dipakai rilis terbaru yang tersedia saat instalasi.
+
+**`npm audit --omit=dev` tidak mencapai nol.** Definition of Done Fase 0 di `IMPLEMENTATION_PLAN.md` menargetkan nol kerentanan tinggi/kritis pada dependensi produksi. Setelah kenaikan di atas, sisa 11 kerentanan (7 tinggi, 4 sedang) berasal dari tiga rantai yang **tidak punya perbaikan tanpa breaking change**, diverifikasi lewat `npm audit fix --force` (yang menyarankan downgrade absurd: Next.js ke 9.3.3, whatsapp-web.js ke 1.17.1 — versi yang jauh lebih rentan dan/atau tidak bisa tersambung ke WhatsApp sama sekali):
+
+| Rantai | Sumber | Kenapa diterima |
+|---|---|---|
+| `whatsapp-web.js → archiver → archiver-utils/glob/brace-expansion` | DoS lewat regex tak terbatas di kode kompresi/ekstraksi media WhatsApp | wakhanza hanya mengirim teks, tidak pernah memanggil jalur kode archiver/zip milik whatsapp-web.js |
+| `next → sharp` (Image Optimizer) | Kerentanan libvips yang dibundel Next.js untuk `next/image` | Dashboard tidak memakai `next/image` dengan sumber jarak jauh; tidak ada `remotePatterns` yang dikonfigurasi |
+| `node-cron`/`sequelize → uuid` | Validasi batas buffer pada mode `uuid` yang tidak dipakai | Kedua paket memakai `uuid` hanya untuk membangkitkan ID acak, bukan mode `buf` yang rentan |
+
+Ini bukan alasan untuk berhenti memeriksa — `npm audit --omit=dev` harus tetap dijalankan tiap dependensi berubah (ARCHITECTURE §9.10), dan baris di atas ditinjau ulang begitu ada rilis yang benar-benar memperbaikinya, bukan sekadar diabaikan permanen.

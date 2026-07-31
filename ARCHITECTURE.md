@@ -636,15 +636,13 @@ Next.js diikat lewat `next start -H 127.0.0.1 -p 3100`. Tanpa `-H`, Next.js meng
 
 ### 9.5 Kekebalan log audit
 
-`audit_log` disebut append-only, tetapi `wakhanza_rw` memegang `ALL PRIVILEGES` atas seluruh skema — artinya dapat menghapus dan mengubahnya. Sifat append-only itu baru nyata bila ditegakkan:
+`audit_log` disebut append-only. Menegakkannya ternyata **tidak sesederhana** `REVOKE DELETE, UPDATE ON wakhanza.audit_log FROM wakhanza_rw` di atas fondasi `GRANT ALL PRIVILEGES ON wakhanza.*` — dibuktikan langsung saat implementasi (Fase 0): MariaDB menyatukan (union) hak akses dari seluruh tingkatan yang berlaku (global, database, tabel, kolom). `REVOKE` pada tingkat tabel **tidak dapat mencabut** hak yang diberikan pada tingkat database. Selama `wakhanza_rw` masih memegang `ALL PRIVILEGES` di tingkat skema, `UPDATE`/`DELETE` pada `audit_log` tetap diizinkan oleh grant database itu — perintah `REVOKE` di atas bahkan gagal dijalankan (`ERROR 1147: no such grant`) karena tidak ada entri hak tingkat-tabel untuk dicabut.
 
-```sql
-REVOKE DELETE, UPDATE ON wakhanza.audit_log FROM 'wakhanza_rw'@'localhost';
-```
+Model hak akses yang benar-benar menegakkannya: **jangan pernah memberi `UPDATE`/`DELETE` di tingkat database sama sekali.** Beri `SELECT, INSERT, CREATE, ALTER, INDEX, DROP, REFERENCES` di tingkat skema (aman dan dibutuhkan bersama, termasuk untuk migrasi), lalu beri `UPDATE, DELETE` satu per satu di tingkat tabel untuk setiap tabel yang memang butuh — **kecuali** `audit_log`, yang tidak pernah menerima grant itu di tingkat mana pun. Detail lengkap perintahnya ada di `TECH_STACK.md` §"Dua Koneksi Database yang Sengaja Dipisah".
 
-Setelah itu, kode aplikasi yang mencoba mengubah riwayat audit akan ditolak MariaDB. Pembersihan berkala di §11 memang tidak menyentuh tabel ini, dan sekarang ketentuan itu tidak lagi bergantung pada kode yang berperilaku benar.
+Diverifikasi langsung: `INSERT` ke `audit_log` oleh `wakhanza_rw` berhasil, `UPDATE`/`DELETE` ditolak MariaDB (`ERROR 1142: command denied`), dan tabel lain (`app_setting`, dst.) tetap bisa di-`UPDATE` seperti biasa. Pembersihan berkala di §11 memang tidak menyentuh tabel ini, dan sekarang ketentuan itu tidak lagi bergantung pada kode yang berperilaku benar — atau pada asumsi yang keliru tentang cara kerja `REVOKE`.
 
-Prinsip yang sama dengan pengaman read-only pada `sik`: aturan yang penting ditegakkan oleh mesin, bukan oleh niat baik.
+Prinsip yang sama dengan pengaman read-only pada `sik`: aturan yang penting ditegakkan oleh mesin, bukan oleh niat baik — dan mesin itu sendiri perlu diperiksa langsung, bukan diasumsikan dari baca dokumentasi.
 
 ### 9.6 Sandbox Chromium
 

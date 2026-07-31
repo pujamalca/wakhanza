@@ -1,0 +1,39 @@
+/**
+ * F5.1: jam tenang default 21.00-07.00 WIB. Pesan di luar jam itu ditahan,
+ * bukan dibuang.
+ *
+ * Rekonsiliasi ARCHITECTURE §6.1 vs §6.2: §6.1 menuliskan pengecekan jam
+ * tenang sebagai jeda global di siklus dispatcher ("bila di luar jam tenang
+ * -> tunggu"), tapi §6.2 mengecualikan BOOK_CANCEL dari penahanan itu. Jeda
+ * global tanpa syarat akan ikut menahan BOOK_CANCEL, bertentangan dengan
+ * pengecualiannya sendiri. Diselesaikan di sini dengan menghitung
+ * `scheduled_at` saat ENQUEUE (bukan jeda terpisah di siklus dispatcher):
+ * pemicu selain BOOK_CANCEL yang jatuh di jam tenang dimajukan ke jendela
+ * berikutnya; BOOK_CANCEL selalu memakai event_at apa adanya. Dispatcher
+ * cukup memfilter `scheduled_at <= NOW()` seperti biasa — tidak perlu jeda
+ * global terpisah yang bisa mengecualikan-dari-pengecualian.
+ */
+export function isQuietHours(date: Date, startHour: number, endHour: number): boolean {
+  if (startHour === endHour) return false;
+  const h = date.getHours();
+  if (startHour < endHour) {
+    return h >= startHour && h < endHour;
+  }
+  // Jam tenang melewati tengah malam, mis. 21..7.
+  return h >= startHour || h < endHour;
+}
+
+/** Waktu jam tenang berikutnya BERAKHIR (jendela kirim dibuka lagi). */
+export function nextWindowStart(date: Date, endHour: number): Date {
+  const next = new Date(date);
+  next.setHours(endHour, 0, 0, 0);
+  if (next <= date) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+/** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */
+export function computeScheduledAt(eventAt: Date, triggerCode: string, quietStart: number, quietEnd: number): Date {
+  if (triggerCode === 'BOOK_CANCEL') return eventAt;
+  if (!isQuietHours(eventAt, quietStart, quietEnd)) return eventAt;
+  return nextWindowStart(eventAt, quietEnd);
+}

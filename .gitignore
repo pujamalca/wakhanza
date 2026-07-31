@@ -8,6 +8,10 @@
 .wwebjs_auth/
 .wwebjs_cache/
 
+# Cadangan terenkripsi (scripts/backup.ps1) -- berisi seluruh dump database
+# dan sesi WhatsApp. Terenkripsi bukan alasan untuk taruh di git.
+backups/
+
 # Dependensi & hasil build
 node_modules/
 .next/
