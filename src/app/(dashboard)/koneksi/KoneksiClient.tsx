@@ -59,9 +59,7 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
       <Card>
         <p className="text-sm text-muted-foreground">Status sesi</p>
         <div className="mt-1 flex items-center gap-2">
-          <Badge variant={statusVariant(data.status)} className="text-sm">
-            {data.status}
-          </Badge>
+          <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
         </div>
         {data.phoneNumber && <p className="mt-2 text-sm">Nomor: {data.phoneNumber}</p>}
         {data.status === 'ready' && (
