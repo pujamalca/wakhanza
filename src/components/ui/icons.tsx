@@ -92,6 +92,15 @@ export const IconMegaphone = (p: IconProps) => (
   </Icon>
 );
 
+/** Gelembung percakapan dengan panah balik -- satu-satunya fitur yang membalas, bukan mengirim. */
+export const IconReply = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 12a8 8 0 0 1-8 8H4l2-2.5A8 8 0 1 1 21 12Z" />
+    <path d="M13 9.5 10 12l3 2.5" />
+    <path d="M10 12h5" />
+  </Icon>
+);
+
 export const IconClock = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />

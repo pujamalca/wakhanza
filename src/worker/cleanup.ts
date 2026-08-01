@@ -1,6 +1,6 @@
 import * as cron from 'node-cron';
 import { Op, QueryTypes } from 'sequelize';
-import { Outbox, SendLog, PatientContact } from '@/models';
+import { Outbox, SendLog, PatientContact, AutoReplyLog } from '@/models';
 import { sik } from '@/db/sik';
 import { normalizePhone } from '@/core/phone';
 import { logger, safeError } from '@/lib/logger';
@@ -17,8 +17,15 @@ async function cleanupOldRecords(): Promise<void> {
 
   const deletedOutbox = await Outbox.destroy({ where: { status: 'sent', sentAt: { [Op.lt]: cutoff } } });
   const deletedLogs = await SendLog.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
+  // auto_reply_log tumbuh seiring pesan MASUK -- laju yang tidak dikendalikan
+  // rumah sakit sama sekali, beda dari tabel lain di sini. Ikut dipangkas
+  // dengan masa simpan yang sama.
+  const deletedAutoReply = await AutoReplyLog.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
 
-  logger.info({ deletedOutbox, deletedLogs }, 'pembersihan berkala: outbox & send_log lama dihapus');
+  logger.info(
+    { deletedOutbox, deletedLogs, deletedAutoReply },
+    'pembersihan berkala: outbox, send_log & auto_reply_log lama dihapus',
+  );
 }
 
 /** ARCHITECTURE §11: patient_contact bersumber 'auto' dihitung ulang bila raw_value di sik berubah. */

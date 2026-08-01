@@ -21,6 +21,17 @@ const EDITABLE_KEYS = [
   'auth.login_max_attempts',
   'auth.login_lockout_minutes',
   'schedule.book_remind_hour',
+  // `autoreply.enabled` sengaja TIDAK di sini. Ia dinyalakan lewat
+  // toggleAutoReplyAction di halaman Balasan otomatis, yang mencatat sendiri ke
+  // audit_log dengan aksi bernama jelas (`auto_reply_toggle`) alih-alih
+  // tenggelam sebagai satu nama kunci di dalam daftar `settings_update`.
+  // Perubahan yang membuat sistem mulai menjawab pasien harus bisa dicari di
+  // audit sebagai peristiwanya sendiri.
+  'autoreply.max_per_number_per_hour',
+  'autoreply.fallback_body',
+  'autoreply.fallback_cooldown_minutes',
+  'autoreply.schedule_max_rows',
+  'autoreply.log_inbound_text',
 ] as const;
 
 export async function GET() {

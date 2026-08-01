@@ -24,6 +24,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: N
     items: [
       { href: '/broadcast', label: 'Broadcast', icon: 'megaphone', adminOnly: true },
       { href: '/broadcast-terjadwal', label: 'Broadcast terjadwal', icon: 'clock', adminOnly: true },
+      { href: '/balasan-otomatis', label: 'Balasan otomatis', icon: 'reply', adminOnly: true },
       { href: '/template', label: 'Template', icon: 'file' },
     ],
   },

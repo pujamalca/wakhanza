@@ -1,4 +1,10 @@
-import { renderTemplate, findUnknownVariables, sanitizeValue, extractVariables } from './template';
+import {
+  renderTemplate,
+  findUnknownVariables,
+  sanitizeValue,
+  extractVariables,
+  AUTOREPLY_TEMPLATE_VARIABLES,
+} from './template';
 
 describe('renderTemplate', () => {
   it('mengganti variabel yang dikenal', () => {
@@ -65,5 +71,43 @@ describe('sanitizeValue', () => {
 
   it('membuang karakter kendali', () => {
     expect(sanitizeValue('Budi\x00\x1FSantoso')).toBe('Budi Santoso');
+  });
+});
+
+describe('variabel jadwal berbaris banyak', () => {
+  const jadwal = '*Senin*\n- 14.01-20.00  dr. Rita (Poliklinik Jantung)';
+
+  it('mempertahankan baris baru -- sanitizeValue justru membuangnya', () => {
+    expect(renderTemplate('Jadwal:\n\n{jadwal_dokter}', { jadwal_dokter: jadwal })).toBe(`Jadwal:\n\n${jadwal}`);
+  });
+
+  it('tidak dipotong di 60 karakter seperti nilai biasa', () => {
+    const panjang = Array.from({ length: 10 }, (_, i) => `- baris ke-${i} yang cukup panjang`).join('\n');
+    expect(renderTemplate('{jadwal_dokter}', { jadwal_dokter: panjang })).toBe(panjang);
+  });
+
+  it('variabel BIASA tetap disanitasi, pengecualiannya tidak bocor', () => {
+    expect(renderTemplate('{nama_pasien}', { nama_pasien: 'Budi\nSantoso' })).toBe('Budi Santoso');
+  });
+
+  it('aturan satu lintasan tetap berlaku: {kontak_rs} di dalam jadwal tidak ikut diganti', () => {
+    const jahat = '- 08.00  dr. {kontak_rs}';
+    expect(
+      renderTemplate('{jadwal_dokter}\nKontak: {kontak_rs}', { jadwal_dokter: jahat, kontak_rs: '0751-123' }),
+    ).toBe('- 08.00  dr. {kontak_rs}\nKontak: 0751-123');
+  });
+});
+
+describe('daftar variabel per konteks', () => {
+  it('template pemicu menolak variabel khusus balasan otomatis', () => {
+    expect(findUnknownVariables('{jadwal_dokter}')).toEqual(['jadwal_dokter']);
+  });
+
+  it('template balasan otomatis menerimanya', () => {
+    expect(findUnknownVariables('{jadwal_dokter} {daftar_poli}', AUTOREPLY_TEMPLATE_VARIABLES)).toEqual([]);
+  });
+
+  it('balasan otomatis menolak {nama_pasien} -- pengirimnya belum tentu pasien terdaftar', () => {
+    expect(findUnknownVariables('{nama_pasien}', AUTOREPLY_TEMPLATE_VARIABLES)).toEqual(['nama_pasien']);
   });
 });

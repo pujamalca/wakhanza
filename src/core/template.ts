@@ -10,7 +10,11 @@
  */
 const VAR_RE = /\{(\w+)\}/g;
 
-export const KNOWN_TEMPLATE_VARIABLES = [
+/**
+ * Variabel untuk ketujuh template pemicu (`template`, satu baris per
+ * trigger_code). Semuanya mengacu ke SATU kunjungan yang sedang terjadi.
+ */
+export const TRIGGER_TEMPLATE_VARIABLES = [
   'nama_pasien',
   'no_rm',
   'nama_rs',
@@ -24,15 +28,51 @@ export const KNOWN_TEMPLATE_VARIABLES = [
   'jenis_layanan',
 ] as const;
 
-export type TemplateVariable = (typeof KNOWN_TEMPLATE_VARIABLES)[number];
-
 /**
  * BROADCAST tidak terikat satu kunjungan -- {no_antrian}/{nama_poli}/
  * {nama_dokter}/{tanggal}/{jam}/{jenis_layanan} mengacu ke SATU kejadian
  * spesifik yang tidak well-defined untuk segmen pasien merentang banyak
- * kunjungan. Subset ini sengaja lebih sempit dari KNOWN_TEMPLATE_VARIABLES.
+ * kunjungan. Subset ini sengaja lebih sempit dari TRIGGER_TEMPLATE_VARIABLES.
  */
 export const BROADCAST_TEMPLATE_VARIABLES = ['nama_pasien', 'no_rm', 'nama_rs', 'alamat_rs', 'kontak_rs'] as const;
+
+/**
+ * BALASAN OTOMATIS berjalan ke arah sebaliknya: dipicu pesan MASUK dari nomor
+ * yang belum tentu dikenali sebagai pasien mana pun, jadi {nama_pasien}/{no_rm}
+ * sengaja TIDAK tersedia -- membalas dengan nama pasien ke nomor yang cuma
+ * "nomor yang mengirim WhatsApp" berarti menerka identitas, dan nomor bisa
+ * berpindah tangan.
+ *
+ * Sebagai gantinya ada tiga variabel yang isinya dibaca langsung dari sik saat
+ * membalas (bukan dari kunjungan): {jadwal_dokter}, {jadwal_hari_ini},
+ * {daftar_poli}. Ketiganya informasi layanan yang memang diumumkan RS, bukan
+ * data satu pasien -- lihat khanza/jadwalDokter.ts.
+ */
+export const AUTOREPLY_TEMPLATE_VARIABLES = [
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+  'tanggal',
+  'jam',
+  'jadwal_dokter',
+  'jadwal_hari_ini',
+  'daftar_poli',
+] as const;
+
+/**
+ * Gabungan seluruh konteks -- INI yang dimengerti `renderTemplate`, bukan
+ * daftar yang boleh dipakai di satu tempat tertentu. Pembatasan per konteks
+ * terjadi saat template DISIMPAN lewat findUnknownVariables(body, <daftar>),
+ * jadi satu renderer tetap melayani tiga konteks tanpa cabang.
+ */
+export const KNOWN_TEMPLATE_VARIABLES = [
+  ...new Set([...TRIGGER_TEMPLATE_VARIABLES, ...BROADCAST_TEMPLATE_VARIABLES, ...AUTOREPLY_TEMPLATE_VARIABLES]),
+] as const;
+
+export type TemplateVariable =
+  | (typeof TRIGGER_TEMPLATE_VARIABLES)[number]
+  | (typeof BROADCAST_TEMPLATE_VARIABLES)[number]
+  | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number];
 
 export function extractVariables(body: string): string[] {
   const names = new Set<string>();
@@ -44,7 +84,7 @@ export function extractVariables(body: string): string[] {
 }
 
 /** Dipanggil saat template DISIMPAN, bukan saat dikirim (ARCHITECTURE §5.3). */
-export function findUnknownVariables(body: string, allowed: readonly string[] = KNOWN_TEMPLATE_VARIABLES): string[] {
+export function findUnknownVariables(body: string, allowed: readonly string[] = TRIGGER_TEMPLATE_VARIABLES): string[] {
   const known = new Set<string>(allowed);
   return extractVariables(body).filter((v) => !known.has(v));
 }
@@ -59,9 +99,29 @@ export function sanitizeValue(value: string, maxLength = 60): string {
   return cleaned.slice(0, maxLength);
 }
 
+/**
+ * Variabel yang isinya SUDAH dirangkai oleh kode kita sendiri dari beberapa
+ * kolom terstruktur, berbentuk banyak baris, dan karena itu dikecualikan dari
+ * sanitizeValue -- yang justru bertugas membuang baris baru dan memotong di 60
+ * karakter.
+ *
+ * Pengecualian ini aman HANYA karena perangkainya (khanza/jadwalDokter.ts)
+ * memanggil sanitizeValue sendiri untuk tiap nama dokter/poli sebelum
+ * menyusunnya jadi daftar. Jangan pernah menambahkan variabel ke sini yang
+ * isinya datang langsung dari satu kolom sik tanpa melewati sanitizeValue --
+ * itu persis lubang §9.2 yang sanitizeValue ada untuk menutupnya.
+ *
+ * Aturan satu lintasan tetap utuh: String.replace dengan callback memindai
+ * string ASLI sekali kiri-ke-kanan dan tidak pernah memeriksa ulang hasil
+ * substitusi, jadi `{kontak_rs}` yang kebetulan ada di dalam daftar jadwal
+ * tetap tampil apa adanya.
+ */
+const MULTILINE_VARIABLES = new Set<string>(['jadwal_dokter', 'jadwal_hari_ini', 'daftar_poli']);
+
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {
   return body.replace(VAR_RE, (_match, key: string) => {
     const value = vars[key as TemplateVariable];
-    return value !== undefined ? sanitizeValue(value) : '';
+    if (value === undefined) return '';
+    return MULTILINE_VARIABLES.has(key) ? value : sanitizeValue(value);
   });
 }

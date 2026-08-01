@@ -108,9 +108,37 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
   };
 }
 
+/**
+ * Konteks untuk BALASAN OTOMATIS: isi pesannya berasal dari baris
+ * `auto_reply_rule` yang cocok, bukan dari `template` maupun ketikan staf saat
+ * itu juga. Sesudah ini tetap lewat enqueueMessage() yang sama seperti sembilan
+ * pemicu lain -- termasuk pemeriksaan opt-out, yang artinya nomor yang pernah
+ * membalas STOP tidak akan menerima balasan otomatis. Itu disengaja: STOP
+ * berarti berhenti, dan menafsirkannya lebih longgar untuk satu jenis pesan
+ * saja akan membuat janji STOP jadi bersyarat.
+ */
+export async function loadAutoReplyContext(body: string): Promise<PipelineContext> {
+  const shared = await loadSharedSettings();
+  return {
+    triggerCode: 'AUTO_REPLY',
+    template: { body },
+    genericTemplate: shared.genericTemplate ?? body,
+    identity: shared.identity,
+    quietStart: shared.quietStart,
+    quietEnd: shared.quietEnd,
+    sensitivePoli: shared.sensitivePoli,
+    sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
+  };
+}
+
 export interface EnqueueInput {
   idempotencyKey: string;
-  noRkmMedis: string;
+  /**
+   * null hanya untuk AUTO_REPLY: yang mengirim pesan adalah sebuah NOMOR, dan
+   * nomor itu belum tentu terhubung ke pasien mana pun di sik.
+   */
+  noRkmMedis: string | null;
   rawPhone: string | null;
   eventAt: Date;
   kdPoli?: string | null;
@@ -118,6 +146,18 @@ export interface EnqueueInput {
   vars: Partial<Record<TemplateVariable, string>>;
   /** Hanya diisi BROADCAST -- menautkan baris outbox ke broadcast_campaign asalnya. */
   campaignId?: number | null;
+  /**
+   * Nomor tujuan yang SUDAH pasti, melewati resolvePhone sepenuhnya.
+   *
+   * Dipakai AUTO_REPLY saja. Untuk sembilan pemicu lain, nomor tujuan adalah
+   * hasil tebakan atas kolom `pasien.no_tlp` yang diketik bebas -- di situlah
+   * resolvePhone bekerja. Untuk balasan otomatis, tujuannya adalah nomor yang
+   * BARU SAJA mengirim pesan lewat WhatsApp: tidak ada yang perlu dinormalisasi
+   * (WhatsApp sudah menyerahkannya dalam bentuk E.164), dan tidak ada pasien
+   * yang boleh diklaim memilikinya. Melewatkannya ke resolvePhone justru akan
+   * menulis baris patient_contact atas nama pasien yang belum tentu benar.
+   */
+  phoneOverride?: string | null;
 }
 
 /**
@@ -126,7 +166,17 @@ export interface EnqueueInput {
  * hanya query sik (src/khanza/*.ts) dan pemetaan variabel template.
  */
 export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext): Promise<void> {
-  const contact = await resolvePhone(input.noRkmMedis, input.rawPhone);
+  let phoneE164: string | null;
+  if (input.phoneOverride) {
+    phoneE164 = input.phoneOverride;
+  } else if (input.noRkmMedis) {
+    phoneE164 = (await resolvePhone(input.noRkmMedis, input.rawPhone)).phoneE164;
+  } else {
+    // Tanpa nomor pasti dan tanpa pasien untuk dicari nomornya, tidak ada
+    // tujuan yang bisa ditentukan. Tetap dicatat sebagai baris outbox
+    // skipped_no_contact di bawah, bukan dibuang diam-diam.
+    phoneE164 = null;
+  }
 
   const privacyCheck = checkPrivacy(
     { kdPoli: input.kdPoli, kdJenisPrw: input.kdJenisPrw },
@@ -141,9 +191,9 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
   const body = appendUniqueCode(rendered, input.idempotencyKey, ctx.uniqueCodeTemplate);
 
   let status: OutboxStatus = 'pending';
-  if (!contact.phoneE164) {
+  if (!phoneE164) {
     status = 'skipped_no_contact';
-  } else if (await OptOut.findByPk(contact.phoneE164)) {
+  } else if (await OptOut.findByPk(phoneE164)) {
     status = 'skipped_opt_out';
   }
 
@@ -156,7 +206,7 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
         triggerCode: ctx.triggerCode,
         campaignId: input.campaignId ?? null,
         noRkmMedis: input.noRkmMedis,
-        phoneE164: contact.phoneE164,
+        phoneE164: phoneE164,
         body,
         status,
         eventAt: input.eventAt,
@@ -166,7 +216,7 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     );
   } catch (err) {
     logger.error(
-      { triggerCode: ctx.triggerCode, noRkmMedis: input.noRkmMedis, phone: maskPhone(contact.phoneE164), ...safeError(err) },
+      { triggerCode: ctx.triggerCode, noRkmMedis: input.noRkmMedis, phone: maskPhone(phoneE164), ...safeError(err) },
       'gagal enqueue satu baris outbox',
     );
   }

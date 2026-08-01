@@ -18,6 +18,7 @@ import {
   IconActivity,
   IconShield,
   IconMenu,
+  IconReply,
   IconX,
   type IconProps,
 } from './ui/icons';
@@ -37,6 +38,7 @@ export type NavIcon =
   | 'ban'
   | 'megaphone'
   | 'clock'
+  | 'reply'
   | 'settings'
   | 'activity'
   | 'shield';
@@ -50,6 +52,7 @@ const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   ban: IconBan,
   megaphone: IconMegaphone,
   clock: IconClock,
+  reply: IconReply,
   settings: IconSettings,
   activity: IconActivity,
   shield: IconShield,

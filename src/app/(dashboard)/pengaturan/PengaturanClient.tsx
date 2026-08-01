@@ -60,6 +60,36 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
     title: 'Jadwal',
     fields: [{ key: 'schedule.book_remind_hour', label: 'Jam kirim pengingat H-1 (0-23)' }],
   },
+  {
+    // Sakelar utamanya (autoreply.enabled) sengaja TIDAK ada di sini -- ia
+    // tinggal di halaman Balasan otomatis, di mana konsekuensinya dijelaskan
+    // dan aturannya terlihat. Menyalakan sistem yang menjawab pasien tidak
+    // boleh jadi salah satu dari dua puluh kotak isian yang seragam.
+    title: 'Balasan otomatis',
+    fields: [
+      {
+        key: 'autoreply.max_per_number_per_hour',
+        label: 'Kuota balasan per nomor per jam',
+        hint: 'Melindungi nomor RS: satu orang yang mengirim puluhan pesan tidak menghasilkan puluhan balasan beruntun.',
+      },
+      {
+        key: 'autoreply.fallback_body',
+        label: 'Pesan saat tak ada yang cocok',
+        hint: 'Kosongkan agar DIAM. Pesan yang tidak dikenali sering pertanyaan medis sungguhan yang lebih baik dibaca petugas.',
+      },
+      { key: 'autoreply.fallback_cooldown_minutes', label: 'Jeda pesan cadangan (menit)' },
+      {
+        key: 'autoreply.schedule_max_rows',
+        label: 'Batas baris jadwal per pesan',
+        hint: 'Jadwal yang melebihi ini dipotong dengan catatan, bukan dibiarkan terpotong sendiri oleh WhatsApp.',
+      },
+      {
+        key: 'autoreply.log_inbound_text',
+        label: 'Simpan teks pesan pasien',
+        hint: '1 = simpan (maks 120 karakter) untuk menyetel kata kunci. Default 0 — pesan pasien bisa berisi keluhan medis, dan tabel log ini bukan rekam medis.',
+      },
+    ],
+  },
 ];
 
 async function fetchSettings(): Promise<Record<string, string>> {

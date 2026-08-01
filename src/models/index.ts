@@ -11,3 +11,5 @@ export { AppSetting, getSetting, getSettingNumber, getSettingBool, getSettingJso
 export { BroadcastCampaign } from './BroadcastCampaign';
 export { BroadcastTemplate } from './BroadcastTemplate';
 export { BroadcastSchedule } from './BroadcastSchedule';
+export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule';
+export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';

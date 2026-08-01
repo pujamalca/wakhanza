@@ -59,4 +59,20 @@ describe('computeScheduledAt', () => {
     const eventAt = at(22);
     expect(computeScheduledAt(eventAt, 'BOOK_CANCEL', 21, 7)).toEqual(eventAt);
   });
+
+  it('AUTO_REPLY TIDAK ditunda -- pasien sedang menunggu jawaban atas pesannya sendiri', () => {
+    const eventAt = at(23);
+    expect(computeScheduledAt(eventAt, 'AUTO_REPLY', 21, 7)).toEqual(eventAt);
+  });
+
+  it('AUTO_REPLY di dini hari pun langsung, bukan ditahan sampai pagi', () => {
+    const eventAt = at(2);
+    expect(computeScheduledAt(eventAt, 'AUTO_REPLY', 21, 7)).toEqual(eventAt);
+  });
+
+  it('pengecualian jam tenang tidak bocor ke pemicu lain', () => {
+    const eventAt = at(23);
+    expect(computeScheduledAt(eventAt, 'BROADCAST', 21, 7)).not.toEqual(eventAt);
+    expect(computeScheduledAt(eventAt, 'QUEUE_REG', 21, 7)).not.toEqual(eventAt);
+  });
 });

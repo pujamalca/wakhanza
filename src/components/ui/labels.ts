@@ -68,6 +68,7 @@ export const TRIGGER_LABEL: Record<string, string> = {
   PHARMACY_READY: 'Obat siap',
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
+  AUTO_REPLY: 'Balasan otomatis',
 };
 
 /** Kode yang belum dikenal dikembalikan apa adanya, bukan jadi string kosong. */

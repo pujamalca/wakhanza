@@ -2,12 +2,16 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox } from '@/models';
 import { logger, safeError, maskPhone } from '@/lib/logger';
+import { handleInboundMessageSafely } from './autoReply';
 
 /**
- * F5.5 / ARCHITECTURE §8: worker tetap memasang pendengar khusus kata kunci
- * berhenti meski versi 1 tidak melayani percakapan. Pesan masuk LAIN
- * diabaikan tanpa balasan -- membalas otomatis untuk hal medis butuh
- * tanggung jawab klinis di luar cakupan perangkat lunak ini.
+ * F5.5 / ARCHITECTURE §8: kata kunci berhenti selalu didengarkan, dan selalu
+ * diperiksa PALING DULU -- sebelum balasan otomatis mendapat giliran.
+ *
+ * Urutan ini bukan kebetulan. Pasien yang mengetik "stop" harus berhenti
+ * berlangganan, bukan memicu pencocokan kata kunci yang kebetulan mengandung
+ * kata itu; dan sebuah aturan balasan yang keliru ditulis staf tidak boleh
+ * bisa menyandera permintaan berhenti.
  */
 const STOP_RE = /^\s*(stop|berhenti|unsubscribe)\s*$/i;
 const CONFIRMATION_TEXT =
@@ -87,20 +91,36 @@ export async function initWaClient(): Promise<Client> {
   client.on('message', async (message) => {
     if (message.fromMe) return;
     if (!message.from.endsWith('@c.us')) return; // hanya obrolan perorangan, bukan grup
-    if (!STOP_RE.test(message.body)) return;
 
     const phoneE164 = message.from.replace('@c.us', '');
-    try {
-      await OptOut.upsert({ phoneE164, source: 'reply' });
-      // §9.8: outbox yang masih menunggu ke nomor ini langsung dilewati --
-      // jangan tunggu pemeriksaan kedua di dispatcher untuk baris yang
-      // sudah nyata-nyata diketahui harus berhenti sekarang.
-      await Outbox.update({ status: 'skipped_opt_out' }, { where: { phoneE164, status: 'pending' } });
-      await message.reply(CONFIRMATION_TEXT);
-      logger.info({ phone: maskPhone(phoneE164) }, 'permintaan berhenti berlangganan diterima');
-    } catch (err) {
-      logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti berlangganan');
+
+    if (STOP_RE.test(message.body)) {
+      try {
+        await OptOut.upsert({ phoneE164, source: 'reply' });
+        // §9.8: outbox yang masih menunggu ke nomor ini langsung dilewati --
+        // jangan tunggu pemeriksaan kedua di dispatcher untuk baris yang
+        // sudah nyata-nyata diketahui harus berhenti sekarang.
+        await Outbox.update({ status: 'skipped_opt_out' }, { where: { phoneE164, status: 'pending' } });
+        await message.reply(CONFIRMATION_TEXT);
+        logger.info({ phone: maskPhone(phoneE164) }, 'permintaan berhenti berlangganan diterima');
+      } catch (err) {
+        logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti berlangganan');
+      }
+      return;
     }
+
+    // Balasan otomatis (worker/autoReply.ts). Diam sepenuhnya selama
+    // app_setting `autoreply.enabled` masih '0' -- yaitu perilaku versi 1 yang
+    // satu arah, tidak berubah sampai rumah sakit menyalakannya sendiri.
+    //
+    // message.id._serialized dipakai sebagai kunci idempoten, jadi pesan yang
+    // sama diserahkan dua kali oleh whatsapp-web.js (lazim setelah sesi
+    // dipulihkan) tidak menghasilkan dua balasan.
+    await handleInboundMessageSafely({
+      waMessageId: message.id?._serialized ?? `${message.from}:${message.timestamp}`,
+      phoneE164,
+      text: message.body ?? '',
+    });
   });
 
   await client.initialize();

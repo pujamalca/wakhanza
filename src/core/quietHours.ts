@@ -31,9 +31,22 @@ export function nextWindowStart(date: Date, endHour: number): Date {
   return next;
 }
 
+/**
+ * Pemicu yang jam tenangnya dilewati, dan alasannya berbeda satu sama lain:
+ *
+ * - BOOK_CANCEL (§6.2): pasien yang bookingnya batal harus tahu SEBELUM ia
+ *   berangkat besok pagi. Menahannya sampai jam 07.00 menghapus gunanya.
+ * - AUTO_REPLY: ini BALASAN atas pesan yang pasiennya sendiri kirim barusan --
+ *   ia sedang memegang ponselnya dan menunggu jawaban. Menahannya sampai pagi
+ *   membuat jawaban datang sembilan jam setelah pertanyaannya, saat pasien
+ *   sudah lupa pernah bertanya. Jam tenang ada untuk melindungi pasien dari
+ *   pesan yang TIDAK ia minta; balasan atas pertanyaannya sendiri bukan itu.
+ */
+const BYPASS_QUIET_HOURS = new Set(['BOOK_CANCEL', 'AUTO_REPLY']);
+
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */
 export function computeScheduledAt(eventAt: Date, triggerCode: string, quietStart: number, quietEnd: number): Date {
-  if (triggerCode === 'BOOK_CANCEL') return eventAt;
+  if (BYPASS_QUIET_HOURS.has(triggerCode)) return eventAt;
   if (!isQuietHours(eventAt, quietStart, quietEnd)) return eventAt;
   return nextWindowStart(eventAt, quietEnd);
 }

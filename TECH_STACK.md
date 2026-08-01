@@ -82,6 +82,11 @@ GRANT UPDATE, DELETE ON wakhanza.app_setting       TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.schema_migrations TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.broadcast_schedule TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.broadcast_template TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.auto_reply_rule    TO 'wakhanza_rw'@'localhost';
+-- auto_reply_log dapat DELETE tapi TIDAK UPDATE: ia dipangkas berkala oleh
+-- worker/cleanup.ts (tumbuh seiring pesan masuk), tapi satu baris log yang
+-- sudah tertulis tidak pernah ditulis ulang.
+GRANT DELETE ON wakhanza.auto_reply_log             TO 'wakhanza_rw'@'localhost';
 -- audit_log dan broadcast_campaign sengaja TIDAK PERNAH diberi UPDATE/DELETE,
 -- di level mana pun -- keduanya insert-only by design (jejak akuntabilitas).
 ```
