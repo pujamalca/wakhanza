@@ -11,6 +11,22 @@ import type { NextAuthConfig } from 'next-auth';
  */
 export const authConfig = {
   pages: { signIn: '/login' },
+  /**
+   * WAJIB, dan sempat luput sampai dashboard diuji lewat `npm start`.
+   *
+   * Auth.js v5 hanya mengaktifkan sendiri kepercayaan pada Host header saat
+   * `next dev`. Pada build produksi -- persis yang dijalankan PM2 lewat
+   * `ecosystem.config.js` -- tanpa baris ini SETIAP permintaan ke /api/auth/*
+   * ditolak `UntrustedHost` dan dijawab HTTP 500, sehingga tidak seorang pun
+   * bisa masuk. Perbedaan dev/produksi ini tidak pernah muncul selama
+   * pengujian memakai `npm run dev`.
+   *
+   * Aman di sini karena topologinya tetap: satu server RS, prosesnya diikat ke
+   * 127.0.0.1 (`next start -H 127.0.0.1`), tidak melayani banyak host dan
+   * tidak menerima Host header dari luar mesin. `NEXTAUTH_URL` di .env tetap
+   * jadi sumber URL kanonik untuk penautan balik.
+   */
+  trustHost: true,
   providers: [],
   callbacks: {
     authorized({ auth: session, request }) {
