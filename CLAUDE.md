@@ -43,7 +43,7 @@ npm run verify:db         # buktikan sik menolak tulisan, dan audit_log append-o
 npm run verify:plans      # EXPLAIN tiap query poller; gagal bila ada type:ALL selain booking_registrasi
 npm run poll:dryrun       # cetak pesan yang AKAN terkirim untuk SEMUA pemicu tanpa mengirim/menulis apa pun
 npm run seed:admin -- <username> "<nama>" <password>   # buat user dashboard pertama (role admin)
-npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini saja (jalankan ulang tiap sesi WA baru)
+npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 npx jest                  # semua test; `npx jest core/phone` untuk satu suite
 npx tsc --noEmit
 npm run lint
@@ -51,7 +51,13 @@ npm run build
 npm audit --omit=dev      # lihat "Penyesuaian Implementasi" TECH_STACK.md -- tidak akan pernah 0 tanpa breaking change, dan itu didokumentasikan sengaja
 ```
 
-Produksi: `ecosystem.config.js` (PM2, dua app: `wakhanza-worker` fork-mode 1 instance, `wakhanza-web`). `scripts/backup.ps1` + `scripts/restore-backup.ps1` untuk cadangan terenkripsi AES-256 database + sesi WhatsApp — **sudah diuji langsung** (dekripsi, ekstraksi, dan restore sungguhan ke database uji, lihat riwayat kerja Fase 4).
+Produksi: `ecosystem.config.js` (PM2, dua app: `wakhanza-worker` fork-mode 1 instance, `wakhanza-web`) -- `pm2 start ecosystem.config.js` lalu `pm2 save`. **Tiga jebakan Windows di jalur ini, ketiganya baru ketahuan saat PM2 benar-benar dipakai** (`npm run worker` tidak pernah menyentuhnya) dan ketiganya sudah diperbaiki:
+
+1. **`script` tidak boleh menunjuk `node_modules/.bin/<apa pun>`** -- berkas di `.bin` tanpa ekstensi adalah skrip `/bin/sh` (npm menaruh pembungkus `.cmd`/`.ps1` terpisah untuk Windows), sedangkan PM2 menjalankan `script` dengan node -> `SyntaxError: missing ) after argument list`, berulang tanpa henti karena `autorestart`. Kena pada KEDUA app. Sekarang menunjuk berkas JS/TS sungguhan + `interpreter: 'node'` eksplisit.
+2. **Worker memakai `node --import tsx berkas.ts`, bukan CLI `tsx`** -- CLI menjalankan kode di proses ANAK, sehingga PM2 hanya mengawasi pembungkusnya: `max_memory_restart: '800M'` akan mengukur pembungkus yang selalu kecil alih-alih Chromium yang merembes (satu-satunya alasan angka itu ada), dan SIGTERM berhenti di pembungkus tanpa sampai ke handler shutdown yang menutup sesi WhatsApp dan pool database.
+3. **`.env`/`.wwebjs_auth` wajib memberi akses ke SYSTEM** -- lihat TECH_STACK.md §"Izin Berkas". Gejalanya menyesatkan: worker mati berulang dengan `SIK_DB_HOST wajib diisi` padahal berkasnya ada.
+
+Diverifikasi: kedua app `online` dengan **0 restart**, dan satu balasan otomatis benar-benar terkirim ke nomor uji oleh worker yang dikelola PM2 (`send_log.outcome='sent'`). `scripts/backup.ps1` + `scripts/restore-backup.ps1` untuk cadangan terenkripsi AES-256 database + sesi WhatsApp — **sudah diuji langsung** (dekripsi, ekstraksi, dan restore sungguhan ke database uji, lihat riwayat kerja Fase 4).
 
 `verify:db` dan `verify:plans` bukan pemeriksaan opsional — keduanya menegakkan dua batasan paling gampang dilanggar tanpa sadar: menulis ke `sik`, dan query yang diam-diam berubah dari index seek menjadi full table scan. Jalankan keduanya setiap kali koneksi atau query poller disentuh.
 

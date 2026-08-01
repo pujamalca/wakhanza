@@ -269,10 +269,22 @@ Worker dijalankan sebagai akun layanan khusus, bukan Administrator.
 
 ```powershell
 icacls .env            /inheritance:r /grant:r "$env:USERNAME:(R)"
+icacls .env                            /grant:r "SYSTEM:(R)"
 icacls .wwebjs_auth    /inheritance:r /grant:r "$env:USERNAME:(F)" /T
+icacls .wwebjs_auth                    /grant:r "SYSTEM:(F)"       /T
 ```
 
 `.wwebjs_auth` berisi sesi WhatsApp aktif — setara kredensial. Siapa pun yang menyalinnya dapat menyamar sebagai nomor WhatsApp rumah sakit.
+
+**Baris SYSTEM itu wajib, dan awalnya tidak ada.** PM2 di Windows lazim terpasang sebagai service (`pm2.exe`, StartType Automatic) sehingga **proses yang diluncurkannya berjalan sebagai SYSTEM** — terukur lewat `whoami` dari dalam proses yang diluncurkan PM2, bukan dikira; `process.env.USERNAME` di sana tetap menunjukkan akun biasa dan menyesatkan. Tanpa ACE untuk SYSTEM, `/inheritance:r` membuangnya dan `wakhanza-worker` mati berulang dengan galat yang menunjuk ke arah yang salah:
+
+```
+Error: Variabel lingkungan SIK_DB_HOST wajib diisi (lihat .env.example)
+```
+
+Menyesatkan karena berkasnya ADA dan `statSync()` atasnya berhasil — yang gagal hanya membaca ISINYA (`EPERM`), dan `process.loadEnvFile()` menelan bedanya lalu tampak seperti `.env` tidak ditemukan. `npm run worker` tidak pernah memperlihatkannya karena dijalankan dari shell akun biasa yang memang punya akses.
+
+Menambahkan SYSTEM tidak melemahkan apa pun yang sungguh dilindungi: proses SYSTEM sudah bisa mengambil alih kepemilikan berkas mana pun di mesin itu (`SeTakeOwnership`/`SeBackupPrivilege`), jadi mengecualikannya tidak menghalangi penyerang — ia hanya mematahkan proses produksi sendiri. Sasaran pengerasan ini tetap tertutup: akun interaktif LAIN di server RS tidak bisa membaca kredensial database maupun sesi WhatsApp. Bila daemon PM2 dijalankan sebagai akun layanan khusus (bukan SYSTEM), ganti akun itu di `scripts/harden-permissions.ps1`.
 
 Saat proses mulai, worker **wajib memverifikasi** bahwa `SIK_DB_USER` benar-benar tidak punya hak tulis, dengan mencoba operasi tulis pada tabel sementara dan memastikan operasi itu ditolak. Bila justru berhasil, worker berhenti dan menolak jalan. Salah konfigurasi kredensial adalah satu-satunya cara prinsip read-only bisa bocor — jadi periksa, jangan percaya.
 
