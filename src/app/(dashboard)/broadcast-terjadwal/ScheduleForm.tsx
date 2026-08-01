@@ -186,9 +186,9 @@ export function ScheduleForm({
       {!isFollowup && repeatKind !== 'once' && (
         <div className="rounded-md border border-amber-600/40 bg-amber-50 p-2 text-xs dark:border-amber-500/40 dark:bg-amber-950">
           Filter di atas memakai <span className="font-medium">jendela berjalan</span>, dan jadwal ini berulang. Pasien yang sama
-          akan dikirimi <span className="font-medium">setiap kali</span> jadwal jalan selama ia masih di dalam jendela. Untuk
-          &ldquo;kirim sekali, sekian hari setelah kunjungan&rdquo;, pilih <span className="font-medium">Tindak lanjut</span> di
-          filter di atas.
+          akan dikirimi <span className="font-medium">setiap kali</span>{' '}
+          jadwal jalan selama ia masih di dalam jendela. Untuk &ldquo;kirim sekali, sekian hari setelah kunjungan&rdquo;, pilih{' '}
+          <span className="font-medium">Tindak lanjut</span> di filter di atas.
         </div>
       )}
 
