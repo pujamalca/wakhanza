@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { AuditLog } from '@/models';
-import { PageHeader, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PageHeader, EmptyState, Pagination, IconShield, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 const PAGE_SIZE = 50;
 
@@ -9,7 +9,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const session = await auth();
   // Nav menyembunyikan tautan ini untuk operator, tapi itu UI saja -- akses
   // langsung lewat URL harus tetap ditolak di server (IMPLEMENTATION_PLAN Fase 3 DoD).
-  if (session?.user.role !== 'admin') redirect('/koneksi');
+  if (session?.user.role !== 'admin') redirect('/ringkasan');
 
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
@@ -48,28 +48,17 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5}>
-                  <EmptyState>Belum ada riwayat.</EmptyState>
+                  <EmptyState icon={<IconShield className="h-5 w-5" />} title="Belum ada riwayat">
+                    Setiap tindakan petugas -- kirim ulang, ubah template, koreksi nomor -- tercatat di sini secara otomatis.
+                  </EmptyState>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      <div className="mt-3 flex items-center gap-3 text-sm">
-        <span className="text-muted-foreground">
-          Halaman {page} / {totalPages} ({count} baris)
-        </span>
-        {page > 1 && (
-          <a className="text-primary underline underline-offset-2" href={`/audit?page=${page - 1}`}>
-            Sebelumnya
-          </a>
-        )}
-        {page < totalPages && (
-          <a className="text-primary underline underline-offset-2" href={`/audit?page=${page + 1}`}>
-            Berikutnya
-          </a>
-        )}
-      </div>
+
+      <Pagination page={page} totalPages={totalPages} count={count} hrefFor={(p) => `/audit?page=${p}`} unit="tindakan" />
     </div>
   );
 }

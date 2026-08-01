@@ -9,7 +9,7 @@ export async function loginAction(formData: FormData): Promise<void> {
     await signIn('credentials', {
       username: formData.get('username'),
       password: formData.get('password'),
-      redirectTo: '/koneksi',
+      redirectTo: '/ringkasan',
     });
   } catch (err) {
     // signIn() sendiri melempar sinyal redirect internal saat SUKSES -- jangan

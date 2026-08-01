@@ -2,7 +2,7 @@ import { auth } from '@/auth';
 import { OptOut } from '@/models';
 import { AddOptOutForm } from './AddOptOutForm';
 import { removeOptOutAction } from './actions';
-import { PageHeader, Button, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PageHeader, Button, EmptyState, IconBan, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 export default async function DaftarTolakPage() {
   const session = await auth();
@@ -56,7 +56,9 @@ export default async function DaftarTolakPage() {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={isAdmin ? 5 : 4}>
-                  <EmptyState>Belum ada nomor yang berhenti berlangganan.</EmptyState>
+                  <EmptyState icon={<IconBan className="h-5 w-5" />} title="Belum ada yang berhenti berlangganan">
+                    Nomor masuk ke sini otomatis begitu pasien membalas STOP, atau bisa ditambahkan manual oleh admin.
+                  </EmptyState>
                 </td>
               </tr>
             )}

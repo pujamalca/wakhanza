@@ -18,4 +18,7 @@ export async function resendOutboxAction(id: number): Promise<void> {
   await row.update({ status: 'pending', scheduledAt: new Date(), lastError: null });
   await logAudit(session!.user.username, 'outbox_resend', String(id), `trigger_code=${row.triggerCode}`);
   revalidatePath('/antrean');
+  // Ringkasan menampilkan daftar "perlu ditinjau" dengan tombol kirim ulang yang
+  // sama; tanpa baris ini baris yang baru diantre ulang tetap tampil di sana.
+  revalidatePath('/ringkasan');
 }

@@ -22,7 +22,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   const session = await auth();
   // Nav menyembunyikan tautan ini untuk operator, tapi akses langsung lewat
   // URL harus tetap ditolak di server (pola sama seperti /audit).
-  if (session?.user.role !== 'admin') redirect('/koneksi');
+  if (session?.user.role !== 'admin') redirect('/ringkasan');
 
   const sp = await searchParams;
   const filters = parseFilters(sp);

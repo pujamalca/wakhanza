@@ -1,0 +1,26 @@
+-- 009_outbox_created_index.sql
+-- Indeks untuk halaman Ringkasan (/ringkasan), yang menjadi halaman pendaratan
+-- sesudah login dan karena itu dibuka jauh lebih sering daripada halaman lain.
+--
+-- Seluruh angkanya diagregasi menurut `outbox.created_at` (hari ini, 7 hari,
+-- 14 hari), dan sampai sekarang `outbox` hanya punya:
+--   uq_idem (idempotency_key), ix_dispatch (status, scheduled_at), ix_rm (no_rkm_medis)
+-- Tidak satu pun bisa dipakai untuk penyaringan rentang tanggal, jadi tanpa
+-- baris di bawah setiap kali seseorang login akan memicu beberapa pemindaian
+-- penuh tabel outbox -- tabel yang justru paling cepat tumbuh di skema ini.
+--
+-- URUTAN KOLOMNYA PENTING, dan sempat salah saat ditulis pertama kali.
+-- Percobaan pertama memakai (status, created_at) dengan alasan "kueri menyaring
+-- status DAN tanggal". EXPLAIN terhadap database sungguhan menunjukkan itu
+-- keliru: rincian per jenis pesan tidak menyaring status sama sekali, sehingga
+-- kolom pertama indeksnya tidak terpakai dan kuerinya jatuh ke type=ALL.
+--
+-- (created_at, status, trigger_code) benar karena created_at adalah satu-satunya
+-- kolom yang disaring SEMUA kueri ringkasan, dan dua kolom sisanya membuat
+-- ketiganya jadi covering index -- baris tabelnya tidak perlu disentuh:
+--   WHERE created_at >= ? GROUP BY status         (hitungan per status)
+--   WHERE created_at >= ? AND status IN (…)       (volume harian grafik)
+--   WHERE created_at >= ? GROUP BY trigger_code   (rincian per jenis pesan)
+-- Kedalaman antrean (status IN ('pending','sending'), tanpa batas tanggal)
+-- sengaja tidak dilayani indeks ini -- ix_dispatch yang sudah ada sudah pas.
+ALTER TABLE outbox ADD KEY ix_created (created_at, status, trigger_code);

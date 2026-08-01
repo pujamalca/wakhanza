@@ -2,7 +2,7 @@ import { QueryTypes } from 'sequelize';
 import { PatientContact } from '@/models';
 import { sik } from '@/db/sik';
 import { CorrectionForm } from './CorrectionForm';
-import { PageHeader, FilterChip, Input, Button, LinkButton, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PageHeader, FilterChip, Input, Button, LinkButton, EmptyState, IconSearch, IconCheck, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 const REASON_LABELS: Record<string, string> = {
   empty: 'Kosong',
@@ -107,7 +107,16 @@ export default async function NomorBermasalahPage({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6}>
-                  <EmptyState>Tidak ada baris.</EmptyState>
+                  {q ? (
+                    <EmptyState icon={<IconSearch className="h-5 w-5" />} title={`Tidak ada hasil untuk "${q}"`}>
+                      Pencarian mencakup nama pasien dan nomor rekam medis. Pasien yang nomornya sudah benar memang tidak muncul
+                      di halaman ini.
+                    </EmptyState>
+                  ) : (
+                    <EmptyState icon={<IconCheck className="h-5 w-5" />} title="Tidak ada nomor bermasalah">
+                      Semua pasien yang sudah diproses punya nomor yang bisa dipakai.
+                    </EmptyState>
+                  )}
                 </td>
               </tr>
             )}

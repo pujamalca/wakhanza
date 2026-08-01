@@ -1,7 +1,19 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, Badge, Button, type BadgeVariant } from '@/components/ui';
+import { heartbeatStale } from '@/lib/health';
+import {
+  Card,
+  Badge,
+  Button,
+  Skeleton,
+  waStatusVariant,
+  waStatusLabel,
+  waStatusHelp,
+  IconRefresh,
+  IconLogout,
+  IconAlertTriangle,
+} from '@/components/ui';
 
 interface KoneksiStatus {
   status: string;
@@ -16,18 +28,6 @@ async function fetchStatus(): Promise<KoneksiStatus> {
   const res = await fetch('/api/koneksi/status', { cache: 'no-store' });
   if (!res.ok) throw new Error('gagal mengambil status');
   return res.json();
-}
-
-function heartbeatStale(heartbeatAt: string | null): boolean {
-  if (!heartbeatAt) return true;
-  return Date.now() - new Date(heartbeatAt).getTime() > 2 * 60 * 1000; // §7: >2 menit dianggap worker mati
-}
-
-function statusVariant(status: string): BadgeVariant {
-  if (status === 'ready') return 'success';
-  if (status === 'qr_pending') return 'warning';
-  if (status === 'disconnected' || status === 'auth_failure') return 'danger';
-  return 'neutral';
 }
 
 export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
@@ -50,66 +50,110 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['koneksi-status'] }),
   });
 
-  if (isLoading || !data) return <p className="text-sm text-muted-foreground">Memuat status...</p>;
+  if (isLoading || !data) {
+    return (
+      <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
+        <Card>
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="mt-3 h-6 w-32" />
+          <Skeleton className="mt-3 h-3 w-full" />
+        </Card>
+      </div>
+    );
+  }
 
   const stale = heartbeatStale(data.heartbeatAt);
+  const showQr = data.status === 'qr_pending' && data.qrData;
 
   return (
-    <div className="max-w-md space-y-4">
+    <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
       <Card>
         <p className="text-sm text-muted-foreground">Status sesi</p>
-        <div className="mt-1 flex items-center gap-2">
-          <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Badge variant={waStatusVariant(data.status)}>{waStatusLabel(data.status)}</Badge>
+          {/* Kode mentah tetap ditampilkan berdampingan: itu yang muncul di log
+              worker dan di kolom wa_session.status saat menelusuri masalah. */}
+          <span className="font-mono text-xs text-muted-foreground">{data.status}</span>
         </div>
-        {data.phoneNumber && <p className="mt-2 text-sm">Nomor: {data.phoneNumber}</p>}
-        {data.status === 'ready' && (
-          <p className={`mt-2 text-xs ${stale ? 'text-destructive' : 'text-muted-foreground'}`}>
-            {stale
-              ? 'Peringatan: denyut jantung worker tidak terbarui >2 menit -- proses mungkin macet meski status "ready".'
-              : `Denyut jantung terakhir: ${new Date(data.heartbeatAt!).toLocaleTimeString('id-ID')}`}
+        <p className="mt-2 text-sm text-muted-foreground">{waStatusHelp(data.status)}</p>
+
+        <dl className="mt-4 space-y-2 border-t pt-3 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Nomor pengirim</dt>
+            <dd className="tabular-nums">{data.phoneNumber ?? '-'}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Denyut worker</dt>
+            <dd className={stale ? 'text-destructive' : ''}>
+              {data.heartbeatAt ? new Date(data.heartbeatAt).toLocaleTimeString('id-ID') : 'belum pernah'}
+            </dd>
+          </div>
+        </dl>
+
+        {data.status === 'ready' && stale && (
+          <p className="mt-3 flex gap-2 rounded-md bg-destructive/10 p-2.5 text-xs text-destructive">
+            <IconAlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              Status masih tertulis tersambung, tapi worker berhenti melapor lebih dari 2 menit. Prosesnya kemungkinan macet --
+              selama ini berlangsung tidak ada pesan yang benar-benar terkirim.
+            </span>
           </p>
         )}
-        {data.lastError && <p className="mt-2 text-xs text-destructive">Error: {data.lastError}</p>}
+
+        {data.lastError && (
+          <p className="mt-3 break-words rounded-md bg-destructive/10 p-2.5 text-xs text-destructive">{data.lastError}</p>
+        )}
+
+        {isAdmin && (
+          <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={commandMutation.isPending}
+              onClick={() => commandMutation.mutate('reconnect')}
+            >
+              <IconRefresh className="h-4 w-4" />
+              Sambung ulang
+            </Button>
+            <Button
+              variant="destructive"
+              size="md"
+              disabled={commandMutation.isPending}
+              onClick={() => {
+                if (confirm('Yakin keluar dari sesi WhatsApp? Semua notifikasi berhenti sampai QR dipindai ulang.')) {
+                  commandMutation.mutate('logout');
+                }
+              }}
+            >
+              <IconLogout className="h-4 w-4" />
+              Keluar sesi
+            </Button>
+          </div>
+        )}
       </Card>
 
-      {data.status === 'qr_pending' && data.qrData && (
-        <Card className="text-center">
-          <p className="mb-2 text-sm text-muted-foreground">Pindai dengan WhatsApp di ponsel nomor notifikasi RS</p>
-          {/* data URL lokal (bukan gambar jarak jauh); bg-white sengaja tetap putih di kedua tema -- QR butuh kontras penuh supaya bisa dipindai */}
+      {showQr && (
+        <Card>
+          <p className="font-medium">Pindai untuk menyambungkan</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm text-muted-foreground">
+            <li>Buka WhatsApp di ponsel bernomor notifikasi rumah sakit.</li>
+            <li>Masuk ke Setelan, lalu Perangkat tertaut.</li>
+            <li>Ketuk Tautkan perangkat, arahkan kamera ke kode di bawah.</li>
+          </ol>
+          {/* data URL lokal (bukan gambar jarak jauh); bg-white sengaja tetap putih
+              di kedua tema -- QR butuh kontras penuh supaya bisa dipindai. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={data.qrData}
-            alt="QR WhatsApp"
+            src={data.qrData!}
+            alt="Kode QR untuk menautkan WhatsApp"
             width={260}
             height={260}
-            className="mx-auto rounded-md border bg-white p-2"
+            className="mx-auto mt-4 h-auto w-full max-w-[260px] rounded-lg border bg-white p-3"
           />
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            Kode berganti sendiri secara berkala. Halaman ini menyegarkan otomatis tiap 3 detik.
+          </p>
         </Card>
-      )}
-
-      {isAdmin && (
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            size="md"
-            disabled={commandMutation.isPending}
-            onClick={() => commandMutation.mutate('reconnect')}
-          >
-            Sambung ulang
-          </Button>
-          <Button
-            variant="destructive"
-            size="md"
-            disabled={commandMutation.isPending}
-            onClick={() => {
-              if (confirm('Yakin keluar dari sesi WhatsApp? Semua notifikasi berhenti sampai QR dipindai ulang.')) {
-                commandMutation.mutate('logout');
-              }
-            }}
-          >
-            Keluar
-          </Button>
-        </div>
       )}
     </div>
   );

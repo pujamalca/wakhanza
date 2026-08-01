@@ -63,7 +63,7 @@ function describeWindow(s: BroadcastSchedule): string {
 
 export default async function BroadcastTerjadwalPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const session = await auth();
-  if (session?.user.role !== 'admin') redirect('/koneksi');
+  if (session?.user.role !== 'admin') redirect('/ringkasan');
 
   const sp = await searchParams;
   const filterConfig = parseScheduleFilters(sp);

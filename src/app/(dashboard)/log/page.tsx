@@ -1,5 +1,17 @@
 import { SendLog, Outbox } from '@/models';
-import { PageHeader, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import {
+  PageHeader,
+  Badge,
+  EmptyState,
+  Pagination,
+  triggerLabel,
+  SEND_OUTCOME_LABEL,
+  IconActivity,
+  tableWrapperClass,
+  theadClass,
+  rowClass,
+  cellClass,
+} from '@/components/ui';
 
 const PAGE_SIZE = 50;
 
@@ -21,17 +33,21 @@ export default async function LogPage({ searchParams }: { searchParams: Promise<
 
   return (
     <div>
-      <PageHeader title="Log pengiriman" description="Setiap percobaan kirim, termasuk yang gagal dan dicoba ulang." />
+      <PageHeader
+        title="Log pengiriman"
+        description="Setiap percobaan kirim, termasuk yang gagal lalu dicoba ulang. Satu pesan bisa punya beberapa baris di sini."
+      />
+
       <div className={tableWrapperClass}>
         <table className="w-full text-sm">
           <thead className={theadClass}>
             <tr>
               <th className={cellClass}>Waktu</th>
-              <th className={cellClass}>Pemicu</th>
-              <th className={cellClass}>Percobaan</th>
+              <th className={cellClass}>Jenis pesan</th>
+              <th className={`${cellClass} hidden sm:table-cell`}>Percobaan</th>
               <th className={cellClass}>Hasil</th>
-              <th className={cellClass}>Detail</th>
-              <th className={cellClass}>Durasi</th>
+              <th className={`${cellClass} hidden md:table-cell`}>Detail</th>
+              <th className={`${cellClass} hidden lg:table-cell`}>Durasi</th>
             </tr>
           </thead>
           <tbody>
@@ -39,42 +55,37 @@ export default async function LogPage({ searchParams }: { searchParams: Promise<
               const outbox = outboxMap.get(row.outboxId);
               return (
                 <tr key={row.id} className={rowClass}>
-                  <td className={`${cellClass} text-xs`}>{row.createdAt.toLocaleString('id-ID')}</td>
-                  <td className={`${cellClass} font-mono text-xs`}>{outbox?.triggerCode ?? '-'}</td>
-                  <td className={cellClass}>{row.attempt}</td>
-                  <td className={cellClass}>
-                    <Badge variant={row.outcome === 'sent' ? 'success' : 'danger'}>{row.outcome}</Badge>
+                  <td className={`${cellClass} whitespace-nowrap text-xs`}>{row.createdAt.toLocaleString('id-ID')}</td>
+                  <td className={cellClass} title={outbox?.triggerCode ?? ''}>
+                    {outbox ? triggerLabel(outbox.triggerCode) : '-'}
                   </td>
-                  <td className={`${cellClass} text-xs`}>{row.detail ?? '-'}</td>
-                  <td className={`${cellClass} text-xs`}>{row.durationMs ? `${row.durationMs} ms` : '-'}</td>
+                  <td className={`${cellClass} hidden tabular-nums sm:table-cell`}>ke-{row.attempt}</td>
+                  <td className={cellClass}>
+                    <Badge variant={row.outcome === 'sent' ? 'success' : 'danger'}>{SEND_OUTCOME_LABEL[row.outcome]}</Badge>
+                  </td>
+                  <td className={`${cellClass} hidden max-w-md truncate text-xs text-muted-foreground md:table-cell`} title={row.detail ?? ''}>
+                    {row.detail ?? '-'}
+                  </td>
+                  <td className={`${cellClass} hidden whitespace-nowrap tabular-nums text-xs lg:table-cell`}>
+                    {row.durationMs ? `${row.durationMs} ms` : '-'}
+                  </td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6}>
-                  <EmptyState>Belum ada log.</EmptyState>
+                  <EmptyState icon={<IconActivity className="h-5 w-5" />} title="Belum ada percobaan kirim">
+                    Baris pertama muncul begitu worker mengirim pesan pertamanya.
+                  </EmptyState>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      <div className="mt-3 flex items-center gap-3 text-sm">
-        <span className="text-muted-foreground">
-          Halaman {page} / {totalPages} ({count} baris)
-        </span>
-        {page > 1 && (
-          <a className="text-primary underline underline-offset-2" href={`/log?page=${page - 1}`}>
-            Sebelumnya
-          </a>
-        )}
-        {page < totalPages && (
-          <a className="text-primary underline underline-offset-2" href={`/log?page=${page + 1}`}>
-            Berikutnya
-          </a>
-        )}
-      </div>
+
+      <Pagination page={page} totalPages={totalPages} count={count} hrefFor={(p) => `/log?page=${p}`} unit="percobaan" />
     </div>
   );
 }

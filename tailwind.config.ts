@@ -23,6 +23,12 @@ const config: Config = {
         },
         card: 'hsl(var(--card))',
         ring: 'hsl(var(--ring))',
+        success: 'hsl(var(--success))',
+        warning: 'hsl(var(--warning))',
+        chart: {
+          sent: 'hsl(var(--chart-sent))',
+          failed: 'hsl(var(--chart-failed))',
+        },
       },
       borderRadius: {
         lg: '0.5rem',

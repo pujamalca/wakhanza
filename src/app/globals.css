@@ -16,6 +16,24 @@
     --border: 214 32% 91%;
     --card: 0 0% 100%;
     --ring: 158 64% 32%;
+
+    /* Status selain "bahaya". Ada di sini, bukan sebagai green-700/amber-700
+       langsung di Badge, karena aturan proyek: warna baru ditambahkan sebagai
+       token di :root DAN .dark, tidak dihardcode per komponen. */
+    --success: 142 72% 29%;
+    --warning: 26 90% 37%;
+
+    /* Warna grafik. TIDAK sama dengan --primary/--destructive: pasangan
+       hijau-merah adalah kasus terburuk buta warna deutan, dan --primary
+       (hue 158) tidak lolos pemeriksaan pemisahan CVD di mode gelap. Nilai di
+       bawah dipilih lewat pencarian terhadap validator palet dan lolos SEMUA
+       pemeriksaan di kedua mode terhadap permukaan --card yang sebenarnya:
+         terang #30a68b vs #dc2828 di #ffffff -> CVD ΔE 12,3 · normal ΔE 32,1
+         gelap  #2c967d vs #e05252 di #141c2e -> CVD ΔE  9,0 · normal ΔE 27,2
+       (ambang: CVD >= 8, normal >= 15, kontras >= 3:1). Mengubah salah satu
+       nilai ini berarti menjalankan ulang validasinya, bukan menebak. */
+    --chart-sent: 166 55% 42%;
+    --chart-failed: 0 72% 51%;
   }
 
   .dark {
@@ -34,6 +52,14 @@
        kelihatan "terangkat", bukan menyatu jadi satu bidang gelap. */
     --card: 222 40% 13%;
     --ring: 158 55% 45%;
+
+    --success: 142 69% 58%;
+    --warning: 43 96% 56%;
+
+    /* Bukan pembalikan otomatis dari nilai terang: dipilih ulang untuk
+       permukaan gelap dan divalidasi ulang terhadapnya (lihat catatan di :root). */
+    --chart-sent: 166 55% 38%;
+    --chart-failed: 0 70% 60%;
   }
 }
 
