@@ -1,7 +1,8 @@
 import { auth } from '@/auth';
-import { WaSession } from '@/models';
+import { WaSession, getSettingBool } from '@/models';
 import { resendOutboxAction } from '../antrean/actions';
 import { SystemStatus } from './SystemStatus';
+import { InboundStatus } from './InboundStatus';
 import { VolumeChart } from './VolumeChart';
 import {
   startOfDay,
@@ -10,6 +11,8 @@ import {
   fetchDailyVolume,
   fetchTriggerBreakdown,
   fetchRecentProblems,
+  fetchInboundActivity,
+  NEEDS_REVIEW,
 } from './queries';
 import {
   PageHeader,
@@ -45,18 +48,25 @@ export default async function RingkasanPage() {
   const session = await auth();
   const isAdmin = session?.user.role === 'admin';
 
-  const [waSession, queue, weekCounts, daily, triggers, problems] = await Promise.all([
+  const [waSession, queue, weekCounts, daily, triggers, problems, inbound, autoReplyEnabled] = await Promise.all([
     WaSession.findByPk(1),
     fetchQueueDepth(),
     fetchStatusCounts(startOfDay(REVIEW_WINDOW_DAYS - 1)),
     fetchDailyVolume(CHART_DAYS),
     fetchTriggerBreakdown(startOfDay(CHART_DAYS - 1)),
     fetchRecentProblems(5),
+    fetchInboundActivity(),
+    getSettingBool('autoreply.enabled', false),
   ]);
 
   const today = daily[daily.length - 1]!;
   const yesterday = daily[daily.length - 2];
-  const needsReview = (weekCounts.failed_permanent ?? 0) + (weekCounts.expired ?? 0);
+  // Dijumlahkan dari NEEDS_REVIEW, bukan diketik ulang: daftar itu yang juga
+  // dipakai `fetchRecentProblems()` tepat di bawah, dan versi lamanya sudah
+  // sempat berbeda satu status dari daftarnya (`failed` tidak ikut terhitung
+  // padahal barisnya muncul di tabel di bawah -- angka KPI mengatakan nol
+  // sementara daftarnya tidak kosong).
+  const needsReview = NEEDS_REVIEW.reduce((total, status) => total + (weekCounts[status] ?? 0), 0);
   const noContact = weekCounts.skipped_no_contact ?? 0;
   const triggerMax = Math.max(...triggers.map((t) => t.total), 1);
 
@@ -87,6 +97,13 @@ export default async function RingkasanPage() {
         heartbeatAt={waSession?.heartbeatAt ?? null}
         lastError={waSession?.lastError ?? null}
       />
+
+      {/* Tepat di bawah SystemStatus, dan itu disengaja: keduanya menjawab
+          "apakah sistemnya masih bekerja" -- yang satu arah keluar, yang satu
+          arah masuk. Semua angka di bawahnya mengukur arah keluar saja, dan
+          itulah kenapa bug LID bisa berjam-jam tanpa satu pun indikator
+          berubah. */}
+      <InboundStatus inbound={inbound} autoReplyEnabled={autoReplyEnabled} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

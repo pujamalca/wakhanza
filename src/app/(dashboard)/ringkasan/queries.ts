@@ -100,6 +100,62 @@ export async function fetchDailyVolume(days: number): Promise<DayVolume[]> {
   });
 }
 
+export interface InboundActivity {
+  /** Pesan masuk perorangan yang tercatat 24 jam terakhir. */
+  last24h: number;
+  /** Kapan pesan masuk TERAKHIR tercatat, kapan pun itu. null = belum pernah sama sekali. */
+  lastAt: Date | null;
+  /**
+   * Menit sejak pesan masuk terakhir. null bila belum pernah ada.
+   *
+   * Dihitung DI SINI, bukan di komponen: `Date.now()` di badan komponen React
+   * adalah nilai yang berubah tiap render dan ditolak aturan lint
+   * `react-hooks/purity`. Komponennya jadi murni presentasi -- sekaligus alasan
+   * kenapa aturan itu ada.
+   */
+  minutesSinceLast: number | null;
+  /** Bagian dari `last24h` yang tidak cocok aturan mana pun -- bahan menyetel kata kunci. */
+  unmatched24h: number;
+}
+
+/**
+ * Lalu lintas MASUK, dan ini satu-satunya angka di halaman ini yang menjawab
+ * pertanyaan "apakah kita masih bisa MENDENGAR pasien".
+ *
+ * Ada karena bug LID: WhatsApp memindahkan pengalamatan ke `@lid` dan setiap
+ * pesan pasien dibuang di baris kedua listener selama berjam-jam. Gejalanya
+ * yang paling menyesatkan yang mungkin -- PM2 online, sesi `ready`, kirim
+ * keluar normal, balasan otomatis menyala, aturan benar -- dan SEMUA indikator
+ * di halaman ini tetap hijau, karena semuanya mengukur arah keluar. Yang
+ * membedakan sehat dari rusak cuma satu: `auto_reply_log` nol baris, dan tidak
+ * ada satu pun tempat yang menampilkannya.
+ *
+ * Dihitung dari `auto_reply_log` (dicatat untuk SETIAP pesan masuk perorangan,
+ * termasuk yang tidak cocok aturan) bukan dari `outbox` -- pertanyaan pasien
+ * yang tidak dibalas justru TIDAK meninggalkan jejak di `outbox` sama sekali,
+ * jadi menghitung dari sana akan buta persis pada kasus yang perlu dilihat.
+ *
+ * `lastAt` tanpa batas waktu supaya "sepi hari ini" bisa dibedakan dari "tidak
+ * pernah menerima apa pun sejak dipasang" -- yang kedua nyaris pasti kerusakan.
+ */
+export async function fetchInboundActivity(): Promise<InboundActivity> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [row] = await db.query<{ n: unknown; unmatched: unknown; last_at: string | null }>(
+    `SELECT SUM(created_at >= :since) AS n,
+            SUM(created_at >= :since AND outcome = 'no_match') AS unmatched,
+            MAX(created_at) AS last_at
+       FROM auto_reply_log`,
+    { replacements: { since }, type: QueryTypes.SELECT },
+  );
+  const lastAt = row?.last_at ? new Date(row.last_at) : null;
+  return {
+    last24h: toInt(row?.n),
+    unmatched24h: toInt(row?.unmatched),
+    lastAt,
+    minutesSinceLast: lastAt ? Math.floor((Date.now() - lastAt.getTime()) / 60_000) : null,
+  };
+}
+
 export interface TriggerRow {
   code: string;
   total: number;

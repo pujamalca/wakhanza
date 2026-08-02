@@ -192,6 +192,8 @@ Mode `followup` diverifikasi terpisah: `resolveScheduleWindow` diuji unit 10 kas
 
 **Gotcha uji manual, dicatat supaya tidak terulang**: baris `broadcast_schedule` yang `next_run_at`-nya di-INSERT lewat `mysql` mentah (mis. `NOW() - INTERVAL 10 SECOND`) TIDAK cocok dengan query `Op.lte` Sequelize milik worker, walau `SELECT next_run_at <= NOW()` lewat SQL biasa menunjukkan `1` (benar). Sequelize/mysql2 menerjemahkan `Date` JS dan nilai `DATETIME` MySQL secara konsisten satu sama lain (tulis-lewat-Sequelize lalu baca-lewat-Sequelize cocok), tapi TIDAK konsisten dengan nilai yang ditulis langsung lewat klien `mysql` di luar Sequelize. Saat menguji fitur berbasis tanggal/jam secara manual, buat baris ujinya lewat kode aplikasi (`Model.create()` atau server action/skrip yang memanggilnya), jangan lewat `INSERT` SQL mentah untuk kolom yang nanti dibandingkan lewat Sequelize.
 
+**SEBABNYA, ditemukan belakangan: kolom `DATETIME` di `wakhanza` menyimpan UTC, bukan WIB.** Sequelize memakai `timezone: '+00:00'` (bawaannya), jadi `Date` JS pukul 20:16 WIB tersimpan sebagai `'13:16:27'` dan dibaca balik menjadi 20:16 WIB lagi — konsisten, dan **tidak ada yang perlu diperbaiki di kode**. Yang perlu diketahui adalah konsekuensi bacanya: **nilai yang terlihat di CLI `mysql` bukan jam dinding WIB**, jadi menghitung selisih waktu dari angka mentah itu meleset 7 jam. Pakai `CONVERT_TZ(kolom,'+00:00','+07:00')` saat memeriksa lewat `mysql`, atau baca lewat Sequelize. Semua model menulis `created_at` sendiri (`defaultValue: DataTypes.NOW`) alih-alih membiarkan `DEFAULT current_timestamp()` milik MariaDB mengisinya — itulah yang menjaga tulis/baca tetap sepasang. Baris yang di-INSERT lewat SQL mentah melewati pasangan itu, dan di situlah gotcha di atas lahir.
+
 ### Kelas keempat: BALASAN OTOMATIS (dipicu PASIEN, arah berlawanan)
 
 Tiga kelas sebelumnya berangkat dari kejadian di `sik` (sisip/pindai) atau dari staf/jadwal (broadcast). Yang ini berangkat dari **pesan masuk pasien** -- satu-satunya kelas yang lajunya tidak dikendalikan rumah sakit sama sekali, dan itu yang membentuk hampir seluruh pagarnya.
@@ -367,6 +369,19 @@ Diverifikasi lewat HTTP asli, tiga langkah dengan kata sandi yang sama supaya `i
 ### Halaman Ringkasan (`/ringkasan`) -- halaman pendaratan
 
 Sesudah login mendarat di `/ringkasan`, bukan `/koneksi` seperti sebelumnya: halaman Koneksi menjawab "bagaimana menyambungkan WhatsApp", pertanyaan yang muncul sekali saat pemasangan; yang ditanyakan petugas tiap hari adalah "apakah pesannya terkirim?". Redirect 403 di `/audit`, `/broadcast`, `/broadcast-terjadwal` dan `redirectTo` di `login/actions.ts` ikut diarahkan ke sini.
+
+**`InboundStatus` -- satu-satunya panel yang mengukur arah MASUK.** Semua angka lain di halaman ini (terkirim, menunggu, perlu ditinjau, grafik volume) mengukur apa yang KITA KIRIM. Saat WhatsApp memindahkan pengalamatan ke `@lid` dan setiap pesan pasien dibuang di baris kedua listener, seluruh halaman ini tetap hijau berjam-jam. Nol pesan masuk seharian di nomor yang dipakai pasien adalah tanda rusak, bukan hari sepi -- tapi hanya kalau ada yang menampilkannya. Diletakkan tepat di bawah `SystemStatus` karena keduanya menjawab pertanyaan yang sama dari dua arah.
+
+Empat hal yang menempel padanya:
+
+- **Dihitung dari `auto_reply_log`, bukan `outbox`.** Pertanyaan pasien yang tidak dibalas justru TIDAK meninggalkan jejak di `outbox` sama sekali -- menghitung dari sana akan buta persis pada kasus yang perlu dilihat.
+- **Bukan `StatCard` seperti empat kotak di atasnya.** Angka telanjang "0" di deretan kotak terbaca sebagai kabar baik (nol gagal, nol perlu ditinjau). Di sini nol adalah kabar buruk, jadi ia perlu kalimat.
+- **Keputusannya di `core/inboundHealth.ts`, fungsi murni.** Bukan kerapian: keadaan yang paling perlu dibuktikan adalah "belum pernah menerima apa pun", dan `auto_reply_log` sengaja tanpa grant `UPDATE` sehingga baris nyata tak bisa disembunyikan sementara untuk mensimulasikannya lewat database. Unit test satu-satunya jalan. `null` (belum pernah) dihitung **sunyi**, bukan aman.
+- **Saat `autoreply.enabled` mati, panelnya menolak menilai** (`tidak-terpantau`). Pencatatan pesan masuk ikut mati di situ, jadi nol tidak berarti apa-apa; melaporkannya sebagai kecurigaan akan jadi peringatan palsu permanen di setiap RS yang belum menyalakan balasan otomatis -- dan peringatan permanen sama saja dengan tidak ada peringatan.
+
+**Sekalian diperbaiki: KPI "Perlu ditinjau" menghitung sendiri `failed_permanent + expired`** alih-alih memakai `NEEDS_REVIEW` yang dipakai tabel tepat di bawahnya. Sesudah `failed` masuk daftar itu, angkanya bisa mengatakan nol sementara daftar di bawahnya tidak kosong. Sekarang dijumlahkan dari daftar yang sama.
+
+Diverifikasi lewat HTTP asli dengan cookie admin: keadaan ramai (`4 pesan masuk dalam 24 jam terakhir, 2 di antaranya tidak cocok aturan mana pun`) dan keadaan tidak-terpantau (`Balasan otomatis sedang mati, jadi pesan masuk tidak dicatat`); keadaan sunyi diuji unit (5 kasus). Data ujinya dibersihkan dan `autoreply.enabled` dikembalikan.
 
 **Satu definisi hari dipakai seluruh halaman: `outbox.created_at`** (kapan pesan masuk antrean), bukan `sent_at`. Pesan yang muncul pukul 22:00, tertahan jam tenang, lalu terkirim pukul 07:00 keesokan hari tetap dihitung pada hari kejadiannya -- kalau tidak, satu pesan bisa tampil di dua hari berbeda tergantung angka mana yang sedang dilihat.
 
