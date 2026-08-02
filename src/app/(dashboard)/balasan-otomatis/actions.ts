@@ -180,7 +180,13 @@ export async function previewAutoReplyAction(text: string): Promise<PreviewResul
   // appendUniqueCode, bukan merangkai footer sendiri: pemisah antara isi pesan
   // dan baris kode ditentukan di satu tempat saja, jadi pratinjau tidak bisa
   // menyimpang dari pesan sungguhan hanya karena bentuknya berubah kelak.
-  const body = appendUniqueCode(renderTemplate(hit.rule.body, vars), 'pratinjau|' + hit.rule.id, await loadUniqueCodeTemplate());
+  // Balasan otomatis melewati jam tenang, jadi waktu kirimnya memang "sekarang".
+  const body = appendUniqueCode(
+    renderTemplate(hit.rule.body, vars),
+    'pratinjau|' + hit.rule.id,
+    await loadUniqueCodeTemplate(),
+    new Date(),
+  );
 
   return { matched: true, ruleId: hit.rule.id, ruleLabel: hit.rule.label, keyword: hit.keyword, body };
 }

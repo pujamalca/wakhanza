@@ -96,6 +96,9 @@ async function reportSection(
       renderTemplate(privacy.safe ? template.body : '(pesan generik privasi)', row.vars),
       buildIdempotencyKey(triggerCode, row.noRkmMedis, i),
       uniqueCodeTemplate,
+      // Dry run tidak mengantre apa pun, jadi tidak ada scheduled_at yang bisa
+      // dipakai; "sekarang" adalah perkiraan terdekat untuk waktu kirimnya.
+      new Date(),
     );
     console.log(`  - RM ${row.noRkmMedis} -> ${preview.phoneE164 ?? 'TIDAK ADA NOMOR'} [${preview.note}]${privacy.safe ? '' : ' [PRIVASI: diganti generik]'}`);
     console.log(`      "${body}"`);

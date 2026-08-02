@@ -1,4 +1,11 @@
-import { messageUniqueCode, buildUniqueCodeFooter, appendUniqueCode, UNIQUE_CODE_LENGTH } from './uniqueCode';
+import {
+  messageUniqueCode,
+  buildUniqueCodeFooter,
+  appendUniqueCode,
+  formatWaktuKirim,
+  DEFAULT_UNIQUE_CODE_TEMPLATE,
+  UNIQUE_CODE_LENGTH,
+} from './uniqueCode';
 import { buildIdempotencyKey } from './idempotency';
 
 describe('messageUniqueCode', () => {
@@ -36,39 +43,67 @@ describe('messageUniqueCode', () => {
   });
 });
 
+describe('formatWaktuKirim', () => {
+  it('memakai YYYY-MM-DD HH:mm:ss dengan nol di depan', () => {
+    expect(formatWaktuKirim(new Date(2026, 7, 2, 20, 18, 41))).toBe('2026-08-02 20:18:41');
+    expect(formatWaktuKirim(new Date(2026, 0, 9, 4, 5, 6))).toBe('2026-01-09 04:05:06');
+  });
+
+  it('memakai jam 24 (tengah malam bukan 12)', () => {
+    expect(formatWaktuKirim(new Date(2026, 11, 31, 0, 0, 0))).toBe('2026-12-31 00:00:00');
+  });
+});
+
 describe('buildUniqueCodeFooter', () => {
-  it('mengganti {kode} di dalam template', () => {
-    const footer = buildUniqueCodeFooter('seed', 'Ref: {kode}')!;
-    expect(footer).toMatch(/^Ref: [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
+  const WAKTU = new Date(2026, 7, 2, 20, 18, 41);
+
+  it('mengganti {waktu} dan {kode} pada template bawaan', () => {
+    const footer = buildUniqueCodeFooter('seed', DEFAULT_UNIQUE_CODE_TEMPLATE, WAKTU)!;
+    expect(footer).toMatch(/^Kode Pengiriman : 2026-08-02 20:18:41 [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
   });
 
   it('mengembalikan null bila template kosong (fitur dimatikan)', () => {
-    expect(buildUniqueCodeFooter('seed', '')).toBeNull();
-    expect(buildUniqueCodeFooter('seed', '   ')).toBeNull();
+    expect(buildUniqueCodeFooter('seed', '', WAKTU)).toBeNull();
+    expect(buildUniqueCodeFooter('seed', '   ', WAKTU)).toBeNull();
   });
 
   it('tetap menempelkan kode walau admin menghapus {kode} dari template', () => {
     // Tanpa jaring pengaman ini, seluruh pesan berakhiran teks identik dan
     // fitur ini mati diam-diam tanpa satu pun pesan error.
-    const footer = buildUniqueCodeFooter('seed', 'Kode pesan')!;
-    expect(footer).toMatch(/^Kode pesan [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
+    const footer = buildUniqueCodeFooter('seed', 'Kode Pengiriman : {waktu}', WAKTU)!;
+    expect(footer).toMatch(/^Kode Pengiriman : 2026-08-02 20:18:41 [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
   });
 
-  it('mengganti semua kemunculan {kode}', () => {
-    const footer = buildUniqueCodeFooter('seed', '{kode} / {kode}')!;
-    const [a, b] = footer.split(' / ');
-    expect(a).toBe(b);
+  it('mengganti semua kemunculan {kode} dan {waktu}', () => {
+    const footer = buildUniqueCodeFooter('seed', '{kode} / {kode} @ {waktu} / {waktu}', WAKTU)!;
+    const [kodeA, sisa] = footer.split(' / ');
+    expect(sisa!.startsWith(kodeA!)).toBe(true);
+    expect(footer.match(/2026-08-02 20:18:41/g)).toHaveLength(2);
+  });
+
+  it('waktu berbeda TIDAK cukup membedakan pesan tanpa {kode}', () => {
+    // Alasan {kode} tetap dipertahankan: satu broadcast meng-enqueue seluruh
+    // penerimanya dalam perulangan rapat, jadi detiknya sama untuk ratusan
+    // pesan. Tanpa kode, seluruh kiriman berakhiran teks identik.
+    const a = buildUniqueCodeFooter('penerima-1', 'Kode Pengiriman : {waktu}', WAKTU)!;
+    const b = buildUniqueCodeFooter('penerima-2', 'Kode Pengiriman : {waktu}', WAKTU)!;
+    expect(a.slice(0, 'Kode Pengiriman : 2026-08-02 20:18:41'.length)).toBe(
+      b.slice(0, 'Kode Pengiriman : 2026-08-02 20:18:41'.length),
+    );
+    expect(a).not.toBe(b); // yang membedakan HANYA kodenya
   });
 });
 
 describe('appendUniqueCode', () => {
+  const WAKTU = new Date(2026, 7, 2, 20, 18, 41);
+
   it('menambahkan footer setelah baris kosong', () => {
-    const out = appendUniqueCode('Halo Budi.', 'seed', 'Ref: {kode}');
-    expect(out).toMatch(/^Halo Budi\.\n\nRef: [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
+    const out = appendUniqueCode('Halo Budi.', 'seed', DEFAULT_UNIQUE_CODE_TEMPLATE, WAKTU);
+    expect(out).toMatch(/^Halo Budi\.\n\nKode Pengiriman : 2026-08-02 20:18:41 [0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}$/);
   });
 
   it('mengembalikan body apa adanya bila template kosong', () => {
-    expect(appendUniqueCode('Halo Budi.', 'seed', '')).toBe('Halo Budi.');
+    expect(appendUniqueCode('Halo Budi.', 'seed', '', WAKTU)).toBe('Halo Budi.');
   });
 
   it('tidak mengembangkan {variabel} yang berasal dari data pasien', () => {
@@ -76,16 +111,17 @@ describe('appendUniqueCode', () => {
     // sudah tersubstitusi tidak boleh dipindai ulang untuk pola {...}
     // (ARCHITECTURE §9.2, aturan satu lintasan).
     const body = 'Halo {kontak_rs}.'; // seolah-olah nama pasien literal "{kontak_rs}"
-    const out = appendUniqueCode(body, 'seed', 'Ref: {kode}');
+    const out = appendUniqueCode(body, 'seed', DEFAULT_UNIQUE_CODE_TEMPLATE, WAKTU);
     expect(out).toContain('Halo {kontak_rs}.');
   });
 
-  it('dua pasien pada kampanye yang sama menerima teks berbeda', () => {
+  it('dua pasien pada kampanye yang sama menerima teks berbeda WALAU detiknya sama', () => {
     // Inti dari fitur ini: broadcast tanpa {nama_pasien} pun tidak lagi
-    // menghasilkan ratusan pesan identik karakter per karakter.
-    const body = 'Info dari RS. Balas STOP untuk berhenti.';
-    const a = appendUniqueCode(body, buildIdempotencyKey('BROADCAST', 7, '000001'), 'Ref: {kode}');
-    const b = appendUniqueCode(body, buildIdempotencyKey('BROADCAST', 7, '000002'), 'Ref: {kode}');
+    // menghasilkan ratusan pesan identik karakter per karakter -- dan waktu
+    // yang sama persis di sini meniru keadaan sungguhannya.
+    const body = 'Info dari RS.';
+    const a = appendUniqueCode(body, buildIdempotencyKey('BROADCAST', 7, '000001'), DEFAULT_UNIQUE_CODE_TEMPLATE, WAKTU);
+    const b = appendUniqueCode(body, buildIdempotencyKey('BROADCAST', 7, '000002'), DEFAULT_UNIQUE_CODE_TEMPLATE, WAKTU);
     expect(a).not.toBe(b);
   });
 });

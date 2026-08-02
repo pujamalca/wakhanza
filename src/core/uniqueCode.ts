@@ -35,7 +35,32 @@ const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 /** 32^6 ≈ 1,07 miliar kemungkinan — jauh melebihi kebutuhan, tetap pendek dibaca. */
 export const UNIQUE_CODE_LENGTH = 6;
 
-export const DEFAULT_UNIQUE_CODE_TEMPLATE = 'Ref: {kode}';
+/**
+ * Waktu ikut ditampilkan karena "Ref: 5QVC9G" tidak berarti apa-apa bagi
+ * pasien yang menerimanya -- sedangkan tanggal dan jam langsung menjawab
+ * "pesan ini soal kapan". Kodenya TETAP ada di belakangnya, dan itu bukan
+ * hiasan: lihat catatan pada `formatWaktuKirim` di bawah.
+ */
+export const DEFAULT_UNIQUE_CODE_TEMPLATE = 'Kode Pengiriman : {waktu} {kode}';
+
+/**
+ * `YYYY-MM-DD HH:mm:ss` waktu lokal (server RS berzona WIB, asumsi yang sama
+ * dipakai quietHours.ts dan core/schedule.ts).
+ *
+ * PENTING -- kenapa stempel waktu saja TIDAK cukup untuk membuat pesan unik:
+ * satu broadcast meng-enqueue seluruh penerimanya dalam satu perulangan rapat,
+ * jadi ratusan pesan mendapat detik yang SAMA. Digabung dengan isi broadcast
+ * yang memang identik, seluruh kiriman jadi identik karakter per karakter --
+ * persis pola yang membuat WhatsApp menandai nomor RS sebagai spam, yaitu
+ * satu-satunya alasan berkas ini ada. Karena itu `{kode}` tetap menyertainya.
+ */
+export function formatWaktuKirim(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  );
+}
 
 export function messageUniqueCode(seed: string, length = UNIQUE_CODE_LENGTH): string {
   const digest = createHash('sha256').update(seed, 'utf8').digest();
@@ -59,18 +84,21 @@ export function messageUniqueCode(seed: string, length = UNIQUE_CODE_LENGTH): st
  *
  * @returns null bila template kosong (fitur dimatikan lewat pengaturan).
  */
-export function buildUniqueCodeFooter(seed: string, template: string): string | null {
+export function buildUniqueCodeFooter(seed: string, template: string, waktu: Date): string | null {
   const tpl = template.trim();
   if (!tpl) return null;
 
   const code = messageUniqueCode(seed);
+  const withWaktu = tpl.replace(/\{waktu\}/g, formatWaktuKirim(waktu));
   // Admin yang tidak sengaja menghapus {kode} dari templatenya akan membuat
-  // SELURUH pesan berakhiran teks yang sama persis — seluruh tujuan fitur ini
-  // hilang tanpa satu pun pesan error. Kodenya tetap ditempelkan di akhir.
-  return tpl.includes('{kode}') ? tpl.replace(/\{kode\}/g, code) : `${tpl} ${code}`;
+  // SELURUH pesan dalam satu broadcast berakhiran teks yang sama persis --
+  // seluruh tujuan fitur ini hilang tanpa satu pun pesan error. Kodenya tetap
+  // ditempelkan di akhir. {waktu} SENGAJA tidak diperlakukan begitu: ia tidak
+  // menjamin apa pun, jadi menempelkannya paksa hanya menambah teks.
+  return withWaktu.includes('{kode}') ? withWaktu.replace(/\{kode\}/g, code) : `${withWaktu} ${code}`;
 }
 
-export function appendUniqueCode(body: string, seed: string, template: string): string {
-  const footer = buildUniqueCodeFooter(seed, template);
+export function appendUniqueCode(body: string, seed: string, template: string, waktu: Date): string {
+  const footer = buildUniqueCodeFooter(seed, template, waktu);
   return footer ? `${body}\n\n${footer}` : body;
 }

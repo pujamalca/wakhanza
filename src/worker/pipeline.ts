@@ -51,7 +51,10 @@ export async function loadUniqueCodeTemplate(): Promise<string> {
  * @returns null bila fitur sedang dimatikan.
  */
 export async function previewUniqueCodeFooter(seed: string): Promise<string | null> {
-  return buildUniqueCodeFooter(seed, await loadUniqueCodeTemplate());
+  // Waktu pratinjau = sekarang. Pesan sungguhan memakai waktu KIRIM-nya
+  // sendiri, jadi angka di pratinjau memang bukan angka yang akan terkirim --
+  // yang diperlihatkan adalah BENTUKNYA, supaya staf tahu baris ini akan ada.
+  return buildUniqueCodeFooter(seed, await loadUniqueCodeTemplate(), new Date());
 }
 
 async function loadSharedSettings() {
@@ -160,6 +163,12 @@ export interface EnqueueInput {
    * menulis baris patient_contact atas nama pasien yang belum tentu benar.
    */
   phoneOverride?: string | null;
+  /**
+   * Lampiran gambar/dokumen. HANYA diisi BROADCAST manual -- di sana selalu ada
+   * staf yang melihat lampirannya sebelum menekan Kirim. Pemicu lain mengirim
+   * tanpa peninjauan tiap kali, jadi sengaja tidak punya jalur ini.
+   */
+  media?: { path: string; mime: string; name: string } | null;
 }
 
 /**
@@ -186,11 +195,19 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     ctx.sensitiveExam,
   );
   const rendered = renderTemplate(privacyCheck.safe ? ctx.template.body : ctx.genericTemplate, input.vars);
+
+  // scheduledAt dihitung SEBELUM body, karena baris kode pengiriman memuat
+  // {waktu} dan yang benar untuk diisikan adalah waktu KIRIM, bukan waktu
+  // masuk antrean. Pesan yang muncul pukul 22.00 lalu ditahan jam tenang
+  // sampai 07.00 harus menyebut 07.00 -- kalau tidak, pasien membaca stempel
+  // sembilan jam sebelum pesannya benar-benar tiba.
+  const scheduledAt = computeScheduledAt(input.eventAt, ctx.triggerCode, ctx.quietStart, ctx.quietEnd);
+
   // Kode unik disisipkan di sini (ENQUEUE), bukan di dispatcher (SEND),
   // supaya `outbox.body` tetap persis sama dengan yang benar-benar dikirim --
   // halaman Log menampilkan teks sungguhan, dan percobaan kirim ulang
   // mengirim teks yang identik alih-alih pesan yang tampak baru.
-  const body = appendUniqueCode(rendered, input.idempotencyKey, ctx.uniqueCodeTemplate);
+  const body = appendUniqueCode(rendered, input.idempotencyKey, ctx.uniqueCodeTemplate, scheduledAt);
 
   let status: OutboxStatus = 'pending';
   if (!phoneE164) {
@@ -202,8 +219,6 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     status = 'skipped_opt_out';
   }
 
-  const scheduledAt = computeScheduledAt(input.eventAt, ctx.triggerCode, ctx.quietStart, ctx.quietEnd);
-
   try {
     await Outbox.create(
       {
@@ -213,6 +228,9 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
         noRkmMedis: input.noRkmMedis,
         phoneE164: phoneE164,
         body,
+        mediaPath: input.media?.path ?? null,
+        mediaMime: input.media?.mime ?? null,
+        mediaName: input.media?.name ?? null,
         status,
         eventAt: input.eventAt,
         scheduledAt,

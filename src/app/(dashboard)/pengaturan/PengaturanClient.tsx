@@ -68,7 +68,7 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
       {
         key: 'dispatch.unique_code_template',
         label: 'Format kode unik',
-        hint: 'Wajib memuat {kode}. Ditambahkan sebagai baris terakhir, mis. "Ref: {kode}".',
+        hint: 'Ditambahkan sebagai baris terakhir. {waktu} = tanggal & jam kirim, {kode} = 6 karakter pembeda. Bawaan: "Kode Pengiriman : {waktu} {kode}". {kode} tetap ditempelkan walau dihapus dari sini — tanpa itu, satu broadcast menghasilkan ratusan pesan berakhiran teks identik.',
       },
     ],
   },
