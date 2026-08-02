@@ -45,6 +45,8 @@ npm run poll:dryrun       # cetak pesan yang AKAN terkirim untuk SEMUA pemicu ta
 npm run scan:contacts -- --dry-run   # hitung nomor pasien yang tidak terpakai, tanpa menulis
 npm run scan:contacts     # isi patient_contact untuk SELURUH pasien sekaligus (lihat di bawah)
 npm run seed:admin -- <username> "<nama>" <password>   # buat user dashboard pertama (role admin)
+npm run users -- list                # daftar akun dashboard + status aktif/terkunci
+npm run users -- disable <username>  # juga: enable / unlock / passwd <username> <sandi-baru>
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 powershell -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1   # daftarkan cadangan harian (lihat di bawah)
 npx jest                  # semua test; `npx jest core/phone` untuk satu suite
@@ -330,6 +332,16 @@ Di halaman Log, `formatDurationSeconds()` memakai satu desimal di bawah 10 detik
 **Kenapa lewat props varian, bukan `className` untuk menimpa warna/padding/ukuran**: dua utility Tailwind untuk properti CSS yang SAMA (mis. `rounded-md` bawaan komponen ditimpa `rounded-full` lewat `className`) menang berdasarkan urutan Tailwind MENGHASILKAN CSS-nya (urutan di config/scale), bukan urutan kemunculan di string `className` -- override lewat `className` bisa diam-diam KALAH. Karena itu Button/Input/Textarea/Select/Badge menerima varian sebagai prop terpisah (`variant`, `size`/`fieldSize`) yang tidak pernah tumpang tindih dengan apa pun yang boleh dikirim lewat `className` (lebar, margin, dsb. saja). Jangan tambah `px-*`/`py-*`/`text-*`/`bg-*`/`rounded-*` lewat `className` ke komponen ini -- kalau ukuran/warna yang ada tidak cukup, tambah varian baru di komponennya, jangan ditimpa dari luar.
 
 Token warna (`src/app/globals.css`'s `:root`/`.dark`, dipetakan di `tailwind.config.ts`): `background`, `foreground`, `primary`, `muted`, `destructive`, `card` (permukaan panel, sedikit lebih terang dari `background` di mode gelap supaya card terlihat "terangkat"), `ring` (fokus), `success`/`warning` (status selain bahaya -- dulu dihardcode `green-600`/`amber-500` di `Badge`, melanggar aturan di bawah), `chart-sent`/`chart-failed` (lihat §Halaman Ringkasan). Tambah token warna baru di SINI (dua tempat: `:root` dan `.dark`), jangan hardcode `dark:bg-slate-800` dsb. langsung di komponen halaman kecuali kasus yang MEMANG sengaja tidak ikut tema (contoh: QR code di `KoneksiClient.tsx` tetap `bg-white` di kedua tema karena butuh kontras penuh untuk bisa dipindai -- ada komentar di kode yang menjelaskan ini).
+
+### Akun dashboard: `npm run users`, dan kenapa JWT membatasi artinya "dinonaktifkan"
+
+`seed:admin` MENOLAK bila username sudah ada, dan tidak ada halaman pengelolaan pengguna. Sampai `scripts/manage-users.ts` ada, tidak ada satu pun jalan yang didukung untuk mengganti kata sandi, menonaktifkan akun petugas yang sudah pindah, atau membuka akun terkunci -- selain menyunting `app_user` lewat SQL mentah, yang berarti menghitung hash bcrypt sendiri di luar aplikasi dan tidak meninggalkan jejak `audit_log`. Semua tindakannya tercatat dengan pelaku `cli:<akun OS>` (dibedakan sengaja dari username staf), dan **kata sandinya tidak pernah ikut dicatat**.
+
+**Pagar yang tidak boleh dilepas**: menonaktifkan admin aktif TERAKHIR ditolak. Halaman pengaturan, template, broadcast, dan audit semuanya admin-only, jadi tanpa admin aktif satu-satunya jalan kembali adalah menyunting database langsung.
+
+**`is_active=0` menghentikan LOGIN BERIKUTNYA, bukan sesi yang sedang berjalan.** Sesinya JWT, bukan session di database (TECH_STACK.md, sengaja -- "sesedikit mungkin komponen"), jadi tidak ada tempat untuk mencabutnya di sisi server. Petugas yang harus diputus saat itu juga perlu `AUTH_SECRET` diganti di `.env` + `wakhanza-web` dimulai ulang, dan itu membatalkan sesi SEMUA orang sekaligus. Batas ini nyata dan harus diketahui sebelum dibutuhkan, bukan ditemukan saat sedang buru-buru.
+
+Diverifikasi lewat HTTP asli, tiga langkah dengan kata sandi yang sama supaya `is_active` benar-benar terisolasi sebagai penyebabnya: nonaktif + sandi benar -> ditolak; diaktifkan -> berhasil masuk; dinonaktifkan lagi -> ditolak. Akun uji `operator1`/`locktest`/`admin2` sekarang nonaktif; `admin` dan `puja` tetap aktif (dua admin, supaya satu akun bukan titik kegagalan tunggal).
 
 ### Halaman Ringkasan (`/ringkasan`) -- halaman pendaratan
 

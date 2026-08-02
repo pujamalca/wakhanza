@@ -17,6 +17,7 @@
     "poll:dryrun": "tsx scripts/poll-dryrun.ts",
     "scan:contacts": "tsx scripts/scan-contacts.ts",
     "seed:admin": "tsx scripts/seed-admin.ts",
+    "users": "tsx scripts/manage-users.ts",
     "harden:permissions": "powershell -ExecutionPolicy Bypass -File scripts/harden-permissions.ps1",
     "test": "jest",
     "audit": "npm audit --omit=dev"
