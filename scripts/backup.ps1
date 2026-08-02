@@ -15,7 +15,11 @@
 # Cadangan yang tidak pernah diuji bukan cadangan (ARCHITECTURE §9.9).
 
 param(
-    [string]$OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "backups")
+    [string]$OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "backups"),
+    # Cadangan lama dipangkas sendiri. Tanpa ini direktori backup tumbuh tanpa
+    # batas sampai disk penuh -- dan disk penuh menghentikan MariaDB, yaitu
+    # justru bencana yang cadangan ini ada untuk menghadapinya.
+    [int]$KeepDays = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,9 +34,15 @@ function Get-EnvFileValue {
     return ($line -split '=', 2)[1]
 }
 
+# Env var lebih dulu (pemakaian manual), lalu .env sebagai cadangan.
+# Jalur .env yang membuat penjadwalan mungkin sama sekali: Task Scheduler
+# menjalankan skrip ini tanpa sesi interaktif, jadi tidak ada tempat untuk
+# mengetik frasa sandi. .env sudah jadi tempat rahasia lain di proyek ini,
+# gitignored, dan dikunci ke akun saat ini + SYSTEM oleh `npm run harden:permissions`.
 $passphrase = $env:WAKHANZA_BACKUP_PASSPHRASE
+if (-not $passphrase) { $passphrase = Get-EnvFileValue "WAKHANZA_BACKUP_PASSPHRASE" }
 if (-not $passphrase) {
-    throw "Set env var WAKHANZA_BACKUP_PASSPHRASE dulu (frasa sandi acak, minimal 20 karakter)."
+    throw "Frasa sandi tidak ada. Isi WAKHANZA_BACKUP_PASSPHRASE di .env, atau set env var-nya (minimal 20 karakter acak)."
 }
 
 $waDbHost = Get-EnvFileValue "WA_DB_HOST"
@@ -55,11 +65,50 @@ New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 try {
     Write-Output "[1/4] dump database $waDbName ..."
     $sqlDump = Join-Path $workDir "wakhanza.sql"
+    $dumpErr = Join-Path $workDir "mysqldump-stderr.txt"
     $dumpArgs = @("-h", $waDbHost, "-P", $waDbPort, "-u", $waDbUser, "--single-transaction", "--routines", $waDbName)
     if ($waDbPass) { $env:MYSQL_PWD = $waDbPass }
-    & $mysqldump.Source @dumpArgs | Out-File -FilePath $sqlDump -Encoding utf8
-    Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
-    if ((Get-Item $sqlDump).Length -eq 0) { throw "dump database kosong -- dibatalkan, bukan cadangan yang gagal senyap." }
+
+    # `$ErrorActionPreference` diturunkan HANYA untuk pemanggilan native ini.
+    #
+    # mysqldump MariaDB 10.4 di sini menulis satu peringatan tak berbahaya ke
+    # stderr setiap kali jalan:
+    #   Warning: option 'max_allowed_packet': unsigned value ... adjusted to ...
+    # PowerShell 5.1 membungkus tiap baris stderr proses native jadi ErrorRecord
+    # (NativeCommandError), dan dengan ErrorActionPreference 'Stop' itu menjadi
+    # galat yang MENGHENTIKAN skrip -- padahal dump-nya sendiri berhasil dan
+    # kode keluarnya 0.
+    #
+    # Bedanya cuma muncul di jalur terjadwal, dan itu yang membuatnya berbahaya:
+    # dijalankan manual dari shell, peringatannya lewat begitu saja dan cadangan
+    # terbentuk normal; dijalankan Task Scheduler lewat `-Command ... *>&1`,
+    # skripnya mati di langkah 1 dan TIDAK ADA berkas cadangan yang terbentuk --
+    # setiap hari, jam 01:00, tanpa seorang pun melihat. Sama persis pola
+    # `trustHost` (CLAUDE.md): kelas kesalahan yang justru dimaafkan saat
+    # dijalankan dengan tangan.
+    #
+    # Yang menentukan berhasil/gagal sekarang adalah KODE KELUAR mysqldump plus
+    # ukuran berkas hasilnya, bukan ada-tidaknya tulisan di stderr.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $mysqldump.Source @dumpArgs 2> $dumpErr | Out-File -FilePath $sqlDump -Encoding utf8
+        $dumpExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEAP
+        Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+    }
+
+    if ($dumpExit -ne 0) {
+        $pesan = if (Test-Path $dumpErr) { (Get-Content $dumpErr -Raw) } else { "(tidak ada keluaran stderr)" }
+        throw "mysqldump gagal dengan kode keluar ${dumpExit}: $pesan"
+    }
+    if (-not (Test-Path $sqlDump) -or (Get-Item $sqlDump).Length -eq 0) {
+        throw "dump database kosong -- dibatalkan, bukan cadangan yang gagal senyap."
+    }
+    # Dibuang sebelum dikompresi: isinya cuma peringatan, dan tidak ada gunanya
+    # ikut terenkripsi ke dalam cadangan.
+    Remove-Item $dumpErr -ErrorAction SilentlyContinue
 
     Write-Output "[2/4] salin sesi WhatsApp (.wwebjs_auth) ..."
     $sessionDir = Join-Path $root ".wwebjs_auth"
@@ -119,6 +168,20 @@ try {
     $outStream.Close()
 
     Write-Output "[ok] cadangan tersimpan: $outFile ($([math]::Round((Get-Item $outFile).Length / 1MB, 2)) MB)"
+
+    # Pemangkasan dijalankan SETELAH cadangan baru berhasil ditulis, tidak
+    # pernah sebelumnya: kalau dump gagal, skrip sudah melempar di atas dan
+    # tidak ada satu pun cadangan lama yang telanjur dihapus.
+    if ($KeepDays -gt 0) {
+        $batas = (Get-Date).AddDays(-$KeepDays)
+        $lama = Get-ChildItem -Path $OutputDir -Filter "wakhanza-backup-*.enc" |
+            Where-Object { $_.LastWriteTime -lt $batas -and $_.FullName -ne $outFile }
+        foreach ($f in $lama) {
+            Remove-Item $f.FullName -Force
+            Write-Output "     dipangkas (lebih tua dari $KeepDays hari): $($f.Name)"
+        }
+    }
+
     Write-Output "Uji pemulihan dengan: powershell -File scripts/restore-backup.ps1 -BackupFile `"$outFile`""
 } finally {
     Remove-Item -Recurse -Force $workDir -ErrorAction SilentlyContinue

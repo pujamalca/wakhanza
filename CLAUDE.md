@@ -46,6 +46,7 @@ npm run scan:contacts -- --dry-run   # hitung nomor pasien yang tidak terpakai, 
 npm run scan:contacts     # isi patient_contact untuk SELURUH pasien sekaligus (lihat di bawah)
 npm run seed:admin -- <username> "<nama>" <password>   # buat user dashboard pertama (role admin)
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
+powershell -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1   # daftarkan cadangan harian (lihat di bawah)
 npx jest                  # semua test; `npx jest core/phone` untuk satu suite
 npx tsc --noEmit
 npm run lint
@@ -66,7 +67,21 @@ Produksi: `ecosystem.config.js` (PM2, dua app: `wakhanza-worker` fork-mode 1 ins
 - **15 menit, bukan 5, dan itu bukan kehati-hatian melainkan pengamatan**: penautan ulang yang terlalu sering tampaknya membuat WhatsApp memperlambat sinkronisasi. Satu start setelah jeda panjang mencapai `ready` dalam 5 detik; empat start beruntun sesudahnya semuanya tersangkut. Watchdog yang menyala tiap 5 menit akan menjadi sumber masalahnya sendiri alih-alih pemulihannya.
 - **Keluarnya WAJIB lewat `shutdown()`, bukan `process.exit()` langsung.** Ini sempat salah pada versi pertama watchdog-nya: keluar tanpa menutup Chromium meninggalkan state sesi setengah tertulis, sehingga proses penggantinya menggantung di `authenticating` -- pemulihan yang justru menciptakan kegagalan berikutnya. `shutdown()` juga memberi `destroy()` batas waktunya sendiri (15 detik), karena sebagian pemanggilnya keluar JUSTRU karena Chromium menggantung, dan `destroy()` pada Chromium yang menggantung bisa ikut menggantung selamanya.
 
-Diverifikasi: kedua app `online` dengan **0 restart**, dan satu balasan otomatis benar-benar terkirim ke nomor uji oleh worker yang dikelola PM2 (`send_log.outcome='sent'`). `scripts/backup.ps1` + `scripts/restore-backup.ps1` untuk cadangan terenkripsi AES-256 database + sesi WhatsApp — **sudah diuji langsung** (dekripsi, ekstraksi, dan restore sungguhan ke database uji, lihat riwayat kerja Fase 4).
+Diverifikasi: kedua app `online` dengan **0 restart**, dan satu balasan otomatis benar-benar terkirim ke nomor uji oleh worker yang dikelola PM2 (`send_log.outcome='sent'`). `scripts/backup.ps1` + `scripts/restore-backup.ps1` untuk cadangan terenkripsi AES-256 database + sesi WhatsApp — **sudah diuji langsung** (dekripsi, ekstraksi, dan restore sungguhan ke database uji, lihat riwayat kerja Fase 4), dan sejak `scripts/install-backup-task.ps1` ada, **benar-benar terjadwal** alih-alih menunggu seseorang ingat menjalankannya (§ berikutnya).
+
+### Cadangan harian: dijadwalkan sebagai SYSTEM, dan satu jebakan stderr
+
+Skrip cadangannya sudah ada sejak Fase 4 tapi **tidak pernah dijadwalkan** — direktori `backups\` bahkan belum pernah terbentuk. Yang hilang bila disk mati bukan cuma riwayat: `opt_out` adalah catatan permintaan berhenti dari pasien dan tidak bisa direkonstruksi dari mana pun, `audit_log` sengaja append-only, dan `.wwebjs_auth` yang lenyap berarti scan QR ulang dengan akses fisik ke ponsel nomor RS.
+
+`install-backup-task.ps1` mendaftarkannya ke Task Scheduler, harian pukul 01:00 (sesudah lalu lintas pasien reda, dan **sebelum** pembersihan berkala worker jam 02:00 — jadi cadangan hari itu masih memuat baris yang beberapa jam kemudian dipangkas). Berjalan sebagai **SYSTEM**: tidak perlu menyimpan password akun di Task Scheduler, tetap jalan saat tidak ada yang login, dan `.env`/`.wwebjs_auth` memang sudah memberi akses ke SYSTEM lewat `harden:permissions`. `mysqldump` wajib ada di PATH tingkat **MESIN** — SYSTEM tidak membaca PATH milik user — dan skrip pemasangnya memeriksa itu di muka supaya kegagalannya tidak baru muncul jam 01:00.
+
+**Frasa sandinya dibaca dari `.env`.** Task Scheduler tidak punya sesi interaktif, jadi tidak ada tempat mengetiknya; `.env` sudah jadi tempat rahasia lain, gitignored, dan terkunci ke akun saat ini + SYSTEM. Konsekuensi yang harus disadari dan **tidak bisa diselesaikan kode**: menyimpan frasa itu HANYA di `.env` berarti disk mati menghapus cadangan beserta kuncinya sekaligus. Catat di luar mesin.
+
+**Jebakan yang membuat percobaan pertama gagal, dan bentuknya persis seperti `trustHost`:** `mysqldump` MariaDB 10.4 menulis satu peringatan tak berbahaya ke stderr tiap kali jalan (`option 'max_allowed_packet': ... adjusted to ...`). PowerShell 5.1 membungkus tiap baris stderr proses native jadi `ErrorRecord`, dan dengan `$ErrorActionPreference='Stop'` itu MENGHENTIKAN skrip walau kode keluar mysqldump 0 dan dump-nya berhasil. Dijalankan manual dari shell, peringatannya lewat begitu saja dan cadangan terbentuk normal; dijalankan Task Scheduler, skripnya mati di langkah 1 dan **tidak ada berkas cadangan yang terbentuk sama sekali** — setiap hari, jam 01:00, tanpa seorang pun melihat. Sekarang berhasil/gagal ditentukan **kode keluar mysqldump plus ukuran berkas hasilnya**, bukan ada-tidaknya tulisan di stderr. Sekali lagi pelajaran yang sama: verifikasi lewat jalur yang benar-benar dipakai produksi, bukan lewat cara yang paling gampang dijalankan dengan tangan.
+
+Cadangan lama dipangkas sendiri (`-KeepDays`, default 30) **sesudah** cadangan baru berhasil ditulis, tidak pernah sebelumnya — kalau dump gagal, skrip sudah berhenti di atas dan tidak ada cadangan lama yang telanjur hilang. Tanpa pemangkasan, direktori cadangan tumbuh sampai disk penuh, dan disk penuh menghentikan MariaDB — justru bencana yang cadangan ini ada untuk menghadapinya.
+
+Diverifikasi lewat jalur terjadwal sungguhan (`Start-ScheduledTask`, bukan memanggil skripnya langsung): `LastTaskResult=0`, berkas 19,02 MB terbentuk, lalu **dipulihkan sungguhan** ke database `wakhanza_restore_test` — 16 tabel, termasuk `patient_contact` 8.118 baris, `app_setting` 28, `template` 7. Database ujinya di-DROP setelah diperiksa.
 
 `verify:db` dan `verify:plans` bukan pemeriksaan opsional — keduanya menegakkan dua batasan paling gampang dilanggar tanpa sadar: menulis ke `sik`, dan query yang diam-diam berubah dari index seek menjadi full table scan. Jalankan keduanya setiap kali koneksi atau query poller disentuh.
 

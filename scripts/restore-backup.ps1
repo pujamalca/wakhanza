@@ -35,9 +35,13 @@ function Get-EnvFileValue {
     return ($line -split '=', 2)[1]
 }
 
+# Sumber yang sama persis dengan backup.ps1 -- kalau keduanya membaca dari
+# tempat berbeda, cadangan bisa terenkripsi dengan frasa yang tidak pernah
+# bisa ditemukan lagi saat dibutuhkan.
 $passphrase = $env:WAKHANZA_BACKUP_PASSPHRASE
+if (-not $passphrase) { $passphrase = Get-EnvFileValue "WAKHANZA_BACKUP_PASSPHRASE" }
 if (-not $passphrase) {
-    throw "Set env var WAKHANZA_BACKUP_PASSPHRASE dulu (frasa sandi yang sama dipakai saat backup.ps1)."
+    throw "Frasa sandi tidak ada. Isi WAKHANZA_BACKUP_PASSPHRASE di .env, atau set env var-nya (harus sama dengan saat backup.ps1)."
 }
 if (-not (Test-Path $BackupFile)) {
     throw "Berkas cadangan tidak ditemukan: $BackupFile"
