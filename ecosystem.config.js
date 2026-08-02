@@ -41,6 +41,16 @@ module.exports = {
       autorestart: true,
       max_memory_restart: '800M', // ARCHITECTURE §12.4: Chromium merembeskan memori, restart aman karena outbox permanen
       restart_delay: 5000,
+      // Windows tidak punya sinyal POSIX, jadi PM2 tidak benar-benar mengirim
+      // SIGTERM dan handler shutdown di src/worker/index.ts praktis tidak
+      // pernah menyala -- terbukti: barisnya nol kali di seluruh log restart.
+      // Dengan ini PM2 mengirim pesan IPC 'shutdown' yang ditangani di sana.
+      shutdown_with_message: true,
+      // Bawaannya 1600 ms. Menutup Chromium dan menuntaskan flush state sesi
+      // (.wwebjs_auth, LevelDB) tidak selesai secepat itu, jadi SIGKILL datang
+      // di tengah penulisan dan meninggalkan sesi yang pada start BERIKUTNYA
+      // menggantung di `authenticating` tanpa batas waktu.
+      kill_timeout: 20000,
       env: {
         NODE_ENV: 'production',
       },
