@@ -15,6 +15,43 @@ async function staleThresholdFor(triggerCode: string): Promise<number> {
 }
 
 /**
+ * Baris yang tertinggal berstatus `sending` dari proses sebelumnya.
+ *
+ * `sending` ditulis di dalam transaksi tepat sebelum kirim, lalu diganti oleh
+ * hasilnya. Kalau worker mati di antara keduanya -- SIGKILL setelah
+ * `kill_timeout`, listrik padam, Chromium menggantung -- barisnya tinggal di
+ * `sending` selamanya: dispatcher hanya mengambil `pending`, cleanup dulu hanya
+ * memangkas `sent`, dan halaman Ringkasan menghitungnya sebagai "menunggu".
+ * Satu pesan pasien hilang tanpa jejak kesalahan.
+ *
+ * SENGAJA TIDAK dikembalikan ke `pending` secara otomatis. Kegagalan terjadi di
+ * satu-satunya titik yang tidak bisa kita ketahui hasilnya: pesannya mungkin
+ * sudah sampai ke WhatsApp sebelum prosesnya mati. Mengirim ulang sendiri
+ * berarti sebagian pasien menerima pesan yang sama dua kali tanpa ada yang
+ * memutuskan itu. Jadi baris ini ditandai `failed_permanent` supaya muncul di
+ * daftar "perlu ditinjau" berikut tombol Kirim ulang -- keputusannya
+ * dikembalikan ke manusia, konsisten dengan cara pemicu lain menangani
+ * kegagalan yang ambigu.
+ *
+ * Aman dilakukan di startup karena worker dijamin instance tunggal
+ * (`instances: 1, exec_mode: 'fork'` di ecosystem.config.js): tidak ada proses
+ * lain yang mungkin sedang memegang baris `sending` saat ini dijalankan.
+ */
+export async function recoverInterruptedSends(): Promise<number> {
+  const [affected] = await Outbox.update(
+    {
+      status: 'failed_permanent',
+      lastError: 'worker berhenti saat pengiriman berlangsung; hasil kirim tidak diketahui',
+    },
+    { where: { status: 'sending' } },
+  );
+  if (affected > 0) {
+    logger.warn({ affected }, 'baris outbox tersangkut "sending" dari proses sebelumnya, ditandai perlu ditinjau');
+  }
+  return affected;
+}
+
+/**
  * ARCHITECTURE §6.1. Satu baris per panggilan — pengiriman beruntun cepat
  * adalah pola yang memicu deteksi spam WhatsApp (F5.2), jeda acak antar
  * pesan diterapkan oleh pemanggil (worker/index.ts) berdasarkan nilai balik
@@ -107,8 +144,22 @@ export async function dispatchTick(): Promise<boolean> {
   } catch (err) {
     const e = safeError(err);
     const permanent = isPermanentAfter(attempts);
+    /**
+     * Saat percobaan habis, statusnya `failed_permanent` -- BUKAN `failed`.
+     *
+     * Bentuk lamanya menulis `failed`, dan itu membuat pesan yang benar-benar
+     * menyerah menghilang dari pandangan: `ringkasan/queries.ts`'s NEEDS_REVIEW
+     * hanya memuat `failed_permanent` dan `expired`, sementara label `failed`
+     * berbunyi "masih akan dicoba ulang otomatis" padahal dispatcher cuma
+     * mengambil baris `pending` dan tidak akan pernah menyentuhnya lagi.
+     * Hasilnya: notifikasi pasien yang gagal tiga kali berturut-turut berhenti
+     * diam-diam -- tidak dicoba ulang, tidak ditampilkan, tidak ada yang tahu.
+     *
+     * `failed` tetap ada di ENUM demi baris lama, dan sekarang ikut terhitung
+     * "perlu ditinjau" supaya baris peninggalan itu pun muncul ke permukaan.
+     */
     await row.update({
-      status: permanent ? 'failed' : 'pending',
+      status: permanent ? 'failed_permanent' : 'pending',
       attempts,
       lastError: e.message,
       scheduledAt: permanent ? row.scheduledAt : new Date(Date.now() + retryDelayMs(attempts)),

@@ -10,7 +10,7 @@ import { runBillingReadyCycle } from './pollerBilling';
 import { runBookingCycle } from './pollerBooking';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
 import { startScheduler } from './scheduler';
-import { dispatchTick } from './dispatcher';
+import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
@@ -202,6 +202,10 @@ async function main(): Promise<void> {
   await sik.authenticate();
   await db.authenticate();
   logger.info('koneksi database terverifikasi (read-only sik, read-write wakhanza)');
+
+  // Dijalankan SEBELUM dispatcher menyala, supaya baris tersangkut dari proses
+  // sebelumnya sudah beres sebelum ada baris `sending` baru yang sah.
+  await recoverInterruptedSends();
 
   await initWaClient();
 

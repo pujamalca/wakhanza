@@ -123,8 +123,17 @@ export async function fetchTriggerBreakdown(since: Date): Promise<TriggerRow[]> 
   return rows.map((r) => ({ code: r.code, total: toInt(r.total), sent: toInt(r.sent) }));
 }
 
-/** Kegagalan yang sudah berhenti dicoba ulang sendiri -- ini yang benar-benar menunggu orang. */
-export const NEEDS_REVIEW: OutboxStatus[] = ['failed_permanent', 'expired'];
+/**
+ * Kegagalan yang sudah berhenti dicoba ulang sendiri -- ini yang benar-benar
+ * menunggu orang.
+ *
+ * `failed` ikut di sini walau dispatcher tidak menulisnya lagi (sekarang
+ * `failed_permanent`, lihat komentar di `dispatcher.ts`). Baris `failed` yang
+ * telanjur ada di pemasangan lama adalah justru yang paling perlu muncul:
+ * selama ini ia tidak dicoba ulang oleh siapa pun DAN tidak tampil di panel
+ * ini, jadi tidak ada satu pun cara untuk mengetahuinya.
+ */
+export const NEEDS_REVIEW: OutboxStatus[] = ['failed', 'failed_permanent', 'expired'];
 
 export async function fetchRecentProblems(limit: number): Promise<Outbox[]> {
   return Outbox.findAll({

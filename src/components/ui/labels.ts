@@ -17,7 +17,7 @@ export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = {
   pending: 'Menunggu',
   sending: 'Sedang dikirim',
   sent: 'Terkirim',
-  failed: 'Gagal sementara',
+  failed: 'Gagal, berhenti dicoba',
   failed_permanent: 'Gagal permanen',
   skipped_no_contact: 'Tanpa nomor',
   skipped_opt_out: 'Berhenti otomatis',
@@ -29,7 +29,11 @@ export const OUTBOX_STATUS_HELP: Record<OutboxStatus, string> = {
   pending: 'Sudah masuk antrean, menunggu giliran kirim atau menunggu jam tenang berakhir.',
   sending: 'Sedang dikirim worker saat ini.',
   sent: 'Sudah diserahkan ke WhatsApp.',
-  failed: 'Percobaan kirim gagal, masih akan dicoba ulang otomatis.',
+  // Label lamanya berbunyi "masih akan dicoba ulang otomatis" dan itu keliru:
+  // dispatcher hanya mengambil baris `pending`, jadi tidak ada yang pernah
+  // menyentuhnya lagi. Status ini tidak ditulis lagi sejak percobaan-habis
+  // diperbaiki jadi `failed_permanent`; teks ini untuk baris peninggalan.
+  failed: 'Percobaan kirim habis dan sudah berhenti dicoba. Perlu ditinjau, bisa dikirim ulang manual.',
   failed_permanent: 'Semua percobaan habis. Perlu ditinjau, bisa dikirim ulang manual.',
   skipped_no_contact: 'Pasien tidak punya nomor yang bisa dipakai. Perbaiki lewat halaman Nomor bermasalah.',
   skipped_opt_out:

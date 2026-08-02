@@ -2,6 +2,7 @@ import * as cron from 'node-cron';
 import { Op, QueryTypes } from 'sequelize';
 import { Outbox, SendLog, PatientContact, AutoReplyLog } from '@/models';
 import { sik } from '@/db/sik';
+import { TERMINAL_OUTBOX_STATUSES } from '@/core/outboxStatus';
 import { normalizePhone } from '@/core/phone';
 import { logger, safeError } from '@/lib/logger';
 import { daftarBerkasMedia, hapusBerkasLampiran } from '@/lib/mediaStorage';
@@ -16,7 +17,28 @@ const RETENTION_DAYS = 90;
 async function cleanupOldRecords(): Promise<void> {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
-  const deletedOutbox = await Outbox.destroy({ where: { status: 'sent', sentAt: { [Op.lt]: cutoff } } });
+  /**
+   * Dipangkas menurut `created_at` untuk SELURUH status terminal, bukan menurut
+   * `sent_at` untuk `sent` saja.
+   *
+   * Bentuk lamanya (`status='sent' AND sent_at < cutoff`) meninggalkan setiap
+   * baris yang tidak pernah berhasil terkirim -- `skipped_no_contact`,
+   * `skipped_opt_out`, `failed`, `failed_permanent`, `expired` -- di tabel
+   * selamanya, karena `sent_at` memang NULL pada semuanya. Justru baris itulah
+   * yang paling banyak: satu broadcast ke 500 pasien di RS yang ~40% nomornya
+   * tidak terpakai meninggalkan ~200 baris abadi sekali kirim.
+   *
+   * Akibat lanjutannya lebih halus dan itu yang membuatnya perlu diperbaiki
+   * sekaligus: baris `skipped_*` ikut menyimpan `media_path`, sedangkan
+   * `cleanupOrphanMedia()` di bawah hanya menghapus berkas yang sudah tidak
+   * ditunjuk baris mana pun. Selama baris abadi itu ada, berkas lampirannya
+   * tidak pernah bisa dihapus dari disk.
+   *
+   * `pending`/`sending` sengaja tidak ikut: keduanya masih dipegang dispatcher.
+   */
+  const deletedOutbox = await Outbox.destroy({
+    where: { status: { [Op.in]: [...TERMINAL_OUTBOX_STATUSES] }, createdAt: { [Op.lt]: cutoff } },
+  });
   const deletedLogs = await SendLog.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
   // auto_reply_log tumbuh seiring pesan MASUK -- laju yang tidak dikendalikan
   // rumah sakit sama sekali, beda dari tabel lain di sini. Ikut dipangkas

@@ -1,15 +1,8 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes } from 'sequelize';
 import { db } from '@/db/wakhanza';
+import { OUTBOX_STATUSES, type OutboxStatus } from '@/core/outboxStatus';
 
-export type OutboxStatus =
-  | 'pending'
-  | 'sending'
-  | 'sent'
-  | 'failed'
-  | 'failed_permanent'
-  | 'skipped_no_contact'
-  | 'skipped_opt_out'
-  | 'expired';
+export type { OutboxStatus };
 
 export class Outbox extends Model<InferAttributes<Outbox>, InferCreationAttributes<Outbox>> {
   declare id: CreationOptional<number>;
@@ -49,17 +42,11 @@ Outbox.init(
     mediaPath: { type: DataTypes.STRING(255), allowNull: true, field: 'media_path' },
     mediaMime: { type: DataTypes.STRING(100), allowNull: true, field: 'media_mime' },
     mediaName: { type: DataTypes.STRING(255), allowNull: true, field: 'media_name' },
+    // Daftar nilainya diambil dari core/outboxStatus.ts, bukan diketik ulang di
+    // sini: ENUM yang tertinggal satu nilai dari daftar pusat akan ditolak
+    // MariaDB saat insert -- kegagalan yang baru muncul di produksi.
     status: {
-      type: DataTypes.ENUM(
-        'pending',
-        'sending',
-        'sent',
-        'failed',
-        'failed_permanent',
-        'skipped_no_contact',
-        'skipped_opt_out',
-        'expired',
-      ),
+      type: DataTypes.ENUM(...OUTBOX_STATUSES),
       allowNull: false,
       defaultValue: 'pending',
     },
