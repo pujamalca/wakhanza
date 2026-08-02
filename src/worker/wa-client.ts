@@ -1,32 +1,163 @@
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import { Client, LocalAuth, type Message } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
-import { WaSession, OptOut, Outbox } from '@/models';
+import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 import { handleInboundMessageSafely } from './autoReply';
+import { isOptOutRequest, optOutTriggerCodes } from '@/core/optOut';
+import {
+  isIndividualAddress,
+  isKnownNonIndividualAddress,
+  isLidAddress,
+  isPhoneLike,
+  phoneFromAddress,
+} from '@/core/waAddress';
 
 /**
- * F5.5 / ARCHITECTURE §8: kata kunci berhenti selalu didengarkan, dan selalu
+ * F5.5 / ARCHITECTURE §8: permintaan berhenti selalu didengarkan, dan selalu
  * diperiksa PALING DULU -- sebelum balasan otomatis mendapat giliran.
  *
- * Urutan ini bukan kebetulan. Pasien yang mengetik "stop" harus berhenti
- * berlangganan, bukan memicu pencocokan kata kunci yang kebetulan mengandung
- * kata itu; dan sebuah aturan balasan yang keliru ditulis staf tidak boleh
- * bisa menyandera permintaan berhenti.
+ * Urutan ini bukan kebetulan. Pasien yang minta berhenti harus berhenti, bukan
+ * memicu pencocokan kata kunci yang kebetulan mengandung kata yang sama; dan
+ * sebuah aturan balasan yang keliru ditulis staf tidak boleh bisa menyandera
+ * permintaan berhenti.
+ *
+ * Frasanya ada di core/optOut.ts bersama daftar pemicu yang terikat -- keduanya
+ * satu berkas karena keduanya menyusun SATU janji ke pasien, dan janji itu
+ * tidak boleh terpecah dua tempat yang bisa berbeda tafsir.
  */
-const STOP_RE = /^\s*(stop|berhenti|unsubscribe)\s*$/i;
-const CONFIRMATION_TEXT =
-  'Anda telah berhenti menerima notifikasi dari kami. Balas kembali kapan saja jika ingin berlangganan lagi lewat petugas pendaftaran.';
+/**
+ * Teks konfirmasi WAJIB menyebut batas cakupannya.
+ *
+ * Versi sebelumnya berbunyi "Anda telah berhenti menerima notifikasi dari
+ * kami" -- kalimat yang kini tidak benar, karena pengumuman broadcast dan
+ * jawaban atas pertanyaan pasien tetap berjalan. Menjanjikan lebih luas dari
+ * yang benar-benar dijalankan mesin adalah cara tercepat kehilangan
+ * kepercayaan pasien, dan pasien tidak punya cara memeriksanya selain menunggu
+ * pesan berikutnya datang.
+ */
+const OPT_OUT_CONFIRMATION = [
+  'Baik, kami hentikan pemberitahuan otomatis untuk nomor ini:',
+  'nomor antrian, konfirmasi & pengingat jadwal, hasil pemeriksaan, obat siap, dan tagihan.',
+  '',
+  'Yang MASIH akan Anda terima: pengumuman dari rumah sakit, dan jawaban atas pesan yang Anda kirim sendiri.',
+  '',
+  'Ingin berlangganan lagi? Sampaikan ke petugas pendaftaran.',
+].join('\n');
 
 let client: Client | null = null;
+
+/** Menyamarkan bagian nomornya tapi MEMPERTAHANKAN akhiran alamat (`@c.us`, `@lid`, `@g.us`) -- akhiran itulah yang menentukan pesan lolos penyaring atau tidak. */
+function jejakId(id: string | null | undefined): string {
+  if (!id) return '(kosong)';
+  const [user, server] = id.split('@');
+  return `${maskPhone(user)}@${server ?? '?'}`;
+}
 
 export function getClient(): Client {
   if (!client) throw new Error('WhatsApp client belum diinisialisasi — panggil initWaClient() dulu');
   return client;
 }
 
+/**
+ * Nomor E.164 pengirim sebuah pesan masuk.
+ *
+ * WAJIB ada sebelum apa pun dikerjakan, karena SEMUA yang di hilir berkunci
+ * pada nomor dan bukan pada identitas obrolan: daftar tolak
+ * (`opt_out.phone_e164`), kuota balasan per nomor (`auto_reply_log`), dan
+ * pengiriman itu sendiri (dispatcher mengirim ke `<nomor>@c.us`).
+ *
+ * Untuk alamat `@lid` nomornya tidak ada di alamat dan harus ditanyakan ke
+ * WhatsApp. Tiga jalur dicoba berurutan, dari yang paling resmi ke yang paling
+ * dalam; yang berhasil dicatat supaya kalau suatu saat WhatsApp mengubahnya
+ * lagi, log memberi tahu jalur mana yang tumbang -- bukan cuma "tidak membalas".
+ *
+ * Mengembalikan null berarti pemanggil harus BERHENTI, bukan menebak: membalas
+ * ke identitas yang tidak bisa dipetakan berarti melewati daftar tolak dan
+ * kuota sekaligus, dan menebak dari bentuk angkanya akan mengirim balasan ke
+ * nomor asing (bagian user sebuah LID berbentuk persis seperti nomor telepon).
+ */
+let jalurPemetaanTerakhir: string | null = null;
+
+/**
+ * Dicatat `info` HANYA saat jalurnya BERUBAH, `debug` selebihnya.
+ *
+ * Jalur mana yang dipakai tidak menarik selama tetap sama -- yang menarik
+ * justru saat ia berpindah ke jalur yang lebih dalam, karena itu tanda WhatsApp
+ * mengubah sesuatu lagi dan jalur sebelumnya berhenti bekerja. Mencatatnya tiap
+ * pesan akan menenggelamkan sinyal itu; mencatatnya hanya di `debug` membuatnya
+ * tak terlihat sama sekali pada LOG_LEVEL bawaan.
+ */
+function catatJalurPemetaan(jalur: string): void {
+  if (jalurPemetaanTerakhir === jalur) {
+    logger.debug({ jalur }, 'nomor pengirim dipetakan dari LID');
+    return;
+  }
+  jalurPemetaanTerakhir = jalur;
+  logger.info({ jalur }, 'jalur pemetaan LID -> nomor berubah');
+}
+
+async function resolvePhoneE164(message: Message): Promise<string | null> {
+  const langsung = phoneFromAddress(message.from);
+  if (langsung) return langsung;
+  if (!isLidAddress(message.from)) return null;
+
+  // [1] Jalur resmi. getContactModel() milik whatsapp-web.js sudah menukar id
+  // LID dengan nomor telepon begitu WhatsApp mengetahuinya.
+  try {
+    const kontak = await message.getContact();
+    const dariId = phoneFromAddress(kontak?.id?._serialized);
+    if (dariId) {
+      catatJalurPemetaan('kontak.id');
+      return dariId;
+    }
+    // [2] Cadangan untuk kasus id-nya ada tapi cacat. Penjaga `!isLidAddress`
+    // di sini WAJIB dan bukan kehati-hatian berlebih: `Contact.number` diisi
+    // dari `userid` kontak, dan untuk kontak ber-LID `userid` itu adalah bagian
+    // user LID-nya sendiri -- 15 digit, lolos isPhoneLike, dan sepenuhnya bukan
+    // nomor telepon. Tanpa penjaga ini jalur [2] justru menjadi cara paling
+    // rapi untuk mengirim balasan pasien ke nomor orang asing.
+    if (!isLidAddress(kontak?.id?._serialized) && isPhoneLike(kontak?.number)) {
+      catatJalurPemetaan('kontak.number');
+      return kontak.number;
+    }
+  } catch (err) {
+    logger.warn({ from: jejakId(message.from), ...safeError(err) }, 'gagal membaca kontak pengirim');
+  }
+
+  // [3] Pemetaan internal yang dipakai whatsapp-web.js sendiri untuk peserta
+  // grup ber-LID. Dibungkus try/catch supaya pembaruan pustaka yang
+  // menghapusnya berakibat "dilewati dengan peringatan", bukan worker tumbang.
+  try {
+    const page = (client as unknown as { pupPage?: { evaluate: (fn: (lid: string) => unknown, arg: string) => Promise<string | null> } })
+      ?.pupPage;
+    if (!page) return null;
+    const hasil: string | null = await page.evaluate(async (lid: string) => {
+      const w = window as unknown as {
+        WWebJS?: { enforceLidAndPnRetrieval?: (id: string) => Promise<{ phone?: { _serialized?: string } }> };
+      };
+      const r = await w.WWebJS?.enforceLidAndPnRetrieval?.(lid);
+      return r?.phone?._serialized ?? null;
+    }, message.from);
+    const dariInternal = phoneFromAddress(hasil);
+    if (dariInternal) {
+      catatJalurPemetaan('enforceLidAndPnRetrieval');
+      return dariInternal;
+    }
+  } catch (err) {
+    logger.warn({ from: jejakId(message.from), ...safeError(err) }, 'pemetaan LID internal gagal');
+  }
+
+  return null;
+}
+
 export async function isWaReady(): Promise<boolean> {
   const row = await WaSession.findByPk(1);
   return row?.status === 'ready';
+}
+
+export async function getWaSessionStatus(): Promise<WaSessionStatus | null> {
+  const row = await WaSession.findByPk(1);
+  return row?.status ?? null;
 }
 
 /**
@@ -90,21 +221,58 @@ export async function initWaClient(): Promise<Client> {
 
   client.on('message', async (message) => {
     if (message.fromMe) return;
-    if (!message.from.endsWith('@c.us')) return; // hanya obrolan perorangan, bukan grup
 
-    const phoneE164 = message.from.replace('@c.us', '');
+    if (!isIndividualAddress(message.from)) {
+      // Status kontak, grup, dan saluran datang terus-menerus ke nomor rumah
+      // sakit dan bukan kesalahan apa pun -- dicatat di level debug supaya
+      // tidak menenggelamkan yang penting. Server yang BELUM dikenal justru
+      // dinaikkan ke warn: lihat alasannya di core/waAddress.ts.
+      const rutin = isKnownNonIndividualAddress(message.from);
+      logger[rutin ? 'debug' : 'warn'](
+        { from: jejakId(message.from), type: message.type },
+        rutin ? 'pesan bukan-perorangan dilewati' : 'pesan masuk dilewati: jenis alamat belum dikenal',
+      );
+      return;
+    }
 
-    if (STOP_RE.test(message.body)) {
+    // Jejak AMPLOP untuk lalu lintas perorangan, dicatat SEBELUM penyaring
+    // sisanya. Tanpa ini, pesan yang jatuh di penyaring mana pun menghilang
+    // tanpa satu baris log -- persis keadaan yang membuat "tidak membalas" tak
+    // bisa dibedakan dari "pesannya tidak pernah sampai", dan yang membuat bug
+    // LID butuh berjam-jam untuk ditemukan. Yang dicatat cuma amplopnya, tidak
+    // pernah isinya (§9.7; `autoreply.log_inbound_text` mati karena alasan
+    // yang sama).
+    logger.info(
+      { from: jejakId(message.from), type: message.type, panjangTeks: (message.body ?? '').length },
+      'pesan masuk diterima',
+    );
+
+    const phoneE164 = await resolvePhoneE164(message);
+    if (!phoneE164) {
+      logger.warn({ from: jejakId(message.from) }, 'pesan masuk dilewati: nomor pengirim tidak bisa dipetakan');
+      return;
+    }
+
+    if (isOptOutRequest(message.body)) {
       try {
         await OptOut.upsert({ phoneE164, source: 'reply' });
         // §9.8: outbox yang masih menunggu ke nomor ini langsung dilewati --
-        // jangan tunggu pemeriksaan kedua di dispatcher untuk baris yang
-        // sudah nyata-nyata diketahui harus berhenti sekarang.
-        await Outbox.update({ status: 'skipped_opt_out' }, { where: { phoneE164, status: 'pending' } });
-        await message.reply(CONFIRMATION_TEXT);
-        logger.info({ phone: maskPhone(phoneE164) }, 'permintaan berhenti berlangganan diterima');
+        // jangan tunggu pemeriksaan kedua di dispatcher untuk baris yang sudah
+        // nyata-nyata diketahui harus berhenti sekarang.
+        //
+        // DIBATASI ke pemicu yang memang terikat: tanpa `triggerCode` di sini,
+        // broadcast dan balasan otomatis yang kebetulan sedang mengantre untuk
+        // nomor ini ikut tercoret -- padahal keduanya sengaja TIDAK tunduk pada
+        // opt-out. Itu akan membuat cakupannya bergantung pada kebetulan waktu:
+        // pesan yang sudah telanjur mengantre hilang, yang belum tetap terkirim.
+        await Outbox.update(
+          { status: 'skipped_opt_out' },
+          { where: { phoneE164, status: 'pending', triggerCode: optOutTriggerCodes() } },
+        );
+        await message.reply(OPT_OUT_CONFIRMATION);
+        logger.info({ phone: maskPhone(phoneE164) }, 'permintaan berhenti kirim otomatis diterima');
       } catch (err) {
-        logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti berlangganan');
+        logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti kirim otomatis');
       }
       return;
     }
