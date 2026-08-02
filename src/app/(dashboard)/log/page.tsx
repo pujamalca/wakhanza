@@ -1,4 +1,5 @@
 import { SendLog, Outbox } from '@/models';
+import { formatDurationSeconds } from '@/core/duration';
 import {
   PageHeader,
   Badge,
@@ -66,8 +67,14 @@ export default async function LogPage({ searchParams }: { searchParams: Promise<
                   <td className={`${cellClass} hidden max-w-md truncate text-xs text-muted-foreground md:table-cell`} title={row.detail ?? ''}>
                     {row.detail ?? '-'}
                   </td>
-                  <td className={`${cellClass} hidden whitespace-nowrap tabular-nums text-xs lg:table-cell`}>
-                    {row.durationMs ? `${row.durationMs} ms` : '-'}
+                  {/* Ditampilkan dalam detik; nilai milidetik yang tersimpan
+                      tetap terbaca lewat `title` supaya tiket dukungan masih
+                      bisa dicocokkan dengan isi `send_log.duration_ms`. */}
+                  <td
+                    className={`${cellClass} hidden whitespace-nowrap tabular-nums text-xs lg:table-cell`}
+                    title={row.durationMs ? `${row.durationMs} ms` : ''}
+                  >
+                    {row.durationMs ? formatDurationSeconds(row.durationMs) : '-'}
                   </td>
                 </tr>
               );

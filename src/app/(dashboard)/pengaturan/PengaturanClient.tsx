@@ -2,20 +2,46 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, Input, Button, Badge } from '@/components/ui';
+import { Card, Input, Button, Badge, MessageEditor } from '@/components/ui';
+import { TRIGGER_TEMPLATE_VARIABLES, AUTOREPLY_TEMPLATE_VARIABLES } from '@/core/template';
+import { msSettingToSeconds, secondsToMsSetting } from '@/core/duration';
 
 interface SettingField {
   key: string;
   label: string;
   hint?: string;
+  /**
+   * Nilainya TERSIMPAN dalam milidetik tapi DITAMPILKAN dalam detik.
+   *
+   * Kunci `app_setting`-nya tetap `*_ms` dan isinya tetap milidetik -- worker
+   * membacanya apa adanya lewat `getSettingNumber` dan tidak ikut berubah.
+   * Yang dikonversi hanya angka di layar: "300000" tidak memberi tahu siapa
+   * pun bahwa itu lima menit, "300" detik memberi tahu.
+   */
+  storedAsMs?: boolean;
+  /**
+   * Field yang isinya PESAN untuk pasien, bukan angka atau sakelar.
+   *
+   * Sebelumnya semua field memakai satu `<Input>` sebaris -- termasuk kedua
+   * pesan di bawah, yang panjangnya satu paragraf penuh dan memuat variabel.
+   * Menyunting kalimat berbaris banyak lewat kotak sebaris berarti staf tidak
+   * pernah bisa melihat pesan yang sedang ia tulis. Ditandai di sini supaya
+   * dirender dengan MessageEditor: toolbar format, sisip variabel, pratinjau.
+   */
+  variables?: readonly string[];
 }
 
 const GROUPS: { title: string; fields: SettingField[] }[] = [
   {
     title: 'Polling',
     fields: [
-      { key: 'polling.interval_ms', label: 'Interval polling sisip (ms)', hint: 'Default 60000' },
-      { key: 'polling.scan_interval_ms', label: 'Interval pindai booking (ms)', hint: 'Default 300000' },
+      { key: 'polling.interval_ms', label: 'Interval polling sisip (detik)', hint: 'Default 60 detik.', storedAsMs: true },
+      {
+        key: 'polling.scan_interval_ms',
+        label: 'Interval pindai booking (detik)',
+        hint: 'Default 300 detik (5 menit).',
+        storedAsMs: true,
+      },
       { key: 'polling.lookback_days', label: 'Jendela mundur (hari)' },
       { key: 'polling.query_timeout_sec', label: 'Batas waktu query (detik)' },
     ],
@@ -25,8 +51,13 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
     fields: [
       { key: 'dispatch.quiet_hours_start', label: 'Jam tenang mulai (0-23)' },
       { key: 'dispatch.quiet_hours_end', label: 'Jam tenang berakhir (0-23)' },
-      { key: 'dispatch.send_min_delay_ms', label: 'Jeda kirim minimum (ms)' },
-      { key: 'dispatch.send_max_delay_ms', label: 'Jeda kirim maksimum (ms)' },
+      { key: 'dispatch.send_min_delay_ms', label: 'Jeda kirim minimum (detik)', hint: 'Default 3 detik.', storedAsMs: true },
+      {
+        key: 'dispatch.send_max_delay_ms',
+        label: 'Jeda kirim maksimum (detik)',
+        hint: 'Default 8 detik. Jeda tiap pesan diacak antara minimum dan maksimum ini.',
+        storedAsMs: true,
+      },
       { key: 'dispatch.max_per_hour', label: 'Kuota kirim per jam' },
       { key: 'dispatch.stale_threshold_hours_default', label: 'Ambang basi default (jam)' },
       {
@@ -46,7 +77,12 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
     fields: [
       { key: 'privacy.sensitive_poli_codes', label: 'Kode poli sensitif (JSON array)', hint: '["U0001","U0002"]' },
       { key: 'privacy.sensitive_exam_codes', label: 'Kode pemeriksaan sensitif (JSON array)' },
-      { key: 'privacy.generic_template', label: 'Template pengganti layanan sensitif' },
+      {
+        key: 'privacy.generic_template',
+        label: 'Template pengganti layanan sensitif',
+        hint: 'Menggantikan isi pesan pemicu ketika layanan pasien masuk daftar sensitif — jadi ia juga tunduk pada permintaan "Berhenti Kirim Otomatis".',
+        variables: TRIGGER_TEMPLATE_VARIABLES,
+      },
     ],
   },
   {
@@ -76,6 +112,7 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
         key: 'autoreply.fallback_body',
         label: 'Pesan saat tak ada yang cocok',
         hint: 'Kosongkan agar DIAM. Pesan yang tidak dikenali sering pertanyaan medis sungguhan yang lebih baik dibaca petugas.',
+        variables: AUTOREPLY_TEMPLATE_VARIABLES,
       },
       { key: 'autoreply.fallback_cooldown_minutes', label: 'Jeda pesan cadangan (menit)' },
       {
@@ -92,6 +129,26 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
   },
 ];
 
+const MS_KEYS = new Set(GROUPS.flatMap((g) => g.fields).filter((f) => f.storedAsMs).map((f) => f.key));
+
+/**
+ * Konversi satuan HANYA di dua titik: saat isi form disiapkan, dan saat
+ * dikirim balik. Bukan di dalam `onChange` -- di sana staf yang sedang mengetik
+ * "1,5" akan kehilangan komanya begitu "1," diubah bolak-balik jadi angka.
+ *
+ * Keduanya wajib persis kebalikan satu sama lain: form ini mengirim ULANG
+ * seluruh kunci saat Simpan ditekan, termasuk yang tidak disentuh, jadi
+ * konversi yang meleset sedikit akan menggeser nilai tiap kali disimpan.
+ * Dijaga uji `duration.test.ts` ("bolak-balik tanpa berubah").
+ */
+function petakan(nilai: Record<string, string>, ubah: (v: string) => string): Record<string, string> {
+  const hasil = { ...nilai };
+  for (const key of MS_KEYS) {
+    if (key in hasil) hasil[key] = ubah(hasil[key]!);
+  }
+  return hasil;
+}
+
 async function fetchSettings(): Promise<Record<string, string>> {
   const res = await fetch('/api/settings', { cache: 'no-store' });
   if (!res.ok) throw new Error('gagal mengambil pengaturan');
@@ -104,7 +161,7 @@ function SettingsForm({ initial, isAdmin }: { initial: Record<string, string>; i
   // State lokal diinisialisasi dari prop saat komponen pertama kali dipasang
   // (kunci berbeda di pemanggil memaksa remount saat data query berubah) --
   // bukan lewat useEffect+setState yang memicu render berantai.
-  const [form, setForm] = useState<Record<string, string>>(initial);
+  const [form, setForm] = useState<Record<string, string>>(() => petakan(initial, msSettingToSeconds));
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const mutation = useMutation({
@@ -127,29 +184,52 @@ function SettingsForm({ initial, isAdmin }: { initial: Record<string, string>; i
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        mutation.mutate(form);
+        mutation.mutate(petakan(form, secondsToMsSetting));
       }}
-      className="max-w-2xl space-y-4"
+      className="max-w-3xl space-y-4"
     >
       {GROUPS.map((group) => (
         <Card key={group.title}>
           <h2 className="mb-3 text-sm font-semibold">{group.title}</h2>
           <div className="space-y-3">
-            {group.fields.map((field) => (
-              <div key={field.key} className="grid grid-cols-2 items-start gap-3">
-                <div>
+            {group.fields.map((field) =>
+              field.variables ? (
+                // Pesan diberi lebar penuh, label di atas: dua kolom sempit
+                // membuat toolbar dan pratinjau tidak muat.
+                <div key={field.key} className="space-y-1">
                   <label className="text-sm font-medium">{field.label}</label>
                   {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
+                  <MessageEditor
+                    name={field.key}
+                    value={form[field.key] ?? ''}
+                    onValueChange={(v) => setForm((f) => ({ ...f, [field.key]: v }))}
+                    variables={field.variables}
+                    disabled={!isAdmin}
+                    rows={4}
+                  />
                 </div>
-                <Input
-                  value={form[field.key] ?? ''}
-                  disabled={!isAdmin}
-                  onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
-                  className="w-full"
-                  fieldSize="sm"
-                />
-              </div>
-            ))}
+              ) : (
+                <div key={field.key} className="grid grid-cols-2 items-start gap-3">
+                  <div>
+                    <label className="text-sm font-medium">{field.label}</label>
+                    {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
+                  </div>
+                  <Input
+                    value={form[field.key] ?? ''}
+                    disabled={!isAdmin}
+                    onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+                    className="w-full"
+                    fieldSize="sm"
+                    // Nilai yang benar-benar masuk database tetap terlihat, jadi
+                    // admin yang membandingkan dengan isi `app_setting` atau
+                    // baris `audit_log` tidak menyangka angkanya berubah.
+                    title={
+                      field.storedAsMs ? `Tersimpan sebagai ${secondsToMsSetting(form[field.key] ?? '')} ms` : undefined
+                    }
+                  />
+                </div>
+              ),
+            )}
           </div>
         </Card>
       ))}
