@@ -150,6 +150,8 @@ Pengingat H-1 dan pembersihan berkala memakai `node-cron` di dalam proses worker
 
 Alasan: satu proses yang hidup lebih sedikit hal yang bisa salah dikonfigurasi, dan pekerjaan terjadwal butuh akses ke koneksi database serta klien WhatsApp yang sama.
 
+**Versi 4.x, dinaikkan dari 3.x untuk menutup kerentanan `uuid`.** Rilis mayor, tapi API yang dipakai proyek ini (`cron.schedule(expr, fn, { timezone })` dan `cron.validate`) tidak berubah bentuk maupun perilaku. `@types/node-cron` DIHAPUS: 4.x membawa tipenya sendiri, dan tipe pihak ketiga yang tertinggal versi justru mendeskripsikan API lama. **Dibuktikan runtime, bukan cuma lewat `tsc`**: jadwal per-detik benar-benar terpanggil 4× dalam 4 detik, `validate('0 18 * * *')` dan `validate('0 2 * * *')` (kedua ekspresi produksi) tetap sah, `validate('ngawur')` tetap ditolak, lalu worker sungguhan di bawah PM2 mencatat kedua penjadwalnya aktif (`penjadwal BOOK_REMIND aktif` dengan `cronExpr: 0 18 * * *`, `timezone: Asia/Jakarta`, dan `penjadwal pembersihan berkala aktif (02:00 WIB)`). Ini perlu karena BOOK_REMIND hanya jalan sekali sehari -- perubahan perilaku diam-diam baru ketahuan setelah pasien tidak menerima pengingatnya.
+
 ---
 
 ## Yang Ditolak
@@ -312,6 +314,6 @@ Dicatat saat Fase 0 benar-benar dikerjakan, karena beberapa pilihan "Ditetapkan"
 |---|---|---|
 | `whatsapp-web.js → archiver → archiver-utils/glob/brace-expansion` | DoS lewat regex tak terbatas di kode kompresi/ekstraksi media WhatsApp | wakhanza hanya mengirim teks, tidak pernah memanggil jalur kode archiver/zip milik whatsapp-web.js |
 | `next → sharp` (Image Optimizer) | Kerentanan libvips yang dibundel Next.js untuk `next/image` | Dashboard tidak memakai `next/image` dengan sumber jarak jauh; tidak ada `remotePatterns` yang dikonfigurasi |
-| `node-cron`/`sequelize → uuid` | Validasi batas buffer pada mode `uuid` yang tidak dipakai | Kedua paket memakai `uuid` hanya untuk membangkitkan ID acak, bukan mode `buf` yang rentan |
+| `sequelize → uuid` | Validasi batas buffer pada mode `uuid` yang tidak dipakai | Sequelize memakai `uuid` hanya untuk membangkitkan ID acak, bukan mode `buf` yang rentan. Diperiksa ulang: tidak ada satu pun kolom UUID di skema `wakhanza` (semua primary key `BIGINT AUTO_INCREMENT` atau `VARCHAR` alami) dan tidak ada import `uuid` di `src/`. Jalur `node-cron → uuid` sudah ditutup dengan menaikkan node-cron ke 4.x |
 
 Ini bukan alasan untuk berhenti memeriksa — `npm audit --omit=dev` harus tetap dijalankan tiap dependensi berubah (ARCHITECTURE §9.10), dan baris di atas ditinjau ulang begitu ada rilis yang benar-benar memperbaikinya, bukan sekadar diabaikan permanen.
