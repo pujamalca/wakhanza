@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
 import { sendBroadcastAction } from './actions';
-import { Textarea, Select, Button, cardClassName } from '@/components/ui';
+import { MessageEditor, WaPreview, Select, Button, cardClassName } from '@/components/ui';
 
 export interface BroadcastTemplateOption {
   id: number;
@@ -80,22 +80,23 @@ export function ComposeForm({
         </div>
       )}
 
-      <Textarea
+      <MessageEditor
         name="messageBody"
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onValueChange={setBody}
+        variables={BROADCAST_TEMPLATE_VARIABLES}
         rows={4}
-        fieldSize="sm"
-        className="w-full font-mono"
+        showPreview={false}
       />
-      <p className="text-xs text-muted-foreground">
-        Variabel tersedia: {BROADCAST_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ')}
-      </p>
 
       {preview && (
         <div className="rounded-md bg-muted/50 p-2 text-xs">
           <p className="mb-1 text-muted-foreground">Pratinjau (contoh pasien pertama):</p>
-          <p className="whitespace-pre-wrap">{uniqueCodeFooter ? `${preview}\n\n${uniqueCodeFooter}` : preview}</p>
+          {/* WaPreview, bukan teks polos: pratinjau harus memperlihatkan *tebal*
+              sebagai tebal seperti yang dilihat pasien, bukan bintangnya. */}
+          <p className="whitespace-pre-wrap">
+            <WaPreview text={uniqueCodeFooter ? `${preview}\n\n${uniqueCodeFooter}` : preview} />
+          </p>
           {uniqueCodeFooter && (
             <p className="mt-2 text-muted-foreground">
               Baris terakhir ditambahkan otomatis dan BERBEDA untuk setiap pasien — supaya kiriman massal tidak berisi teks

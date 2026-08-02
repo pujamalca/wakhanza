@@ -2,10 +2,10 @@ import { redirect } from 'next/navigation';
 import { Op, fn, col } from 'sequelize';
 import { auth } from '@/auth';
 import { AutoReplyRule, AutoReplyLog, parseKeywords, getSettingBool, getSettingNumber, getSetting } from '@/models';
-import { PageHeader, Card, EmptyState, Badge, IconMegaphone } from '@/components/ui';
+import { PageHeader, Card } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
-import { RuleForm, NewRuleForm, RuleHelp } from './RuleForm';
+import { RuleTable } from './RuleTable';
 
 // Angka ringkasan dan sakelar dibaca tiap kali halaman dibuka -- tidak boleh
 // tersaji dari cache build.
@@ -48,18 +48,6 @@ async function pemakaianPerAturan() {
     raw: true,
   })) as unknown as Array<{ ruleId: number; jumlah: number | string }>;
   return new Map(rows.map((r) => [Number(r.ruleId), Number(r.jumlah)]));
-}
-
-/**
- * Aturan yang tidak pernah terpakai hampir selalu berarti kata kuncinya tidak
- * cocok dengan cara pasien sungguhan bertanya -- itu satu-satunya sinyal
- * otomatis yang bisa diberikan halaman ini tanpa menyimpan teks pesan pasien.
- */
-function keteranganPemakaian(aktif: boolean, jumlah: number): string {
-  if (!aktif) return 'Nonaktif — tidak pernah diperiksa.';
-  return jumlah > 0
-    ? `Dipakai ${jumlah}× dalam ${HARI_RINGKASAN} hari terakhir.`
-    : `Belum pernah terpakai dalam ${HARI_RINGKASAN} hari terakhir.`;
 }
 
 function Angka({ label, nilai, warna, help }: { label: string; nilai: number; warna?: string; help: string }) {
@@ -130,8 +118,9 @@ export default async function BalasanOtomatisPage() {
             <h3 className="font-medium">Cara kerjanya</h3>
             <ol className="ml-4 list-decimal space-y-1.5 text-muted-foreground">
               <li>
-                Pasien mengirim pesan ke nomor WhatsApp rumah sakit. Kata <span className="font-mono text-xs">STOP</span> selalu
-                diperiksa lebih dulu dan tidak pernah bisa disandera aturan di bawah.
+                Pasien mengirim pesan ke nomor WhatsApp rumah sakit. Permintaan{' '}
+                <span className="font-mono text-xs">Berhenti Kirim Otomatis</span> selalu diperiksa lebih dulu dan tidak pernah
+                bisa disandera aturan di bawah.
               </li>
               <li>
                 Aturan diperiksa berurutan dari <span className="font-medium">urutan terkecil</span>. Yang pertama cocok yang
@@ -143,8 +132,9 @@ export default async function BalasanOtomatisPage() {
                 sendiri.
               </li>
               <li>
-                Nomor yang pernah membalas <span className="font-mono text-xs">STOP</span> tetap tidak dikirimi apa pun,
-                termasuk balasan otomatis.
+                Pasien yang meminta <span className="font-mono text-xs">Berhenti Kirim Otomatis</span>{' '}
+                <span className="font-medium">tetap dibalas di sini</span> — yang ia hentikan adalah pemberitahuan otomatis
+                (antrian, hasil, obat, tagihan, pengingat jadwal), bukan jawaban atas pesan yang ia kirim sendiri.
               </li>
             </ol>
             <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5 text-xs">
@@ -161,40 +151,20 @@ export default async function BalasanOtomatisPage() {
       </div>
 
       <h2 className="mb-1 font-medium">Aturan</h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Diperiksa dari urutan terkecil ke terbesar. Taruh aturan yang spesifik di atas yang umum — &ldquo;jadwal hari ini&rdquo;
-        harus diperiksa sebelum &ldquo;jadwal&rdquo;, kalau tidak yang umum akan selalu menang lebih dulu.
-      </p>
 
-      <RuleHelp />
-
-      <div className="grid gap-3 md:grid-cols-2">
-        {rules.map((r) => (
-          <RuleForm
-            key={r.id}
-            id={r.id}
-            initialLabel={r.label}
-            initialKeywords={parseKeywords(r.keywords).join(', ')}
-            initialMatchMode={r.matchMode}
-            initialBody={r.body}
-            initialPriority={r.priority}
-            initialActive={r.isActive}
-            readOnly={false}
-            usage={keteranganPemakaian(r.isActive, pakai.get(r.id) ?? 0)}
-          />
-        ))}
-        <NewRuleForm />
-      </div>
-
-      {rules.length === 0 && (
-        <EmptyState
-          icon={<IconMegaphone className="h-6 w-6" />}
-          title="Belum ada aturan"
-          action={<Badge variant="info">Tambahkan aturan pertama lewat formulir di atas</Badge>}
-        >
-          Tanpa aturan, tidak ada pesan masuk yang dibalas.
-        </EmptyState>
-      )}
+      <RuleTable
+        hariRingkasan={HARI_RINGKASAN}
+        rules={rules.map((r) => ({
+          id: r.id,
+          label: r.label,
+          keywords: parseKeywords(r.keywords),
+          matchMode: r.matchMode,
+          body: r.body,
+          priority: r.priority,
+          isActive: r.isActive,
+          usage: pakai.get(r.id) ?? 0,
+        }))}
+      />
     </div>
   );
 }

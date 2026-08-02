@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
-import { Input, Textarea, Select, Button, cardClassName } from '@/components/ui';
+import { Input, MessageEditor, WaPreview, Select, Button, cardClassName } from '@/components/ui';
 import { createScheduleAction } from './actions';
 import type { BroadcastTemplateOption } from '../broadcast/ComposeForm';
 
@@ -77,23 +77,22 @@ export function ScheduleForm({
             </Select>
           </div>
         )}
-        <Textarea
+        <MessageEditor
           name="messageBody"
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onValueChange={setBody}
+          variables={BROADCAST_TEMPLATE_VARIABLES}
           rows={4}
-          fieldSize="sm"
-          className="w-full font-mono"
+          showPreview={false}
         />
-        <p className="text-xs text-muted-foreground">
-          Variabel tersedia: {BROADCAST_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ')}
-        </p>
       </div>
 
       {preview && (
         <div className="rounded-md bg-muted/50 p-2 text-xs">
           <p className="mb-1 text-muted-foreground">Pratinjau (contoh pasien pertama dari hasil filter saat ini):</p>
-          <p className="whitespace-pre-wrap">{uniqueCodeFooter ? `${preview}\n\n${uniqueCodeFooter}` : preview}</p>
+          <p className="whitespace-pre-wrap">
+            <WaPreview text={uniqueCodeFooter ? `${preview}\n\n${uniqueCodeFooter}` : preview} />
+          </p>
           {uniqueCodeFooter && (
             <p className="mt-2 text-muted-foreground">
               Baris terakhir ditambahkan otomatis dan BERBEDA untuk setiap pasien pada setiap kali jadwal jalan — supaya
