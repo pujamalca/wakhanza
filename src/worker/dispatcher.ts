@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import { db } from '@/db/wakhanza';
 import { Outbox, OptOut, SendLog, getSettingNumber, getSettingJson } from '@/models';
 import { isPermanentAfter, retryDelayMs, isStale } from '@/core/retry';
+import { respectsOptOut } from '@/core/optOut';
 import { isWaReady, sendWhatsAppMessage, isRegisteredOnWhatsApp } from './wa-client';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 
@@ -51,8 +52,10 @@ export async function dispatchTick(): Promise<boolean> {
 
   // §9.8: opt-out diperiksa dua kali -- sekali saat enqueue, sekali lagi tepat
   // sebelum kirim. Jeda antara masuk antrean dan terkirim bisa panjang saat
-  // jam tenang; pasien yang membalas STOP di jeda itu tidak boleh tetap dikirimi.
-  if (row.phoneE164 && (await OptOut.findByPk(row.phoneE164))) {
+  // jam tenang; pasien yang meminta berhenti di sela itu tidak boleh tetap
+  // dikirimi. respectsOptOut() dipakai di KEDUA tempat lewat fungsi yang sama,
+  // supaya cakupannya tidak bisa berbeda antara saat menyusun dan saat kirim.
+  if (row.phoneE164 && respectsOptOut(row.triggerCode) && (await OptOut.findByPk(row.phoneE164))) {
     await row.update({ status: 'skipped_opt_out' });
     logger.info({ triggerCode: row.triggerCode, phone: maskPhone(row.phoneE164) }, 'dilewati: opt-out terdeteksi sebelum kirim');
     return true;

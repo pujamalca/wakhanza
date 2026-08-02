@@ -14,7 +14,7 @@ export default async function DaftarTolakPage() {
     <div>
       <PageHeader
         title="Daftar tolak"
-        description="Nomor yang berhenti berlangganan (F5.5). Seluruh pengiriman berikutnya ke nomor ini dilewati."
+        description="Nomor yang meminta berhenti menerima pemberitahuan otomatis (F5.5) — nomor antrian, konfirmasi & pengingat jadwal, hasil pemeriksaan, obat siap, dan tagihan. Pengumuman broadcast dan balasan otomatis atas pesan yang pasien kirim sendiri TIDAK ikut dihentikan."
       />
 
       {isAdmin && <AddOptOutForm />}
@@ -57,7 +57,8 @@ export default async function DaftarTolakPage() {
               <tr>
                 <td colSpan={isAdmin ? 5 : 4}>
                   <EmptyState icon={<IconBan className="h-5 w-5" />} title="Belum ada yang berhenti berlangganan">
-                    Nomor masuk ke sini otomatis begitu pasien membalas STOP, atau bisa ditambahkan manual oleh admin.
+                    Nomor masuk ke sini otomatis begitu pasien membalas &ldquo;Berhenti Kirim Otomatis&rdquo;, atau bisa
+                    ditambahkan manual oleh admin.
                   </EmptyState>
                 </td>
               </tr>

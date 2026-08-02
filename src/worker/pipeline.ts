@@ -5,6 +5,7 @@ import { renderTemplate, type TemplateVariable } from '@/core/template';
 import { appendUniqueCode, buildUniqueCodeFooter, DEFAULT_UNIQUE_CODE_TEMPLATE } from '@/core/uniqueCode';
 import { checkPrivacy } from '@/core/privacy';
 import { computeScheduledAt } from '@/core/quietHours';
+import { respectsOptOut } from '@/core/optOut';
 import { resolvePhone } from './contactResolver';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 
@@ -112,10 +113,11 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
  * Konteks untuk BALASAN OTOMATIS: isi pesannya berasal dari baris
  * `auto_reply_rule` yang cocok, bukan dari `template` maupun ketikan staf saat
  * itu juga. Sesudah ini tetap lewat enqueueMessage() yang sama seperti sembilan
- * pemicu lain -- termasuk pemeriksaan opt-out, yang artinya nomor yang pernah
- * membalas STOP tidak akan menerima balasan otomatis. Itu disengaja: STOP
- * berarti berhenti, dan menafsirkannya lebih longgar untuk satu jenis pesan
- * saja akan membuat janji STOP jadi bersyarat.
+ * pemicu lain -- kecuali satu hal: AUTO_REPLY TIDAK tunduk pada opt-out
+ * (core/optOut.ts). Frasa yang dipakai pasien adalah "Berhenti Kirim Otomatis",
+ * dan jawaban atas pesan yang ia kirim sendiri barusan bukan kiriman otomatis
+ * -- mendiamkan orang yang baru saja bertanya membuat sistem tampak rusak, dan
+ * bukan itu yang ia minta.
  */
 export async function loadAutoReplyContext(body: string): Promise<PipelineContext> {
   const shared = await loadSharedSettings();
@@ -193,7 +195,10 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
   let status: OutboxStatus = 'pending';
   if (!phoneE164) {
     status = 'skipped_no_contact';
-  } else if (await OptOut.findByPk(phoneE164)) {
+  } else if (respectsOptOut(ctx.triggerCode) && (await OptOut.findByPk(phoneE164))) {
+    // respectsOptOut() DILETAKKAN DI DEPAN pemeriksaan database, bukan
+    // sesudahnya: untuk BROADCAST ke ratusan penerima, itu menghemat satu
+    // query per baris yang hasilnya toh tidak dipakai.
     status = 'skipped_opt_out';
   }
 

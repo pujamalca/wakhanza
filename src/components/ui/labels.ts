@@ -20,7 +20,7 @@ export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = {
   failed: 'Gagal sementara',
   failed_permanent: 'Gagal permanen',
   skipped_no_contact: 'Tanpa nomor',
-  skipped_opt_out: 'Menolak (STOP)',
+  skipped_opt_out: 'Berhenti otomatis',
   expired: 'Kedaluwarsa',
 };
 
@@ -32,7 +32,8 @@ export const OUTBOX_STATUS_HELP: Record<OutboxStatus, string> = {
   failed: 'Percobaan kirim gagal, masih akan dicoba ulang otomatis.',
   failed_permanent: 'Semua percobaan habis. Perlu ditinjau, bisa dikirim ulang manual.',
   skipped_no_contact: 'Pasien tidak punya nomor yang bisa dipakai. Perbaiki lewat halaman Nomor bermasalah.',
-  skipped_opt_out: 'Nomor ini pernah membalas STOP, jadi sengaja tidak dikirimi.',
+  skipped_opt_out:
+    'Pasien meminta berhenti menerima pemberitahuan otomatis, jadi jenis pesan ini sengaja tidak dikirimi. Pengumuman broadcast dan balasan otomatis tidak terpengaruh.',
   expired: 'Kejadiannya sudah terlalu lama saat giliran kirim tiba, jadi dibatalkan agar pasien tidak menerima kabar basi.',
 };
 
