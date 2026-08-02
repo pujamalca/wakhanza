@@ -14,6 +14,7 @@ import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
+import { sendAlert } from './alert';
 import { randomDelayMs } from '@/core/retry';
 
 let running = true;
@@ -159,6 +160,14 @@ async function sessionWatchdog(): Promise<void> {
     // yang hilang karena restart.
     if (!(await checkHealth())) {
       logger.fatal('pemeriksaan kesehatan gagal, keluar supaya proses disupervisi ulang');
+      // Dikirim SEBELUM shutdown(): sesudahnya prosesnya sudah tidak ada.
+      // Ditunggu (bukan void) karena batas waktunya sudah keras 10 detik dan
+      // peringatan yang belum sempat terkirim sama saja dengan tidak ada.
+      await sendAlert({
+        kind: 'health_check_failed',
+        message: 'Sesi WhatsApp lulus status `ready` tapi tidak menjawab -- worker dimulai ulang.',
+        detail: 'Bila berulang, buka /koneksi dan periksa apakah sesi perlu ditautkan ulang.',
+      });
       // Lewat shutdown(), BUKAN process.exit() langsung: keluar tanpa menutup
       // Chromium meninggalkan state sesi setengah tertulis, sehingga proses
       // pengganti menggantung di `authenticating` -- pemulihan yang justru
@@ -179,6 +188,15 @@ async function sessionWatchdog(): Promise<void> {
       { status, diamMenit: Math.round(diamMs / 60_000) },
       'sesi WhatsApp tidak mencapai `ready` melewati batas, keluar supaya proses disupervisi ulang',
     );
+    // Inilah kejadian yang dulu berlangsung 14 jam tanpa ada yang tahu.
+    // Watchdog memang memulihkannya sendiri, tapi kalau pemulihannya gagal
+    // berulang, peringatan inilah satu-satunya yang membedakan "pulih dalam 15
+    // menit" dari "mati semalaman".
+    await sendAlert({
+      kind: 'session_stuck',
+      message: `Sesi WhatsApp tersangkut di status "${status ?? 'tidak diketahui'}" lebih dari ${Math.round(BATAS_TIDAK_SIAP_MS / 60_000)} menit -- worker dimulai ulang.`,
+      detail: 'Tidak ada pesan yang bisa dikirim maupun diterima selama ini. Buka /koneksi bila peringatan ini berulang.',
+    });
     await shutdown('sesi tidak mencapai ready', 1);
     return;
   }
@@ -195,7 +213,16 @@ async function main(): Promise<void> {
     await assertAuditLogAppendOnly();
     await assertRequiredSikColumnsExist();
   } catch (err) {
-    logger.fatal(safeError(err), 'PEMERIKSAAN KEAMANAN STARTUP GAGAL -- worker menolak jalan');
+    const e = safeError(err);
+    logger.fatal(e, 'PEMERIKSAAN KEAMANAN STARTUP GAGAL -- worker menolak jalan');
+    // Kegagalan paling senyap dari semuanya: worker menolak jalan, PM2 terus
+    // menyalakannya ulang, dan dashboard tetap tampil normal karena proses web
+    // memang hidup sendiri. Tidak satu pun pesan terkirim, tanpa ada yang tahu.
+    await sendAlert({
+      kind: 'startup_failed',
+      message: 'Worker MENOLAK JALAN -- pemeriksaan keamanan startup gagal.',
+      detail: `${e.message}\nTidak ada pesan yang akan terkirim sampai ini diperbaiki.`,
+    });
     process.exit(1);
   }
 

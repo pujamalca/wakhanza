@@ -32,6 +32,8 @@ const EDITABLE_KEYS = [
   'autoreply.fallback_cooldown_minutes',
   'autoreply.schedule_max_rows',
   'autoreply.log_inbound_text',
+  'alert.webhook_url',
+  'alert.min_interval_minutes',
 ] as const;
 
 export async function GET() {

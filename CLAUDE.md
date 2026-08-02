@@ -333,6 +333,27 @@ Di halaman Log, `formatDurationSeconds()` memakai satu desimal di bawah 10 detik
 
 Token warna (`src/app/globals.css`'s `:root`/`.dark`, dipetakan di `tailwind.config.ts`): `background`, `foreground`, `primary`, `muted`, `destructive`, `card` (permukaan panel, sedikit lebih terang dari `background` di mode gelap supaya card terlihat "terangkat"), `ring` (fokus), `success`/`warning` (status selain bahaya -- dulu dihardcode `green-600`/`amber-500` di `Badge`, melanggar aturan di bawah), `chart-sent`/`chart-failed` (lihat §Halaman Ringkasan). Tambah token warna baru di SINI (dua tempat: `:root` dan `.dark`), jangan hardcode `dark:bg-slate-800` dsb. langsung di komponen halaman kecuali kasus yang MEMANG sengaja tidak ikut tema (contoh: QR code di `KoneksiClient.tsx` tetap `bg-white` di kedua tema karena butuh kontras penuh untuk bisa dipindai -- ada komentar di kode yang menjelaskan ini).
 
+### Peringatan gangguan (`worker/alert.ts`) -- jalur yang tidak ikut mati bersama yang diberitakannya
+
+Watchdog memang memulihkan sesi yang tersangkut sendiri, tapi kalau pemulihannya gagal berulang tidak ada satu pun jalur yang memberi tahu siapa-siapa: panel di `/ringkasan` mengandalkan ada orang yang membuka halamannya, dan gangguan 14 jam itu bermula pukul 01:25.
+
+**Tidak bisa lewat WhatsApp, dan itu bukan detail kecil** -- hampir semua yang layak dialarmkan di sistem ini adalah "WhatsApp tidak jalan". Bentuknya **webhook HTTP generik**, bukan SMTP: nol dependensi baru (`fetch` sudah bawaan Node, dan menambah klien SMTP berarti satu paket lagi yang harus dirawat di server RS), dan satu URL yang sama bisa diarahkan ke bot Telegram, webhook Slack/Discord, atau endpoint milik IT rumah sakit. Field `text` diletakkan di depan payload dengan nama itu supaya ketiganya memakainya apa adanya tanpa adaptor.
+
+Empat hal yang menempel padanya:
+
+- **`alert.webhook_url` default KOSONG = tidak ada peringatan yang dikirim.** Konsisten dengan `autoreply.enabled`: fitur yang menghubungi dunia luar dinyalakan sadar-sadar, bukan menyala karena kebetulan terpasang.
+- **Jeda per JENIS peringatan** (`alert.min_interval_minutes`, default 15), disimpan di memori bukan database -- satu proses worker, dan peringatan yang hilang saat restart justru YANG BENAR karena restart itu sendiri kejadian baru. Tanpa jeda, satu gangguan semalaman jadi ratusan pesan dan penerimanya berhenti membacanya, persis alasan level log dipisah `debug`/`warn` di `wa-client.ts`. `kind: 'test'` dikecualikan: staf yang menekan tombol uji berulang sambil membetulkan URL harus melihat hasilnya.
+- **`sendAlert()` TIDAK PERNAH melempar**, dan punya batas waktu keras 10 detik. Peringatan yang gagal tidak boleh menjatuhkan proses yang sedang berusaha melaporkan masalahnya sendiri -- itu menukar satu gangguan dengan dua.
+- **Isinya cuma keadaan sistem** -- tidak pernah nomor pasien, nama, atau isi pesan. Webhook mengirim ke pihak ketiga di luar kendali RS, jadi aturan §9.7 berlaku lebih ketat lagi.
+
+Dipasang di tiga titik, semuanya keadaan "tidak ada pesan yang bisa terkirim": watchdog sesi tersangkut, pemeriksaan kesehatan gagal, dan **pemeriksaan keamanan startup gagal** -- yang terakhir paling senyap dari semuanya, karena PM2 terus menyalakan ulang sementara dashboard tetap tampil normal (proses web hidup sendiri).
+
+**Tombol "Kirim peringatan uji" di `/pengaturan` menguji nilai yang SUDAH TERSIMPAN, bukan yang sedang diketik** -- menguji isi kotak yang belum disimpan akan melaporkan "berhasil" atas URL yang tidak akan dipakai worker saat gangguan sungguhan datang. Webhook yang tidak pernah dicoba sama saja dengan tidak ada: URL salah ketik, bot yang belum diundang ke grup, atau token kedaluwarsa semuanya diam sampai saat paling buruk untuk menemukannya.
+
+**Kunci baru wajib didaftarkan ke `EDITABLE_KEYS`** di `api/settings/route.ts` -- itu daftar-izin, jadi kunci yang tidak terdaftar tersimpan diam-diam tanpa efek.
+
+Diverifikasi: keempat perilaku jeda dibuktikan lewat penerima webhook lokal sungguhan (jenis sama tertahan, jenis beda lolos, `test` dua kali beruntun keduanya lolos), payload diperiksa dan tidak memuat data pasien; tombolnya ditekan lewat **browser sungguhan** (Puppeteer, mencari tombol lewat TEKSNYA -- pelajaran dari uji broadcast yang dulu tidak sengaja menekan "Keluar") dengan ketiga jalur: terkirim, URL kosong, dan URL sah tapi tidak ada yang mendengarkan. Tercatat di `audit_log` sebagai `alert_webhook_test`. Dikembalikan ke kosong setelah diuji.
+
 ### Akun dashboard: `npm run users`, dan kenapa JWT membatasi artinya "dinonaktifkan"
 
 `seed:admin` MENOLAK bila username sudah ada, dan tidak ada halaman pengelolaan pengguna. Sampai `scripts/manage-users.ts` ada, tidak ada satu pun jalan yang didukung untuk mengganti kata sandi, menonaktifkan akun petugas yang sudah pindah, atau membuka akun terkunci -- selain menyunting `app_user` lewat SQL mentah, yang berarti menghitung hash bcrypt sendiri di luar aplikasi dan tidak meninggalkan jejak `audit_log`. Semua tindakannya tercatat dengan pelaku `cli:<akun OS>` (dibedakan sengaja dari username staf), dan **kata sandinya tidak pernah ikut dicatat**.

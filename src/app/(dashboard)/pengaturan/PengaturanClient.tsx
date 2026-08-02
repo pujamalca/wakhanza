@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, Input, Button, Badge, MessageEditor } from '@/components/ui';
 import { TRIGGER_TEMPLATE_VARIABLES, AUTOREPLY_TEMPLATE_VARIABLES } from '@/core/template';
 import { msSettingToSeconds, secondsToMsSetting } from '@/core/duration';
+import { testAlertWebhookAction } from './actions';
 
 interface SettingField {
   key: string;
@@ -97,6 +98,21 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
     fields: [{ key: 'schedule.book_remind_hour', label: 'Jam kirim pengingat H-1 (0-23)' }],
   },
   {
+    title: 'Peringatan gangguan',
+    fields: [
+      {
+        key: 'alert.webhook_url',
+        label: 'URL webhook peringatan',
+        hint: 'Kosongkan untuk mematikan. Diisi URL bot Telegram / webhook Slack-Discord / endpoint IT rumah sakit -- SENGAJA bukan WhatsApp, karena yang dilaporkan justru saat WhatsApp tidak jalan.',
+      },
+      {
+        key: 'alert.min_interval_minutes',
+        label: 'Jeda minimum antar peringatan sejenis (menit)',
+        hint: 'Gangguan semalaman tidak boleh jadi ratusan pesan -- penerimanya akan berhenti membaca.',
+      },
+    ],
+  },
+  {
     // Sakelar utamanya (autoreply.enabled) sengaja TIDAK ada di sini -- ia
     // tinggal di halaman Balasan otomatis, di mana konsekuensinya dijelaskan
     // dan aturannya terlihat. Menyalakan sistem yang menjawab pasien tidak
@@ -147,6 +163,49 @@ function petakan(nilai: Record<string, string>, ubah: (v: string) => string): Re
     if (key in hasil) hasil[key] = ubah(hasil[key]!);
   }
   return hasil;
+}
+
+/**
+ * Tombol uji webhook.
+ *
+ * Terpisah dari form utama dan TIDAK ikut tombol Simpan: yang diuji adalah
+ * nilai yang SUDAH tersimpan, bukan yang sedang diketik. Menguji isi kotak yang
+ * belum disimpan akan melaporkan "berhasil" atas URL yang tidak akan dipakai
+ * worker saat gangguan sungguhan datang.
+ */
+function UjiWebhook() {
+  const [hasil, setHasil] = useState<{ ok: boolean; message: string } | null>(null);
+  const [menguji, setMenguji] = useState(false);
+
+  return (
+    <div className="mt-3 border-t border-muted pt-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={menguji}
+          onClick={async () => {
+            setMenguji(true);
+            setHasil(null);
+            try {
+              setHasil(await testAlertWebhookAction());
+            } catch {
+              setHasil({ ok: false, message: 'Gagal memanggil server.' });
+            } finally {
+              setMenguji(false);
+            }
+          }}
+        >
+          {menguji ? 'Mengirim...' : 'Kirim peringatan uji'}
+        </Button>
+        <p className="text-xs text-muted-foreground">Memakai URL yang sudah tersimpan -- simpan dulu bila baru diubah.</p>
+      </div>
+      {hasil && (
+        <p className={`mt-2 text-xs ${hasil.ok ? 'text-success' : 'text-destructive'}`}>{hasil.message}</p>
+      )}
+    </div>
+  );
 }
 
 async function fetchSettings(): Promise<Record<string, string>> {
@@ -231,6 +290,7 @@ function SettingsForm({ initial, isAdmin }: { initial: Record<string, string>; i
               ),
             )}
           </div>
+          {group.title === 'Peringatan gangguan' && isAdmin && <UjiWebhook />}
         </Card>
       ))}
 
