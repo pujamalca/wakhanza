@@ -4,6 +4,14 @@ import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
 import { sendBroadcastAction } from './actions';
 import { MessageEditor, WaPreview, Select, Button, cardClassName } from '@/components/ui';
+import {
+  periksaBerkasLampiran,
+  periksaPanjangKeterangan,
+  formatUkuran,
+  jenisLampiranDari,
+  ACCEPT_LAMPIRAN,
+  MAX_KETERANGAN,
+} from '@/core/media';
 
 export interface BroadcastTemplateOption {
   id: number;
@@ -36,8 +44,16 @@ export function ComposeForm({
     {},
   );
   const [body, setBody] = useState(DEFAULT_BODY);
+  const [lampiran, setLampiran] = useState<File | null>(null);
 
   const preview = sampleVars ? renderTemplate(body, sampleVars) : null;
+
+  // Diperiksa juga di server sebelum menulis apa pun (actions.ts). Di sini
+  // hanya supaya staf tahu SEBELUM menekan Kirim, bukan sesudah.
+  const berkasError = lampiran ? periksaBerkasLampiran(lampiran.name, lampiran.type, lampiran.size).error : undefined;
+  const panjangFooter = uniqueCodeFooter ? uniqueCodeFooter.length + 2 : 0;
+  const keteranganError = lampiran && !berkasError ? periksaPanjangKeterangan(body, panjangFooter).error : undefined;
+  const lampiranBermasalah = !!(berkasError || keteranganError);
 
   return (
     <form
@@ -45,7 +61,8 @@ export function ComposeForm({
       className={`mt-4 space-y-2 ${cardClassName}`}
       onSubmit={(e) => {
         const ok = window.confirm(
-          `Kirim pesan ini ke ${total} pasien (${reachable} akan benar-benar menerima -- sisanya tanpa nomor valid atau sudah berhenti)?`,
+          `Kirim pesan ini ke ${total} pasien (${reachable} akan benar-benar menerima -- sisanya tanpa nomor valid atau sudah berhenti)?` +
+            (lampiran ? `\n\nLampiran ikut terkirim: ${lampiran.name} (${formatUkuran(lampiran.size)}).` : ''),
         );
         if (!ok) e.preventDefault();
       }}
@@ -106,9 +123,38 @@ export function ComposeForm({
         </div>
       )}
 
+      <div className="space-y-1 border-t pt-2">
+        <label className="text-xs font-medium" htmlFor="media-broadcast">
+          Lampiran (opsional)
+        </label>
+        <input
+          id="media-broadcast"
+          type="file"
+          name="media"
+          accept={ACCEPT_LAMPIRAN}
+          onChange={(e) => setLampiran(e.target.files?.[0] ?? null)}
+          className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1 file:text-xs file:text-foreground hover:file:bg-muted/70"
+        />
+        {lampiran && !berkasError && (
+          <p className="text-xs text-muted-foreground">
+            {jenisLampiranDari(lampiran.type)?.label} &middot; {formatUkuran(lampiran.size)} &middot; dikirim sebagai{' '}
+            <span className="text-foreground">{lampiran.name}</span>
+          </p>
+        )}
+        {/* Batas keterangan hanya berlaku SAAT ada lampiran -- pesan teks biasa
+            boleh panjang, jadi angka ini sengaja tidak ditampilkan kalau tidak
+            ada berkas yang dipilih. */}
+        {lampiran && !berkasError && !keteranganError && (
+          <p className="text-xs text-muted-foreground">
+            Panjang pesan {body.length + panjangFooter} / {MAX_KETERANGAN} karakter (termasuk baris kode pengiriman).
+          </p>
+        )}
+        {(berkasError || keteranganError) && <p className="text-xs text-destructive">{berkasError ?? keteranganError}</p>}
+      </div>
+
       {state.error && <p className="text-xs text-destructive">{state.error}</p>}
 
-      <Button type="submit" variant="primary" size="xs" disabled={isPending || total === 0}>
+      <Button type="submit" variant="primary" size="xs" disabled={isPending || total === 0 || lampiranBermasalah}>
         {isPending ? 'Mengirim...' : `Kirim ke ${total} pasien`}
       </Button>
     </form>

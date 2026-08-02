@@ -4,6 +4,7 @@ import { Outbox, SendLog, PatientContact, AutoReplyLog } from '@/models';
 import { sik } from '@/db/sik';
 import { normalizePhone } from '@/core/phone';
 import { logger, safeError } from '@/lib/logger';
+import { daftarBerkasMedia, hapusBerkasLampiran } from '@/lib/mediaStorage';
 
 const RETENTION_DAYS = 90;
 
@@ -26,6 +27,37 @@ async function cleanupOldRecords(): Promise<void> {
     { deletedOutbox, deletedLogs, deletedAutoReply },
     'pembersihan berkala: outbox, send_log & auto_reply_log lama dihapus',
   );
+
+  await cleanupOrphanMedia();
+}
+
+/**
+ * Berkas lampiran broadcast yang barisnya sudah ikut terpangkas di atas.
+ *
+ * Satu berkas ditunjuk oleh SELURUH baris outbox satu kampanye, jadi ia hanya
+ * boleh dihapus setelah tidak ada satu pun baris yang menunjuknya lagi --
+ * menghapus per baris akan membuat kiriman ke pasien ke-2 sampai ke-500 gagal
+ * karena berkasnya sudah lenyap saat gilirannya tiba.
+ *
+ * `broadcast_campaign` sengaja TIDAK ikut diperiksa: ia insert-only dan tidak
+ * pernah dipangkas, jadi memakainya sebagai acuan berarti tidak ada berkas yang
+ * pernah bisa dihapus. Catatan nama berkas di sana tetap utuh sebagai jejak
+ * akuntabilitas walau berkasnya sudah tidak ada.
+ */
+async function cleanupOrphanMedia(): Promise<void> {
+  // Ambang usia melindungi berkas yang BARU diunggah tapi baris outbox-nya
+  // belum sempat ditulis (jeda beberapa detik saat broadcast besar).
+  const kandidat = await daftarBerkasMedia(24 * 60 * 60 * 1000);
+  if (kandidat.length === 0) return;
+
+  let dihapus = 0;
+  for (const nama of kandidat) {
+    const masihDipakai = await Outbox.count({ where: { mediaPath: nama } });
+    if (masihDipakai > 0) continue;
+    await hapusBerkasLampiran(nama);
+    dihapus++;
+  }
+  if (dihapus > 0) logger.info({ dihapus }, 'pembersihan berkala: berkas lampiran tanpa pemilik dihapus');
 }
 
 /** ARCHITECTURE §11: patient_contact bersumber 'auto' dihitung ulang bila raw_value di sik berubah. */

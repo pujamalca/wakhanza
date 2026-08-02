@@ -7,7 +7,9 @@ import { fetchPatientSegment } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { buildIdempotencyKey } from '@/core/idempotency';
-import { loadBroadcastContext, enqueueMessage, identityVars } from '@/worker/pipeline';
+import { loadBroadcastContext, enqueueMessage, identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
+import { periksaBerkasLampiran, periksaPanjangKeterangan, MAX_LAMPIRAN_MB } from '@/core/media';
+import { simpanBerkasLampiran } from '@/lib/mediaStorage';
 import { BroadcastCampaign, getSettingNumber, logAudit } from '@/models';
 import { parseFilters, type RawFilterInput } from './filters';
 
@@ -55,6 +57,29 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
     };
   }
 
+  // Lampiran diperiksa SEBELUM apa pun ditulis: berkas disimpan hanya setelah
+  // seluruh validasi lolos, supaya penolakan tidak meninggalkan berkas yatim.
+  const unggahan = formData.get('media');
+  const berkas = unggahan instanceof File && unggahan.size > 0 ? unggahan : null;
+  let media: { path: string; mime: string; name: string } | null = null;
+
+  if (berkas) {
+    const maxMb = await getSettingNumber('broadcast.max_media_mb', MAX_LAMPIRAN_MB);
+    const periksa = periksaBerkasLampiran(berkas.name, berkas.type, berkas.size, maxMb);
+    if (!periksa.ok) return { error: periksa.error };
+
+    // Panjang keterangan dihitung berikut baris kode pengiriman, karena baris
+    // itu ikut terkirim dan ikut memakan jatah batas WhatsApp.
+    const footer = (await previewUniqueCodeFooter('pratinjau|panjang')) ?? '';
+    const panjangFooter = footer ? footer.length + 2 : 0; // +2 = baris kosong pemisah
+    const muat = periksaPanjangKeterangan(messageBody, panjangFooter);
+    if (!muat.ok) return { error: muat.error };
+
+    const tersimpan = await simpanBerkasLampiran(berkas);
+    if (!tersimpan) return { error: 'Berkas lampiran tidak bisa disimpan.' };
+    media = { path: tersimpan.relativePath, mime: tersimpan.mime, name: tersimpan.originalName };
+  }
+
   const identity = await getHospitalIdentity();
   const ctx = await loadBroadcastContext(messageBody);
 
@@ -69,6 +94,9 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
       cari: filters.cari,
     }),
     messageBody,
+    mediaPath: media?.path ?? null,
+    mediaMime: media?.mime ?? null,
+    mediaName: media?.name ?? null,
     recipientCount: recipients.length,
   });
 
@@ -83,12 +111,18 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
         kdPoli: row.kd_poli,
         vars: { ...identityVars(identity), nama_pasien: row.nm_pasien ?? '', no_rm: row.no_rkm_medis },
         campaignId: campaign.id,
+        media,
       },
       ctx,
     );
   }
 
-  await logAudit(session!.user.username, 'broadcast_send', String(campaign.id), `${recipients.length} penerima`);
+  await logAudit(
+    session!.user.username,
+    'broadcast_send',
+    String(campaign.id),
+    media ? `${recipients.length} penerima, lampiran ${media.name}` : `${recipients.length} penerima`,
+  );
   revalidatePath('/broadcast');
   redirect(`/broadcast?sent=${campaign.id}`);
 }

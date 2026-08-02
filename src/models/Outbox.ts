@@ -19,6 +19,15 @@ export class Outbox extends Model<InferAttributes<Outbox>, InferCreationAttribut
   declare noRkmMedis: string | null;
   declare phoneE164: string | null;
   declare body: string;
+  /**
+   * Lintasan berkas lampiran RELATIF terhadap direktori media (lihat
+   * lib/mediaStorage.ts) -- bukan lintasan absolut, supaya memindahkan
+   * pemasangan atau direktori datanya tidak membatalkan baris lama.
+   */
+  declare mediaPath: string | null;
+  declare mediaMime: string | null;
+  /** Nama asli unggahan, HANYA untuk ditampilkan ke staf dan sebagai nama berkas di WhatsApp. */
+  declare mediaName: string | null;
   declare status: CreationOptional<OutboxStatus>;
   declare attempts: CreationOptional<number>;
   declare eventAt: Date;
@@ -37,6 +46,9 @@ Outbox.init(
     noRkmMedis: { type: DataTypes.STRING(15), allowNull: true, field: 'no_rkm_medis' },
     phoneE164: { type: DataTypes.STRING(20), allowNull: true, field: 'phone_e164' },
     body: { type: DataTypes.TEXT, allowNull: false },
+    mediaPath: { type: DataTypes.STRING(255), allowNull: true, field: 'media_path' },
+    mediaMime: { type: DataTypes.STRING(100), allowNull: true, field: 'media_mime' },
+    mediaName: { type: DataTypes.STRING(255), allowNull: true, field: 'media_name' },
     status: {
       type: DataTypes.ENUM(
         'pending',

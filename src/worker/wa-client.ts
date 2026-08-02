@@ -1,4 +1,4 @@
-import { Client, LocalAuth, type Message } from 'whatsapp-web.js';
+import { Client, LocalAuth, MessageMedia, type Message } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
 import { logger, safeError, maskPhone } from '@/lib/logger';
@@ -11,6 +11,7 @@ import {
   isPhoneLike,
   phoneFromAddress,
 } from '@/core/waAddress';
+import { resolveMediaPath } from '@/lib/mediaStorage';
 
 /**
  * F5.5 / ARCHITECTURE §8: permintaan berhenti selalu didengarkan, dan selalu
@@ -308,9 +309,40 @@ export async function checkHealth(timeoutMs = 10_000): Promise<boolean> {
   }
 }
 
-export async function sendWhatsAppMessage(phoneE164: string, body: string): Promise<void> {
+export interface LampiranKirim {
+  /** Lintasan RELATIF terhadap direktori media; diperiksa ulang di sini. */
+  path: string;
+  name: string;
+}
+
+/**
+ * Pesan dikirim ke `<nomor>@c.us` walau obrolan masuknya beralamat `@lid` --
+ * WhatsApp menerima JID bernomor untuk pengiriman dan menaruhnya di percakapan
+ * yang sama. Dibuktikan end-to-end: balasan atas pesan ber-LID diterima pasien.
+ */
+export async function sendWhatsAppMessage(phoneE164: string, body: string, lampiran?: LampiranKirim | null): Promise<void> {
   const c = getClient();
-  await c.sendMessage(`${phoneE164}@c.us`, body);
+  const chatId = `${phoneE164}@c.us`;
+
+  if (!lampiran) {
+    await c.sendMessage(chatId, body);
+    return;
+  }
+
+  // Lintasan dibangun ulang lewat resolveMediaPath, bukan dipakai apa adanya
+  // dari baris outbox: nilainya sudah pulang-pergi lewat database, dan ini yang
+  // memastikan satu baris yang disunting lewat SQL tidak bisa membuat worker
+  // membaca berkas sembarang di server lalu mengirimkannya ke pasien.
+  const absolut = resolveMediaPath(lampiran.path);
+  if (!absolut) throw new Error(`lintasan lampiran ditolak: ${lampiran.path}`);
+
+  const media = MessageMedia.fromFilePath(absolut);
+  media.filename = lampiran.name || media.filename;
+  // Isi pesan menjadi KETERANGAN lampiran. Batas panjangnya jauh lebih pendek
+  // daripada pesan teks biasa dan sudah diperiksa saat menyusun
+  // (core/media.ts's periksaPanjangKeterangan) -- kalau sampai lolos ke sini
+  // dan ditolak WhatsApp, kegagalannya tercatat di send_log seperti biasa.
+  await c.sendMessage(chatId, media, { caption: body });
 }
 
 /** F5.4: bedakan nomor tak terdaftar (permanen) dari kegagalan sementara SEBELUM mencoba kirim. */

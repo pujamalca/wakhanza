@@ -25,6 +25,11 @@ logs/
 npm-debug.log*
 coverage/
 
+# Lampiran broadcast yang diunggah staf. Sengaja DI LUAR public/ -- apa pun di
+# bawah public/ dilayani Next.js tanpa autentikasi, jadi setiap surat edaran RS
+# akan bisa diunduh siapa saja yang menebak namanya.
+uploads/
+
 # OS
 Thumbs.db
 .DS_Store

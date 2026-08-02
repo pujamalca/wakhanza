@@ -93,10 +93,17 @@ export async function dispatchTick(): Promise<boolean> {
       return true;
     }
 
-    await sendWhatsAppMessage(row.phoneE164, row.body);
+    await sendWhatsAppMessage(
+      row.phoneE164,
+      row.body,
+      row.mediaPath ? { path: row.mediaPath, name: row.mediaName ?? '' } : null,
+    );
     await row.update({ status: 'sent', sentAt: new Date(), attempts });
     await SendLog.create({ outboxId: row.id, attempt: attempts, outcome: 'sent', durationMs: Date.now() - startedAt });
-    logger.info({ triggerCode: row.triggerCode, phone: maskPhone(row.phoneE164) }, 'pesan terkirim');
+    logger.info(
+      { triggerCode: row.triggerCode, phone: maskPhone(row.phoneE164), berlampiran: !!row.mediaPath },
+      'pesan terkirim',
+    );
   } catch (err) {
     const e = safeError(err);
     const permanent = isPermanentAfter(attempts);

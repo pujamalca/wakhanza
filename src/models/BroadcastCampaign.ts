@@ -13,6 +13,9 @@ export class BroadcastCampaign extends Model<InferAttributes<BroadcastCampaign>,
   declare createdBy: string;
   declare filterJson: string;
   declare messageBody: string;
+  declare mediaPath: CreationOptional<string | null>;
+  declare mediaMime: CreationOptional<string | null>;
+  declare mediaName: CreationOptional<string | null>;
   declare recipientCount: number;
   declare createdAt: CreationOptional<Date>;
 }
@@ -23,6 +26,9 @@ BroadcastCampaign.init(
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     filterJson: { type: DataTypes.TEXT, allowNull: false, field: 'filter_json' },
     messageBody: { type: DataTypes.TEXT, allowNull: false, field: 'message_body' },
+    mediaPath: { type: DataTypes.STRING(255), allowNull: true, field: 'media_path' },
+    mediaMime: { type: DataTypes.STRING(100), allowNull: true, field: 'media_mime' },
+    mediaName: { type: DataTypes.STRING(255), allowNull: true, field: 'media_name' },
     recipientCount: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, field: 'recipient_count' },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   },
