@@ -42,6 +42,8 @@ npm run migrate           # terapkan migrations/*.sql yang belum jalan (skema wa
 npm run verify:db         # buktikan sik menolak tulisan, dan audit_log append-only tertegak
 npm run verify:plans      # EXPLAIN tiap query poller; gagal bila ada type:ALL selain booking_registrasi
 npm run poll:dryrun       # cetak pesan yang AKAN terkirim untuk SEMUA pemicu tanpa mengirim/menulis apa pun
+npm run scan:contacts -- --dry-run   # hitung nomor pasien yang tidak terpakai, tanpa menulis
+npm run scan:contacts     # isi patient_contact untuk SELURUH pasien sekaligus (lihat di bawah)
 npm run seed:admin -- <username> "<nama>" <password>   # buat user dashboard pertama (role admin)
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 npx jest                  # semua test; `npx jest core/phone` untuk satu suite
@@ -329,6 +331,16 @@ Sesudah login mendarat di `/ringkasan`, bukan `/koneksi` seperti sebelumnya: hal
 ## Keputusan yang dulu terbuka, sudah diputuskan saat implementasi
 
 - **`core/phone.ts`**: diimplementasikan **ketat** -- persis 7 langkah ARCHITECTURE §5.1, tanpa heuristik tambahan. Diverifikasi terhadap seluruh 8.117 baris `sik.pasien` nyata: 59,5% langsung valid (melampaui baseline 45% di PRD), sisanya masuk `patient_contact` dengan alasan penolakan untuk dikoreksi manual lewat dashboard.
+
+### `npm run scan:contacts` -- kenapa pemindaian awal perlu ada terpisah
+
+`worker/contactResolver.ts` menulis satu baris `patient_contact` hanya SAAT sebuah pemicu sudah melewati pasien itu. Konsekuensinya luput cukup lama: di hari pertama produksi halaman `/nomor-bermasalah` kosong, lalu terisi seorang demi seorang **sesudah** tiap pasien gagal dikirimi. Nomor yang tidak terpakai baru ketahuan setelah pesannya telanjur hilang -- padahal daftarnya bisa diketahui seluruhnya di muka. `scripts/scan-contacts.ts` membaca `sik.pasien` sekali jalan (SELECT saja, keyset pagination lewat PK + jeda antar batch supaya tidak berebut koneksi dengan SIMRS) dan mengisi semuanya. **Baris `source='manual'` tidak pernah ditimpa** -- koreksi petugas mengalahkan normalisasi otomatis (F2.1-F2.3), dan skrip ini tidak boleh membatalkan pekerjaan orang. Aman dijalankan berulang; punya `--dry-run`.
+
+Hasil nyata di database ini: 8.118 pasien, 4.834 (59,5%) terpakai -- **angka yang sama persis dengan verifikasi `core/phone.ts` dulu**, jadi sekalian membuktikan skripnya memakai normalisasi yang sama, bukan salinan yang menyimpang.
+
+**Sebarannya timpang, dan itu mengubah bentuk halamannya.** Dari 3.284 nomor bermasalah, 3.166 beralasan `empty` -- pasien yang di Khanza memang tidak punya nomor sama sekali. Itu bukan salah ketik yang bisa dibetulkan sambil menatap layar; nomornya harus diminta saat pasien datang lagi. Yang benar-benar bisa dikerjakan petugas dari mejanya cuma 118 (`too_short` 55, `not_mobile` 52, `unparseable` 11). Karena chip saringan dulu diurutkan mengikuti urutan kunci enum, `Kosong` tampil lebih dulu dan mengubur 118 baris itu. Sekarang chip-nya **diurutkan yang bisa dikerjakan lebih dulu, membawa jumlah masing-masing**, ditambah keterangan "menampilkan 100 dari N" (halamannya berbatas 100 baris dan dulu tidak mengatakannya) dan satu kalimat khusus pada saringan `Kosong` yang menjelaskan kenapa tidak ada yang bisa dikoreksi di situ.
+
+Diverifikasi lewat HTTP asli dengan cookie sesi admin sungguhan: chip terurut `Semua (3.284) | Terlalu pendek (55) | Bukan nomor seluler (52) | Tidak terbaca (11) | Kosong (3.166)`.
 - **`BILLING_READY` — kirim ke pasien atau penanggung jawab?** (PRD §10 #3) Ternyata pertanyaan ini tidak berdampak teknis: `reg_periksa.p_jawab` cuma berisi NAMA, bukan nomor kontak terpisah. Satu-satunya nomor yang tersedia tetap `pasien.no_tlp`, apa pun jawabannya (lihat komentar di `khanza/billing.ts`).
 
 ## Yang masih perlu keputusan rumah sakit (bukan teknis)

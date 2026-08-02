@@ -1,4 +1,4 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, fn, col } from 'sequelize';
 import { PatientContact } from '@/models';
 import { sik } from '@/db/sik';
 import { CorrectionForm } from './CorrectionForm';
@@ -10,6 +10,20 @@ const REASON_LABELS: Record<string, string> = {
   not_mobile: 'Bukan nomor seluler',
   unparseable: 'Tidak terbaca',
 };
+
+/**
+ * Urutan chip: yang BISA dikerjakan petugas dari mejanya lebih dulu.
+ *
+ * Sesudah `npm run scan:contacts` mengisi seluruh pasien sekaligus, sebaran
+ * nyatanya sangat timpang -- di database ini 3.166 dari 3.284 baris beralasan
+ * `empty`, yaitu pasien yang di Khanza memang tidak punya nomor sama sekali.
+ * Itu bukan salah ketik yang bisa dibetulkan sambil menatap layar; nomornya
+ * harus diminta saat pasien datang lagi. Menaruhnya lebih dulu (urutan abjad
+ * kunci enum) mengubur 118 baris yang justru bisa langsung diperbaiki.
+ */
+const REASON_ORDER = ['too_short', 'not_mobile', 'unparseable', 'empty'] as const;
+
+const JUMLAH_PER_HALAMAN = 100;
 
 async function namesFor(rmList: string[]): Promise<Map<string, string>> {
   if (rmList.length === 0) return new Map();
@@ -27,6 +41,25 @@ export default async function NomorBermasalahPage({
 }) {
   const { q, reason } = await searchParams;
 
+  // Dihitung lewat satu query GROUP BY, bukan satu COUNT per alasan: angkanya
+  // dipakai untuk menunjukkan sebaran yang timpang itu langsung di chip-nya,
+  // supaya petugas tahu mana yang sepadan dibuka tanpa harus mencobanya satu-satu.
+  const reasonCounts = new Map<string, number>();
+  let totalBermasalah = 0;
+  if (!q?.trim()) {
+    const counts = await PatientContact.findAll({
+      attributes: ['reason', [fn('COUNT', col('no_rkm_medis')), 'n']],
+      where: { phoneE164: null },
+      group: ['reason'],
+      raw: true,
+    });
+    for (const c of counts as unknown as { reason: string | null; n: number | string }[]) {
+      const n = Number(c.n) || 0;
+      totalBermasalah += n;
+      if (c.reason) reasonCounts.set(c.reason, n);
+    }
+  }
+
   let rows: PatientContact[];
   if (q && q.trim()) {
     const term = q.trim();
@@ -42,8 +75,10 @@ export default async function NomorBermasalahPage({
   } else {
     const where: Record<string, unknown> = { phoneE164: null };
     if (reason) where.reason = reason;
-    rows = await PatientContact.findAll({ where, order: [['checkedAt', 'DESC']], limit: 100 });
+    rows = await PatientContact.findAll({ where, order: [['checkedAt', 'DESC']], limit: JUMLAH_PER_HALAMAN });
   }
+
+  const ditampilkan = reason ? (reasonCounts.get(reason) ?? 0) : totalBermasalah;
 
   const nameMap = await namesFor(rows.map((r) => r.noRkmMedis));
 
@@ -67,16 +102,30 @@ export default async function NomorBermasalahPage({
       </form>
 
       {!q && (
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          <FilterChip href="/nomor-bermasalah" active={!reason}>
-            Semua
-          </FilterChip>
-          {Object.entries(REASON_LABELS).map(([key, label]) => (
-            <FilterChip key={key} href={`/nomor-bermasalah?reason=${key}`} active={reason === key}>
-              {label}
+        <>
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            <FilterChip href="/nomor-bermasalah" active={!reason}>
+              Semua ({totalBermasalah.toLocaleString('id-ID')})
             </FilterChip>
-          ))}
-        </div>
+            {REASON_ORDER.map((key) => (
+              <FilterChip key={key} href={`/nomor-bermasalah?reason=${key}`} active={reason === key}>
+                {REASON_LABELS[key]} ({(reasonCounts.get(key) ?? 0).toLocaleString('id-ID')})
+              </FilterChip>
+            ))}
+          </div>
+          {ditampilkan > JUMLAH_PER_HALAMAN && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Menampilkan {JUMLAH_PER_HALAMAN} dari {ditampilkan.toLocaleString('id-ID')}. Persempit lewat saringan di
+              atas atau cari nama/no. RM tertentu.
+            </p>
+          )}
+          {reason === 'empty' && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Nomornya memang belum pernah dicatat di SIMRS Khanza, jadi tidak ada yang bisa dibetulkan dari sini --
+              nomornya perlu diminta saat pasien datang lagi.
+            </p>
+          )}
+        </>
       )}
 
       <div className={tableWrapperClass}>
