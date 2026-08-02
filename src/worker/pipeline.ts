@@ -194,7 +194,26 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     ctx.sensitivePoli,
     ctx.sensitiveExam,
   );
-  const rendered = renderTemplate(privacyCheck.safe ? ctx.template.body : ctx.genericTemplate, input.vars);
+
+  /**
+   * Identitas RS disisipkan DI SINI sebagai dasar, bukan diserahkan ke tiap
+   * pemanggil.
+   *
+   * Sebelumnya `ctx.identity` ada di PipelineContext tapi tidak pernah dibaca
+   * `enqueueMessage` sama sekali -- kelima pemanggil kebetulan menyisipkan
+   * `identityVars()` sendiri ke `vars`, dan kebenarannya bergantung pada
+   * kelimanya mengingat itu. Yang membuatnya berbahaya bukan pemicunya
+   * melainkan TEMPLATE GENERIK: isinya ditulis admin di halaman Pengaturan dan
+   * memang memuat `{nama_rs}`/`{kontak_rs}`, sementara ia menggantikan pesan
+   * untuk jalur privasi mana pun -- termasuk pemicu baru yang penulisnya tidak
+   * tahu kewajiban itu. Hasilnya pesan berbunyi "ada informasi dari ." tanpa
+   * satu pun galat. Ditemukan lewat uji integrasi ini, bukan di produksi.
+   *
+   * `input.vars` tetap menimpa, jadi pemanggil yang sudah menyisipkannya
+   * menghasilkan pesan yang sama persis seperti sebelumnya.
+   */
+  const vars = { ...identityVars(ctx.identity), ...input.vars };
+  const rendered = renderTemplate(privacyCheck.safe ? ctx.template.body : ctx.genericTemplate, vars);
 
   // scheduledAt dihitung SEBELUM body, karena baris kode pengiriman memuat
   // {waktu} dan yang benar untuk diisikan adalah waktu KIRIM, bukan waktu

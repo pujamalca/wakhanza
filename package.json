@@ -20,6 +20,7 @@
     "users": "tsx scripts/manage-users.ts",
     "harden:permissions": "powershell -ExecutionPolicy Bypass -File scripts/harden-permissions.ps1",
     "test": "jest",
+    "test:int": "jest --config jest.integration.config.js",
     "audit": "npm audit --omit=dev"
   },
   "dependencies": {

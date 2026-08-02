@@ -1,0 +1,463 @@
+import { Op } from 'sequelize';
+import { Outbox, OptOut, AppSetting } from '@/models';
+import { db } from '@/db/wakhanza';
+import { sik } from '@/db/sik';
+import { enqueueMessage, type PipelineContext } from './pipeline';
+
+/**
+ * Uji integrasi `enqueueMessage()` -- satu-satunya jalur yang dilewati KEEMPAT
+ * kelas pemicu (sisip, pindai, broadcast, balasan otomatis).
+ *
+ * Sampai berkas ini ada, seluruh 14 suite uji proyek ini menguji `src/core/`
+ * saja: fungsi murni yang tidak menyentuh database. Bagian yang menggabungkan
+ * semuanya -- gerbang opt-out, penggantian privasi, penundaan jam tenang,
+ * penolakan duplikat oleh UNIQUE KEY, dan penyisipan kode pengiriman -- hanya
+ * pernah divalidasi manual, satu per satu, setiap kali ada yang berubah. Itu
+ * yang membuat tiap perubahan pada pipeline mahal, dan itu pula alasan bug
+ * seperti "percobaan habis ditulis dengan status yang salah" bisa bertahan.
+ *
+ * Menulis ke database `wakhanza` SUNGGUHAN dengan sengaja: yang perlu
+ * dibuktikan justru perilaku terhadap skema, grant, dan UNIQUE KEY yang
+ * benar-benar berlaku. Setiap baris diberi tanda `TANDA` pada
+ * `idempotency_key` dan dibersihkan sendiri.
+ */
+
+const TANDA = 'INTTEST';
+const NOMOR_UJI = '628000000001';
+
+/** Nomor yang dipakai menguji gerbang opt-out. Dibersihkan di afterAll. */
+const NOMOR_OPTOUT = '628000000002';
+
+function ctx(over: Partial<PipelineContext> = {}): PipelineContext {
+  return {
+    triggerCode: 'QUEUE_REG',
+    template: { body: 'Halo {nama_pasien}, antrean Anda {no_antrian} di {nama_poli}.' },
+    genericTemplate: 'Bpk/Ibu {nama_pasien}, ada informasi dari {nama_rs}. Silakan hubungi kami.',
+    identity: { namaRs: 'RS Uji', alamatRs: 'Jl. Uji 1', kontakRs: '021-000' },
+    quietStart: 21,
+    quietEnd: 7,
+    sensitivePoli: [],
+    sensitiveExam: [],
+    uniqueCodeTemplate: 'Kode Pengiriman : {waktu} {kode}',
+    ...over,
+  };
+}
+
+let nomorUrut = 0;
+function kunci(nama: string): string {
+  return `${TANDA}|${nama}|${++nomorUrut}`;
+}
+
+async function ambil(idempotencyKey: string): Promise<Outbox | null> {
+  return Outbox.findOne({ where: { idempotencyKey } });
+}
+
+beforeAll(async () => {
+  await db.authenticate();
+});
+
+afterAll(async () => {
+  await Outbox.destroy({ where: { idempotencyKey: { [Op.like]: `${TANDA}|%` } } });
+  await OptOut.destroy({ where: { phoneE164: NOMOR_OPTOUT } });
+  await db.close();
+  await sik.close();
+});
+
+describe('enqueueMessage: jalur normal', () => {
+  it('menulis baris pending dengan variabel tersubstitusi dan kode pengiriman', async () => {
+    const k = kunci('normal');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi', no_antrian: 'A-12', nama_poli: 'Poli Umum' },
+      },
+      ctx(),
+    );
+
+    const row = await ambil(k);
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe('pending');
+    expect(row!.phoneE164).toBe(NOMOR_UJI);
+    expect(row!.body).toContain('Halo Budi, antrean Anda A-12 di Poli Umum.');
+    // Kode pengiriman disisipkan saat ENQUEUE, bukan saat SEND -- itu yang
+    // membuat outbox.body sama persis dengan yang benar-benar terkirim.
+    expect(row!.body).toMatch(/Kode Pengiriman : \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [0-9A-Z]{6}$/);
+  });
+
+  it('variabel yang tidak diisi tidak meninggalkan placeholder mentah', async () => {
+    // Pasien menerima "{nama_pasien}" apa adanya adalah kegagalan yang terlihat
+    // langsung olehnya, bukan cuma di log.
+    const k = kunci('kosong');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx(),
+    );
+
+    const row = await ambil(k);
+    expect(row!.body).not.toContain('{no_antrian}');
+    expect(row!.body).not.toContain('{nama_poli}');
+  });
+});
+
+describe('enqueueMessage: gerbang sebelum antre', () => {
+  it('tanpa nomor -> skipped_no_contact, bukan dibuang diam-diam', async () => {
+    const k = kunci('tanpa-nomor');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: null,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx(),
+    );
+
+    const row = await ambil(k);
+    // Barisnya HARUS tetap ada: jejak bahwa pemicunya terdeteksi tidak boleh
+    // hilang hanya karena pasiennya tak punya nomor -- itulah yang dibaca
+    // halaman Nomor bermasalah.
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe('skipped_no_contact');
+    expect(row!.phoneE164).toBeNull();
+  });
+
+  it('nomor yang sudah opt-out -> skipped_opt_out untuk pemicu yang terikat', async () => {
+    await OptOut.destroy({ where: { phoneE164: NOMOR_OPTOUT } });
+    await OptOut.create({ phoneE164: NOMOR_OPTOUT, source: 'manual', note: 'uji integrasi', createdAt: new Date() });
+
+    const k = kunci('optout-terikat');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_OPTOUT,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx({ triggerCode: 'QUEUE_REG' }),
+    );
+
+    expect((await ambil(k))!.status).toBe('skipped_opt_out');
+  });
+
+  it('BROADCAST dan AUTO_REPLY TIDAK terikat opt-out -- tetap pending', async () => {
+    // Keputusan rumah sakit, bukan default teknis (core/optOut.ts): broadcast
+    // adalah kanal berbeda, dan balasan otomatis adalah jawaban atas pesan yang
+    // pasiennya sendiri kirim barusan.
+    for (const trigger of ['BROADCAST', 'AUTO_REPLY']) {
+      const k = kunci(`optout-bebas-${trigger}`);
+      await enqueueMessage(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_OPTOUT,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+        },
+        ctx({ triggerCode: trigger }),
+      );
+      expect((await ambil(k))!.status).toBe('pending');
+    }
+  });
+});
+
+describe('enqueueMessage: privasi', () => {
+  it('poli sensitif mengganti SELURUH isi dengan template generik', async () => {
+    const k = kunci('privasi');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        kdPoli: 'JIWA01',
+        vars: { nama_pasien: 'Budi', no_antrian: 'A-12', nama_poli: 'Poli Jiwa' },
+      },
+      ctx({ sensitivePoli: ['JIWA01'] }),
+    );
+
+    const row = await ambil(k);
+    // Yang dijaga bukan cuma "template generik terpakai", tapi bahwa NAMA
+    // POLI-nya benar-benar tidak ikut terkirim -- itu inti F4.3.
+    expect(row!.body).toContain('Silakan hubungi kami');
+    expect(row!.body).not.toContain('Poli Jiwa');
+    expect(row!.body).not.toContain('A-12');
+    // Identitas RS terisi walau pemanggil TIDAK menyisipkannya ke vars.
+    // Template generik ditulis admin dan memang memuat {nama_rs}; kalau
+    // pengisiannya bergantung pada tiap pemanggil, pesan privasi berbunyi
+    // "ada informasi dari ." tanpa satu pun galat.
+    expect(row!.body).toContain('RS Uji');
+    expect(row!.body).not.toContain('{nama_rs}');
+  });
+
+  it('satu kode sensitif di antara beberapa sudah cukup mengganti pesan', async () => {
+    // RESULT_READY digabung per kunjungan bisa membawa beberapa kode sekaligus.
+    const k = kunci('privasi-larik');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        kdJenisPrw: ['UMUM01', 'HIV01', 'UMUM02'],
+        vars: { nama_pasien: 'Budi', no_antrian: 'A-12', nama_poli: 'Poli Umum' },
+      },
+      ctx({ sensitiveExam: ['HIV01'] }),
+    );
+
+    expect((await ambil(k))!.body).toContain('Silakan hubungi kami');
+  });
+});
+
+describe('enqueueMessage: jam tenang', () => {
+  // 22:30 -- di dalam jam tenang 21..7.
+  const malam = new Date();
+  malam.setHours(22, 30, 0, 0);
+
+  it('pesan malam ditahan sampai jendela berikutnya dibuka', async () => {
+    const k = kunci('jam-tenang');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: malam,
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx(),
+    );
+
+    const row = await ambil(k);
+    expect(row!.scheduledAt.getHours()).toBe(7);
+    expect(row!.scheduledAt.getTime()).toBeGreaterThan(malam.getTime());
+    // event_at TETAP waktu kejadiannya -- kalau ikut digeser, ambang "pesan
+    // sudah basi" di dispatcher akan menghitung dari waktu yang salah.
+    expect(row!.eventAt.getHours()).toBe(22);
+  });
+
+  it('kode pengiriman memuat waktu KIRIM, bukan waktu masuk antrean', async () => {
+    // Pesan yang muncul pukul 22.30 lalu tertahan sampai 07.00 harus menyebut
+    // 07.00 -- kalau tidak, pasien membaca stempel sembilan jam sebelum
+    // pesannya tiba.
+    const k = kunci('waktu-kirim');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: malam,
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx(),
+    );
+
+    const row = await ambil(k);
+    const jam = String(row!.scheduledAt.getHours()).padStart(2, '0');
+    expect(row!.body).toContain(`${jam}:00:00`);
+    expect(row!.body).not.toContain('22:30');
+  });
+
+  it('BOOK_CANCEL dan AUTO_REPLY melewati jam tenang', async () => {
+    for (const trigger of ['BOOK_CANCEL', 'AUTO_REPLY']) {
+      const k = kunci(`bypass-${trigger}`);
+      await enqueueMessage(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: malam,
+          vars: { nama_pasien: 'Budi' },
+        },
+        ctx({ triggerCode: trigger }),
+      );
+
+      const row = await ambil(k);
+      expect(row!.scheduledAt.getTime()).toBe(malam.getTime());
+    }
+  });
+});
+
+describe('enqueueMessage: idempotensi', () => {
+  it('kunci yang sama dua kali hanya menghasilkan SATU baris', async () => {
+    const k = kunci('idem');
+    const kirim = () =>
+      enqueueMessage(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+        },
+        ctx(),
+      );
+
+    await kirim();
+    await kirim();
+
+    // Dijaga UNIQUE KEY di mesin database, bukan pemeriksaan di kode -- itu
+    // yang membuat worker restart atau jadwal yang jalan dua kali tidak pernah
+    // bisa mengirim pesan ganda ke pasien.
+    expect(await Outbox.count({ where: { idempotencyKey: k } })).toBe(1);
+  });
+
+  it('percobaan kedua TIDAK melempar, jadi satu duplikat tidak menghentikan sisa satu siklus', async () => {
+    const k = kunci('idem-diam');
+    const input = {
+      idempotencyKey: k,
+      noRkmMedis: null,
+      rawPhone: null,
+      phoneOverride: NOMOR_UJI,
+      eventAt: new Date(),
+      vars: { nama_pasien: 'Budi' },
+    };
+    await enqueueMessage(input, ctx());
+    await expect(enqueueMessage(input, ctx())).resolves.toBeUndefined();
+  });
+});
+
+describe('enqueueMessage: lampiran', () => {
+  it('lintasan berkas ikut tersimpan di baris outbox', async () => {
+    const k = kunci('lampiran');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+        media: { path: 'uji-integrasi.pdf', mime: 'application/pdf', name: 'Surat Edaran.pdf' },
+      },
+      ctx({ triggerCode: 'BROADCAST' }),
+    );
+
+    const row = await ambil(k);
+    // Yang disimpan LINTASANNYA, bukan isinya: satu broadcast ke 500 pasien
+    // menghasilkan 500 baris yang menunjuk satu berkas yang sama.
+    expect(row!.mediaPath).toBe('uji-integrasi.pdf');
+    expect(row!.mediaMime).toBe('application/pdf');
+    expect(row!.mediaName).toBe('Surat Edaran.pdf');
+  });
+});
+
+describe('enqueueMessage: kode pengiriman', () => {
+  it('kode diturunkan dari idempotency key, jadi percobaan ulang mengirim teks IDENTIK', async () => {
+    // Kode acak akan membuat percobaan kedua tampak sebagai pesan BARU bagi
+    // pasien maupun bagi WhatsApp -- persis kebalikan dari tujuan fitur ini.
+    const k1 = kunci('kode-sama');
+    const k2 = kunci('kode-beda');
+    const kirim = async (key: string) => {
+      await enqueueMessage(
+        {
+          idempotencyKey: key,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+        },
+        ctx(),
+      );
+      return (await ambil(key))!.body.match(/([0-9A-Z]{6})$/)![1];
+    };
+
+    const kodeA = await kirim(k1);
+    const kodeB = await kirim(k2);
+    expect(kodeA).not.toBe(kodeB);
+
+    // Baris dihapus lalu di-enqueue ULANG dengan kunci yang sama: kodenya wajib
+    // sama persis seperti sebelumnya.
+    const sebelum = (await ambil(k1))!.body;
+    await Outbox.destroy({ where: { idempotencyKey: k1 } });
+    await enqueueMessage(
+      {
+        idempotencyKey: k1,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx(),
+    );
+    const sesudah = (await ambil(k1))!.body;
+    expect(sesudah.match(/([0-9A-Z]{6})$/)![1]).toBe(sebelum.match(/([0-9A-Z]{6})$/)![1]);
+  });
+
+  it('template kosong = fitur mati, tidak ada baris kode yang ditempel', async () => {
+    const k = kunci('kode-mati');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx({ uniqueCodeTemplate: '' }),
+    );
+
+    expect((await ambil(k))!.body).not.toContain('Kode Pengiriman');
+  });
+
+  it('kode TETAP ditempel walau {kode} dihapus dari template', async () => {
+    // Tanpa ini seluruh pesan berakhiran teks identik dan fitur anti-spam mati
+    // diam-diam, tanpa satu pun pesan error.
+    const k = kunci('kode-dipaksa');
+    await enqueueMessage(
+      {
+        idempotencyKey: k,
+        noRkmMedis: null,
+        rawPhone: null,
+        phoneOverride: NOMOR_UJI,
+        eventAt: new Date(),
+        vars: { nama_pasien: 'Budi' },
+      },
+      ctx({ uniqueCodeTemplate: 'Dikirim pada {waktu}' }),
+    );
+
+    expect((await ambil(k))!.body).toMatch(/Dikirim pada \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [0-9A-Z]{6}$/);
+  });
+});
+
+describe('app_setting: kunci yang dipakai pipeline benar-benar ada', () => {
+  it('semua kunci yang dibaca loadSharedSettings tersedia di database', async () => {
+    // Kunci yang hilang tidak pernah melempar -- getSetting* memakai fallback,
+    // jadi pengaturan yang lupa di-seed berubah jadi perilaku default yang
+    // diam-diam berbeda dari yang tertulis di halaman Pengaturan.
+    const wajib = [
+      'dispatch.quiet_hours_start',
+      'dispatch.quiet_hours_end',
+      'privacy.sensitive_poli_codes',
+      'privacy.sensitive_exam_codes',
+      'privacy.generic_template',
+      'dispatch.unique_code_enabled',
+      'dispatch.unique_code_template',
+    ];
+    const ada = await AppSetting.findAll({ where: { k: wajib } });
+    expect(ada.map((r) => r.k).sort()).toEqual([...wajib].sort());
+  });
+});

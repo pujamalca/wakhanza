@@ -49,7 +49,8 @@ npm run users -- list                # daftar akun dashboard + status aktif/terk
 npm run users -- disable <username>  # juga: enable / unlock / passwd <username> <sandi-baru>
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 powershell -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1   # daftarkan cadangan harian (lihat di bawah)
-npx jest                  # semua test; `npx jest core/phone` untuk satu suite
+npx jest                  # semua test unit (fungsi murni, TIDAK butuh database); `npx jest core/phone` untuk satu suite
+npm run test:int          # uji integrasi enqueueMessage() -- BUTUH MariaDB hidup, lihat di bawah
 npx tsc --noEmit
 npm run lint
 npm run build
@@ -121,6 +122,14 @@ Otorisasi API ditegakkan DUA lapis dan keduanya perlu diperiksa saat menambah ro
 Substitusi footer-nya SENGAJA terpisah dari `renderTemplate()`: menggabungkan footer ke body lalu merender ulang sekali lagi akan melanggar aturan satu-lintasan (§ substitusi template di bawah). Alfabetnya Crockford Base32 -- tepat 32 karakter (tanpa bias modulo) dan tanpa I/L/O/U supaya tidak tertukar saat dibacakan lewat telepon. Kalau admin menghapus `{kode}` dari templatenya, kodenya TETAP ditempelkan di akhir (`buildUniqueCodeFooter`) -- tanpa itu seluruh pesan berakhiran teks identik dan fitur ini mati diam-diam tanpa satu pun pesan error.
 
 Pratinjau `/broadcast`, `/broadcast-terjadwal`, dan `npm run poll:dryrun` semuanya membaca pengaturannya lewat `loadUniqueCodeTemplate()`/`previewUniqueCodeFooter()` yang SAMA dipakai `enqueueMessage()` -- pratinjau tidak boleh menampilkan bentuk pesan yang berbeda dari yang benar-benar terkirim.
+
+**Uji integrasi pipeline (`worker/pipeline.int.test.ts`, `npm run test:int`).** Sampai berkas ini ada, seluruh suite uji proyek ini menguji `src/core/` saja -- fungsi murni yang tidak menyentuh database. Bagian yang MENGGABUNGKAN semuanya, dan satu-satunya jalur yang dilewati keempat kelas pemicu, hanya pernah divalidasi manual satu per satu setiap kali ada yang berubah. Tiga hal yang menempel padanya:
+
+- **Config terpisah** (`jest.integration.config.js`, berkas `*.int.test.ts`, dikecualikan dari `jest.config.js`). `npx jest` harus tetap bisa dijalankan di mana saja tanpa database dan selesai dalam hitungan detik -- begitu ia butuh MariaDB hidup, ia berhenti dipakai sebagai pemeriksaan cepat. `maxWorkers: 1` karena beberapa uji sengaja mengubah pengaturan bersama.
+- **Menulis ke database `wakhanza` SUNGGUHAN**, bukan database uji hasil `sync()`. Yang perlu dibuktikan justru perilaku terhadap skema, grant, dan UNIQUE KEY yang benar-benar berlaku -- dan `sequelize.sync()` memang tidak pernah dipanggil di proyek ini. Baris ujinya ditandai pada `idempotency_key` dan dibersihkan di `afterAll`.
+- **`.env` harus dimuat lewat `setupFiles`, dan sebabnya halus.** `process.loadEnvFile()` adalah fungsi native yang menulis ke `process.env` milik proses SUNGGUHAN, sementara berkas uji berjalan di sandbox VM yang memegang salinannya sendiri: pemuatannya "berhasil" tanpa galat, lalu `WA_DB_HOST` tetap undefined. Karena itu setup-nya membaca `.env` dan menulis nilainya satu per satu.
+
+**Dan uji ini langsung menemukan satu perangkap**: `PipelineContext.identity` ada tapi `enqueueMessage()` tidak pernah membacanya -- kelima pemanggil kebetulan menyisipkan `identityVars()` sendiri ke `vars`, jadi kebenarannya bergantung pada kelimanya mengingat itu. Yang membuatnya berbahaya bukan pemicunya melainkan **template generik**: isinya ditulis admin di halaman Pengaturan dan memang memuat `{nama_rs}`/`{kontak_rs}`, sementara ia menggantikan pesan untuk jalur privasi mana pun -- termasuk pemicu baru yang penulisnya tidak tahu kewajiban itu. Pesannya akan berbunyi "ada informasi dari ." tanpa satu pun galat. Sekarang `enqueueMessage()` menyisipkannya sendiri sebagai dasar dan `input.vars` tetap menimpa, jadi pemanggil lama menghasilkan pesan yang sama persis.
 
 RESULT_READY punya DUA watermark terpisah (`RESULT_READY_LAB`, `RESULT_READY_RADIOLOGI` di `poll_cursor`) walau satu `trigger_code` -- mencampur watermark dua sumber independen bisa membuat salah satunya melompati baris yang belum diproses.
 
