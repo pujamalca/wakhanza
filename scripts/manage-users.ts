@@ -29,6 +29,7 @@
  *   npm run users -- enable  <username>
  *   npm run users -- unlock  <username>
  *   npm run users -- passwd  <username> <kata-sandi-baru>
+ *   npm run users -- delete  <username>
  */
 import os from 'node:os';
 import { AppUser } from '../src/models';
@@ -39,6 +40,7 @@ import {
   setelSandi,
   setelAktif,
   bukaKunci,
+  hapusPengguna,
   type Hasil,
 } from '../src/lib/userAdmin';
 import type { AppUserRole } from '../src/core/userPolicy';
@@ -55,6 +57,7 @@ function pakai(): never {
       '  npm run users -- enable  <username>',
       '  npm run users -- unlock  <username>',
       '  npm run users -- passwd  <username> <kata-sandi-baru>',
+      '  npm run users -- delete  <username>   (permanen -- pakai disable kalau mungkin dipakai lagi)',
     ].join('\n'),
   );
   process.exit(1);
@@ -139,6 +142,22 @@ async function main(): Promise<void> {
       if (!arg1) pakai();
       const id = await cariId(arg1);
       laporkan(await bukaKunci(id, PELAKU), `kunci login '${arg1}' dilepas.`);
+      break;
+    }
+
+    case 'delete': {
+      if (!arg1) pakai();
+      const id = await cariId(arg1);
+      const hasil = await hapusPengguna(id, PELAKU, BUKAN_AKUN_DASHBOARD);
+      laporkan(hasil, `'${arg1}' dihapus permanen.`);
+      if (hasil.ok) {
+        // Dicetak SESUDAH berhasil, bukan sebagai peringatan sebelum bertanya:
+        // skrip ini tidak interaktif (dijalankan lewat npm, tanpa prompt di
+        // mana pun), jadi kalimat yang meminta pertimbangan ulang tidak punya
+        // tempat untuk dijawab. Yang berguna di sini adalah memberi tahu apa
+        // yang BARU SAJA terjadi -- terutama bahwa jejaknya tidak ikut hilang.
+        console.log(`     Riwayat audit atas nama '${arg1}' tetap tersimpan; nama itu kini bisa dipakai akun baru.`);
+      }
       break;
     }
 

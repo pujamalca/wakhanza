@@ -40,7 +40,7 @@ export interface KeadaanPerubahan {
 export type Penolakan = string | null;
 
 const PESAN_ADMIN_TERAKHIR =
-  'Ini satu-satunya admin yang masih aktif. Menonaktifkan atau menurunkan perannya akan mengunci semua orang keluar dari halaman pengaturan, template, broadcast, dan audit -- dan satu-satunya jalan kembali adalah menyunting database langsung. Buat atau aktifkan admin lain dulu.';
+  'Ini satu-satunya admin yang masih aktif. Menonaktifkan, menurunkan peran, atau menghapusnya akan mengunci semua orang keluar dari halaman pengaturan, template, broadcast, dan audit -- dan satu-satunya jalan kembali adalah menyunting database langsung. Buat atau aktifkan admin lain dulu.';
 
 /** Sasaran ikut dihitung sebagai admin aktif hanya bila ia memang admin DAN aktif. */
 function sasaranAdalahAdminAktif(keadaan: KeadaanPerubahan): boolean {
@@ -70,6 +70,32 @@ export function bolehUbahPeran(keadaan: KeadaanPerubahan, peranBaru: AppUserRole
   if (keadaan.diriSendiri) {
     return 'Tidak bisa menurunkan peran akun sendiri. Minta admin lain melakukannya.';
   }
+  return null;
+}
+
+/**
+ * Menghapus permanen. Pagarnya SAMA dengan menonaktifkan, dan itu disengaja --
+ * keduanya berujung pada orang yang sama tidak bisa masuk lagi, jadi keadaan
+ * yang berbahaya untuk yang satu berbahaya juga untuk yang lain.
+ *
+ * Yang BERBEDA: tidak ada pengecualian "sudah nonaktif, bukan perubahan".
+ * Menonaktifkan akun yang sudah nonaktif memang tidak mengubah apa pun,
+ * sedangkan menghapusnya tetap menghilangkan barisnya untuk selamanya.
+ *
+ * Yang TIDAK dijaga di sini, karena tidak bisa: `audit_log.actor` menyimpan
+ * username sebagai teks, bukan foreign key, jadi riwayat lama TETAP utuh
+ * sesudah barisnya hilang. Efek sampingnya justru kebalikannya -- usernamenya
+ * jadi bisa dipakai lagi oleh orang lain, dan sejak saat itu riwayat lama
+ * terbaca seolah milik orang baru itu. Yang menutup celahnya bukan pagar
+ * melainkan pencatatan: penghapusannya sendiri masuk `audit_log` berikut
+ * username dan perannya, sehingga batas antara dua pemakai nama yang sama
+ * tetap bisa ditemukan.
+ */
+export function bolehHapus(keadaan: KeadaanPerubahan): Penolakan {
+  if (sasaranAdalahAdminAktif(keadaan) && keadaan.adminAktif <= 1) return PESAN_ADMIN_TERAKHIR;
+  // Lebih keras daripada menonaktifkan diri sendiri: di sana pelakunya masih
+  // bisa diaktifkan lagi oleh admin lain, di sini akunnya sudah tidak ada.
+  if (keadaan.diriSendiri) return 'Tidak bisa menghapus akun sendiri. Minta admin lain melakukannya.';
   return null;
 }
 

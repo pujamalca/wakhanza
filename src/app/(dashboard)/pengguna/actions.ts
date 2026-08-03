@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
-import { buatPengguna, ubahPengguna, setelSandi, setelAktif, bukaKunci } from '@/lib/userAdmin';
+import { buatPengguna, ubahPengguna, setelSandi, setelAktif, bukaKunci, hapusPengguna } from '@/lib/userAdmin';
 import type { AppUserRole } from '@/core/userPolicy';
 
 /**
@@ -95,6 +95,17 @@ export async function setelAktifAction(id: number, aktif: boolean): Promise<Hasi
 
   segarkan();
   return { sukses: aktif ? 'Akun diaktifkan.' : 'Akun dinonaktifkan.' };
+}
+
+export async function hapusPenggunaAction(id: number): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const hasil = await hapusPengguna(id, session!.user.username, session!.user.username);
+  if (!hasil.ok) return { error: hasil.error };
+
+  segarkan();
+  return { sukses: 'Akun dihapus. Riwayat auditnya tetap tersimpan.' };
 }
 
 export async function bukaKunciAction(id: number): Promise<HasilForm> {

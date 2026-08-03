@@ -1,4 +1,5 @@
 import {
+  bolehHapus,
   bolehNonaktifkan,
   bolehUbahPeran,
   periksaSandi,
@@ -62,6 +63,39 @@ describe('bolehUbahPeran', () => {
 
   it('admin NONAKTIF yang diturunkan tidak kena pagar admin terakhir', () => {
     expect(bolehUbahPeran(keadaan({ aktifSekarang: false, adminAktif: 1 }), 'operator')).toBeNull();
+  });
+});
+
+describe('bolehHapus', () => {
+  it('operator boleh dihapus', () => {
+    expect(bolehHapus(keadaan({ peranSekarang: 'operator', adminAktif: 1 }))).toBeNull();
+  });
+
+  it('admin biasa boleh dihapus selama masih ada admin lain', () => {
+    expect(bolehHapus(keadaan({ adminAktif: 2 }))).toBeNull();
+  });
+
+  it('admin aktif TERAKHIR ditolak', () => {
+    expect(bolehHapus(keadaan({ adminAktif: 1 }))).toMatch(/satu-satunya admin/i);
+  });
+
+  it('menghapus akun sendiri ditolak walau admin lain masih banyak', () => {
+    expect(bolehHapus(keadaan({ diriSendiri: true, adminAktif: 5 }))).toMatch(/akun sendiri/i);
+  });
+
+  it('pagar admin terakhir menang atas pagar diri sendiri', () => {
+    expect(bolehHapus(keadaan({ diriSendiri: true, adminAktif: 1 }))).toMatch(/satu-satunya admin/i);
+  });
+
+  it('admin NONAKTIF boleh dihapus walau tinggal satu admin aktif -- ia bukan admin itu', () => {
+    expect(bolehHapus(keadaan({ aktifSekarang: false, adminAktif: 1 }))).toBeNull();
+  });
+
+  it('akun yang SUDAH nonaktif tetap boleh dihapus -- beda dari menonaktifkan, ini masih perubahan', () => {
+    // bolehNonaktifkan() meloloskannya karena "bukan perubahan"; di sini
+    // barisnya tetap hilang, jadi tidak ada jalan pintas yang setara.
+    expect(bolehNonaktifkan(keadaan({ aktifSekarang: false, diriSendiri: true }))).toBeNull();
+    expect(bolehHapus(keadaan({ aktifSekarang: false, diriSendiri: true }))).toMatch(/akun sendiri/i);
   });
 });
 

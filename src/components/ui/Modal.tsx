@@ -100,6 +100,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = 'Hapus',
+  pendingLabel = 'Menghapus...',
   pending = false,
 }: {
   open: boolean;
@@ -108,6 +109,9 @@ export function ConfirmDialog({
   title: string;
   message: React.ReactNode;
   confirmLabel?: string;
+  /** Wajib diisi bila tindakannya bukan menghapus -- "Menghapus..." pada dialog
+   *  yang sebenarnya menonaktifkan membuat orang mengira ia salah tekan. */
+  pendingLabel?: string;
   pending?: boolean;
 }) {
   return (
@@ -128,7 +132,7 @@ export function ConfirmDialog({
             disabled={pending}
             className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {pending ? 'Menghapus...' : confirmLabel}
+            {pending ? pendingLabel : confirmLabel}
           </button>
         </div>
       </div>

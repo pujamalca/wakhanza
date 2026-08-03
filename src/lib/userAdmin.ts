@@ -1,6 +1,8 @@
 import bcrypt from 'bcrypt';
 import { AppUser, logAudit } from '@/models';
+import { db } from '@/db/wakhanza';
 import {
+  bolehHapus,
   bolehNonaktifkan,
   bolehUbahPeran,
   periksaNama,
@@ -193,6 +195,44 @@ export async function setelAktif(
   // terkunci akan menolak login tanpa satu pun tanda kenapa.
   await user.update({ isActive: true, failedAttempts: 0, lockedUntil: null });
   await logAudit(pelaku, 'user_enable', String(user.id), `username=${user.username}`);
+  return berhasil;
+}
+
+/**
+ * Menghapus barisnya untuk selamanya -- pasangan dari `setelAktif(false)`, bukan
+ * penggantinya. Nonaktif untuk akun yang mungkin dipakai lagi; hapus untuk akun
+ * yang memang salah dibuat atau tidak akan pernah dipakai lagi.
+ *
+ * Riwayat `audit_log` orangnya TIDAK ikut terhapus (dan memang tidak bisa --
+ * tabel itu tanpa grant DELETE): `actor` menyimpan usernamenya sebagai teks,
+ * bukan foreign key ke baris ini. Yang hilang cuma kemampuannya masuk.
+ */
+export async function hapusPengguna(id: number, pelaku: string, pelakuUsername: string | null): Promise<Hasil> {
+  const user = await cari(id);
+  if (!user) return gagal('Pengguna tidak ditemukan.');
+
+  const tolak = bolehHapus(await keadaanUntuk(user, pelakuUsername));
+  if (tolak) return gagal(tolak);
+
+  // Satu transaksi, bukan dua perintah berurutan, dan urutannya di dalam sana
+  // tidak menyelamatkan apa pun tanpa itu: begitu barisnya hilang, baris audit
+  // adalah SATU-SATUNYA tempat yang masih menyebut akun ini pernah ada. Kalau
+  // penghapusannya berhasil sementara pencatatannya gagal, yang tertinggal
+  // adalah akun yang lenyap tanpa satu pun jejak siapa menghapusnya kapan --
+  // dan tidak ada lagi sumber untuk merekonstruksinya.
+  await db.transaction(async (transaction) => {
+    await logAudit(
+      pelaku,
+      'user_delete',
+      String(user.id),
+      // Username dan peran ikut dicatat justru KARENA barisnya akan hilang:
+      // sesudah ini nama itu bisa dipakai orang lain, dan baris inilah batas
+      // yang memisahkan riwayat pemakai lama dari pemakai baru.
+      `username=${user.username} peran=${user.role} aktif=${user.isActive ? 'ya' : 'tidak'}`,
+      { transaction },
+    );
+    await user.destroy({ transaction });
+  });
   return berhasil;
 }
 

@@ -1,4 +1,11 @@
-import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes } from 'sequelize';
+import {
+  DataTypes,
+  Model,
+  type CreationOptional,
+  type InferAttributes,
+  type InferCreationAttributes,
+  type Transaction,
+} from 'sequelize';
 import { db } from '@/db/wakhanza';
 
 /**
@@ -27,6 +34,18 @@ AuditLog.init(
   { sequelize: db, tableName: 'audit_log', timestamps: false },
 );
 
-export async function logAudit(actor: string, action: string, target?: string, detail?: string): Promise<void> {
-  await AuditLog.create({ actor, action, target: target ?? null, detail: detail ?? null });
+/**
+ * `transaction` dipakai oleh tindakan yang MENGHAPUS barisnya sendiri
+ * (`hapusPengguna`): di sana baris audit adalah satu-satunya yang tertinggal,
+ * jadi ia harus jadi atau batal bersama penghapusannya, bukan menyusul.
+ * Rollback bukan perintah DELETE, jadi ini tidak melanggar append-only.
+ */
+export async function logAudit(
+  actor: string,
+  action: string,
+  target?: string,
+  detail?: string,
+  options?: { transaction?: Transaction },
+): Promise<void> {
+  await AuditLog.create({ actor, action, target: target ?? null, detail: detail ?? null }, options);
 }

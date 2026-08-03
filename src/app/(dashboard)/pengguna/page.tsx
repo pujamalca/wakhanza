@@ -48,11 +48,11 @@ export default async function PenggunaPage() {
 
       <div className="mt-4 space-y-2 text-xs text-muted-foreground">
         <p>
-          <span className="font-medium text-foreground">Menonaktifkan tidak memutus sesi yang sedang berjalan.</span> Sesi
-          dashboard tidak disimpan di database, jadi tidak ada tempat untuk mencabutnya di tengah jalan. Akun yang
-          dinonaktifkan ditolak pada login BERIKUTNYA, sementara jendela yang sudah terbuka tetap bisa dipakai sampai
-          sesinya kedaluwarsa. Untuk memutus seseorang saat itu juga, hubungi pengembang &mdash; caranya membatalkan sesi
-          semua orang sekaligus.
+          <span className="font-medium text-foreground">Menonaktifkan maupun menghapus tidak memutus sesi yang sedang
+          berjalan.</span> Sesi dashboard tidak disimpan di database, jadi tidak ada tempat untuk mencabutnya di tengah
+          jalan. Akun yang dinonaktifkan atau dihapus ditolak pada login BERIKUTNYA, sementara jendela yang sudah
+          terbuka tetap bisa dipakai sampai sesinya kedaluwarsa. Untuk memutus seseorang saat itu juga, hubungi
+          pengembang &mdash; caranya membatalkan sesi semua orang sekaligus.
         </p>
         <p>
           <span className="font-medium text-foreground">Menurunkan peran juga baru berlaku pada login berikutnya</span>,

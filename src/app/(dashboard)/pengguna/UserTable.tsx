@@ -20,6 +20,7 @@ import {
   setelSandiAction,
   setelAktifAction,
   bukaKunciAction,
+  hapusPenggunaAction,
   type HasilForm,
 } from './actions';
 
@@ -44,6 +45,7 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
   const [mengubah, setMengubah] = useState<UserRow | null>(null);
   const [menyetelSandi, setMenyetelSandi] = useState<UserRow | null>(null);
   const [menonaktifkan, setMenonaktifkan] = useState<UserRow | null>(null);
+  const [menghapus, setMenghapus] = useState<UserRow | null>(null);
   const [pending, startTransition] = useTransition();
   const [pesan, setPesan] = useState<HasilForm>({});
 
@@ -56,9 +58,14 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          Akun dinonaktifkan, bukan dihapus &mdash; jejak audit menyimpan nama penggunanya, dan menghapus akun membuat
-          riwayat lama menunjuk orang yang tidak ada lagi.
+        {/* Perbedaan keduanya ditulis di sini, bukan cuma di dialog konfirmasi:
+            yang menentukan pilihan adalah "apakah akun ini mungkin dipakai
+            lagi", dan itu sudah diketahui SEBELUM tombolnya ditekan. */}
+        <p className="max-w-2xl text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Nonaktifkan</span> untuk akun yang mungkin dipakai lagi &mdash;
+          bisa dinyalakan kembali kapan saja. <span className="font-medium text-foreground">Hapus</span> untuk akun yang
+          salah dibuat atau tidak akan dipakai lagi; barisnya tidak bisa dikembalikan, tapi jejak auditnya tetap
+          tersimpan atas nama penggunanya.
         </p>
         <Button variant="primary" size="sm" onClick={() => setMembuat(true)} className="shrink-0">
           Tambah pengguna
@@ -118,8 +125,12 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
                           Buka kunci
                         </Button>
                       )}
+                      {/* Nonaktifkan sengaja BUKAN destructive: ia bisa
+                          dibatalkan, sementara Hapus tepat di sebelahnya tidak.
+                          Dua tombol merah berdampingan membuat yang benar-benar
+                          tak bisa ditarik kembali berhenti menonjol. */}
                       {u.isActive ? (
-                        <Button variant="destructive" size="xs" onClick={() => setMenonaktifkan(u)} disabled={pending || saya}>
+                        <Button variant="secondary" size="xs" onClick={() => setMenonaktifkan(u)} disabled={pending || saya}>
                           Nonaktifkan
                         </Button>
                       ) : (
@@ -127,6 +138,9 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
                           Aktifkan
                         </Button>
                       )}
+                      <Button variant="destructive" size="xs" onClick={() => setMenghapus(u)} disabled={pending || saya}>
+                        Hapus
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -151,6 +165,8 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
         open={menonaktifkan !== null}
         onClose={() => setMenonaktifkan(null)}
         pending={pending}
+        confirmLabel="Nonaktifkan"
+        pendingLabel="Menonaktifkan..."
         title={`Nonaktifkan "${menonaktifkan?.username ?? ''}"?`}
         message={
           <>
@@ -170,6 +186,46 @@ export function UserTable({ users, usernameSaya }: { users: UserRow[]; usernameS
           startTransition(async () => {
             setPesan(await setelAktifAction(id, false));
             setMenonaktifkan(null);
+          });
+        }}
+      />
+
+      <ConfirmDialog
+        open={menghapus !== null}
+        onClose={() => setMenghapus(null)}
+        pending={pending}
+        confirmLabel="Hapus permanen"
+        title={`Hapus akun "${menghapus?.username ?? ''}"?`}
+        message={
+          <>
+            Baris akunnya <span className="font-medium text-foreground">hilang untuk selamanya</span> dan tidak bisa
+            dikembalikan. Kalau akunnya mungkin dipakai lagi, pilih Nonaktifkan.
+            <br />
+            <br />
+            Riwayat auditnya <span className="font-medium text-foreground">tidak ikut terhapus</span> &mdash; jejak lama
+            tetap tercatat atas nama <span className="font-mono text-xs">{menghapus?.username}</span>. Tapi nama itu jadi
+            bisa dipakai lagi: kalau nanti ada akun baru dengan nama pengguna yang sama, riwayat lama akan terbaca
+            seolah miliknya.
+            {menghapus?.isActive && (
+              <>
+                <br />
+                <br />
+                {/* Batas yang sama seperti pada Nonaktifkan, dan justru di sini
+                    lebih mudah terlewat: akun yang menghilang dari tabel
+                    terlihat seperti akses yang sudah benar-benar putus. */}
+                <span className="font-medium text-foreground">Akun ini masih aktif.</span> Sesi yang sedang berjalan
+                tidak ikut terputus &mdash; kalau orangnya sedang membuka dashboard, ia tetap bisa memakainya sampai
+                sesinya kedaluwarsa (paling lama 8 jam).
+              </>
+            )}
+          </>
+        }
+        onConfirm={() => {
+          const id = menghapus?.id;
+          if (id === undefined) return;
+          startTransition(async () => {
+            setPesan(await hapusPenggunaAction(id));
+            setMenghapus(null);
           });
         }}
       />

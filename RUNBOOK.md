@@ -154,9 +154,17 @@ Isi peringatannya **hanya keadaan sistem** — tidak pernah nomor, nama, atau is
 **Semuanya ada di dashboard**, tidak perlu baris perintah:
 
 - **`/profil`** — untuk semua orang. Ganti nama tampilan dan **kata sandi sendiri**. Setiap petugas sebaiknya mengganti sandi awalnya di sini begitu akunnya dibuat. Sandi yang dipakai bersama membuat kolom "siapa yang melakukan" di jejak audit berhenti berarti apa-apa.
-- **`/pengguna`** — admin saja. Tambah akun, ubah nama dan peran, setel ulang sandi yang lupa, buka akun terkunci, aktifkan/nonaktifkan.
+- **`/pengguna`** — admin saja. Tambah akun, ubah nama dan peran, setel ulang sandi yang lupa, buka akun terkunci, aktifkan/nonaktifkan, hapus.
 
-Akun **dinonaktifkan, bukan dihapus** — jejak audit menyimpan nama penggunanya, dan menghapus akun membuat riwayat lama menunjuk orang yang tidak ada lagi.
+### Nonaktifkan atau hapus?
+
+| | **Nonaktifkan** | **Hapus** |
+|---|---|---|
+| Kapan | Petugas cuti, pindah bagian, atau mungkin kembali | Akun salah dibuat, atau orangnya sudah pasti tidak akan memakainya lagi |
+| Bisa dibatalkan? | Ya — tinggal tekan Aktifkan | **Tidak.** Barisnya hilang selamanya |
+| Jejak auditnya | Tetap utuh | Tetap utuh |
+
+**Jejak audit tidak pernah ikut terhapus**, apa pun pilihannya — riwayat lama tetap tercatat atas nama penggunanya. Yang perlu diketahui: sesudah dihapus, **nama pengguna itu bisa dipakai lagi oleh akun baru**, dan sejak saat itu riwayat lama akan terbaca seolah milik orang yang baru. Kalau nama seperti `loket1` dipakai bergantian, ini normal — penghapusannya sendiri ikut tercatat di `/audit`, jadi batas antara pemakai lama dan baru masih bisa ditemukan di sana. Kalau ragu, pilih Nonaktifkan.
 
 ### Kalau dashboard-nya sendiri tidak bisa dipakai
 
@@ -169,13 +177,15 @@ npm run users -- passwd <username> <sandi-baru>  # ganti sandi
 npm run users -- disable <username>              # petugas pindah/keluar
 npm run users -- enable <username>
 npm run users -- unlock <username>               # akun terkunci karena salah sandi 5x
+npm run users -- delete <username>               # PERMANEN — tidak bisa dibatalkan
 ```
 
 ### Tiga batasan yang perlu diketahui sebelum dibutuhkan
 
-- **Menonaktifkan akun menghentikan LOGIN BERIKUTNYA, bukan sesi yang sedang berjalan.** Petugas yang sudah masuk tetap bisa memakai dashboard sampai sesinya habis (8 jam). Kalau harus diputus saat itu juga, hubungi pengembang — caranya membatalkan sesi SEMUA orang sekaligus.
+- **Menonaktifkan MAUPUN MENGHAPUS akun menghentikan LOGIN BERIKUTNYA, bukan sesi yang sedang berjalan.** Petugas yang sudah masuk tetap bisa memakai dashboard sampai sesinya habis (8 jam) — bahkan setelah akunnya hilang dari tabel. Kalau harus diputus saat itu juga, hubungi pengembang; caranya membatalkan sesi SEMUA orang sekaligus.
 - **Menurunkan peran juga baru berlaku pada login berikutnya**, karena alasan yang sama. Admin yang baru diturunkan jadi operator masih bisa membuka halaman admin sampai sesinya habis.
-- **Admin aktif terakhir tidak bisa dinonaktifkan maupun diturunkan perannya.** Ini disengaja: tanpa admin, halaman pengaturan, broadcast, audit, dan pengelolaan pengguna tidak bisa dibuka siapa pun lagi. **Sebaiknya selalu ada dua admin** supaya satu akun bukan titik kegagalan tunggal — halaman `/pengguna` memberi peringatan bila tinggal satu.
+- **Admin aktif terakhir tidak bisa dinonaktifkan, diturunkan perannya, maupun dihapus.** Ini disengaja: tanpa admin, halaman pengaturan, broadcast, audit, dan pengelolaan pengguna tidak bisa dibuka siapa pun lagi. **Sebaiknya selalu ada dua admin** supaya satu akun bukan titik kegagalan tunggal — halaman `/pengguna` memberi peringatan bila tinggal satu.
+- **Akun sendiri tidak bisa dinonaktifkan maupun dihapus.** Tombolnya mati di baris Anda sendiri. Minta admin lain yang melakukannya.
 
 ---
 
