@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { Client, LocalAuth, MessageMedia, type Message } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
@@ -163,6 +165,102 @@ export async function getWaSessionStatus(): Promise<WaSessionStatus | null> {
   return row?.status ?? null;
 }
 
+/** Kode galat Windows saat berkas masih dipegang proses lain. */
+const KODE_BERKAS_TERKUNCI = ['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'];
+
+function galatBerkasTerkunci(err: unknown): boolean {
+  // whatsapp-web.js membungkusnya dengan `throw new Error(e)`, jadi kode
+  // aslinya sudah luruh jadi TEKS ("Error: EPERM: operation not permitted,
+  // unlink '...'"). Karena itu pemeriksaannya lewat pesan, bukan `err.code`.
+  const teks = err instanceof Error ? err.message : String(err);
+  return KODE_BERKAS_TERKUNCI.some((kode) => teks.includes(kode));
+}
+
+/**
+ * Direktori sesi yang benar-benar dipakai LocalAuth.
+ *
+ * Diambil dari instance-nya bila ada -- kalau aturan penamaan pustaka berubah,
+ * menurunkannya sendiri berarti kita menghapus direktori yang SALAH (atau,
+ * lebih buruk, tidak menghapus apa pun sambil melaporkan berhasil).
+ */
+function direktoriSesi(): string {
+  // `authStrategy` tidak ada di tipe publik whatsapp-web.js, jadi cast-nya
+  // memang perlu -- dan justru karena itu hasilnya diperlakukan sebagai
+  // mungkin-tidak-ada, dengan penurunan sendiri sebagai cadangan di bawah.
+  const dariInstance = (client as unknown as { authStrategy?: { userDataDir?: string } } | null)?.authStrategy
+    ?.userDataDir;
+  if (dariInstance) return dariInstance;
+  return path.join(path.resolve(process.env.WA_SESSION_PATH ?? './.wwebjs_auth'), 'session');
+}
+
+/**
+ * Melepas perangkat dari WhatsApp. TIDAK menunggu berkas sesinya terhapus.
+ *
+ * KENAPA DIPECAH DUA. `client.logout()` melakukan empat langkah berurutan:
+ *
+ *   1. `Socket.logout()` di halaman   -> perangkat dilepas di SISI SERVER
+ *   2. `pupBrowser.close()`           -> Chromium ditutup
+ *   3. tunggu `isConnected()` -- MAKS 1 detik
+ *   4. `authStrategy.logout()`        -> hapus direktori sesi   <-- EPERM di sini
+ *
+ * Yang gagal di Windows hanya langkah 4, dan itu mengubah seluruh cara
+ * menanganinya: saat galatnya muncul, perangkatnya SUDAH terlepas dan Chromium
+ * SUDAH tertutup. Melemparkannya sebagai kegagalan utuh -- perilaku sebelumnya
+ * -- membuat `status`/`phone_number` tidak pernah dikosongkan, sehingga halaman
+ * Koneksi tetap menampilkan sesi yang sebenarnya sudah tidak ada dan setiap
+ * upaya menautkan ulang ditolak "sesi sebelumnya masih ada". Ditemukan dari
+ * `wa_session.last_error` di produksi, bukan diperkirakan.
+ *
+ * Karena itu pemanggilnya WAJIB mengoreksi status lebih dulu, baru memanggil
+ * `bersihkanDirektoriSesi()`. Urutan sebaliknya menahan koreksi status selama
+ * berkasnya masih dicoba dihapus -- yaitu memperpanjang keadaan salah itu.
+ *
+ * @returns `direktoriTerkunci` true bila perangkat sudah lepas tapi direktori
+ *          sesinya belum bisa dihapus. Bukan kegagalan logout.
+ */
+export async function lepasPerangkat(): Promise<{ direktoriTerkunci: boolean }> {
+  const c = getClient();
+  try {
+    await c.logout();
+    return { direktoriTerkunci: false };
+  } catch (err) {
+    if (!galatBerkasTerkunci(err)) throw err;
+    logger.warn(safeError(err), 'perangkat sudah dilepas dari WhatsApp, berkas sesinya menyusul');
+    return { direktoriTerkunci: true };
+  }
+}
+
+/**
+ * Menghapus direktori sesi, dengan jeda menaik sampai ~45 detik.
+ *
+ * Jedanya menaik (1s, 2s, 3s, ...) alih-alih tetap: proses anak Chromium
+ * (renderer, GPU, network service) biasanya melepas handle-nya dalam beberapa
+ * detik pertama, sementara pemegang yang benar-benar bermasalah -- pemindai
+ * virus yang sedang membaca berkas sesi -- butuh jauh lebih lama. Jeda tetap
+ * yang pendek gagal untuk kasus kedua; jeda tetap yang panjang membuat kasus
+ * pertama, yang justru paling sering, menunggu tanpa alasan.
+ *
+ * `maxRetries` sengaja tidak dipakai di sini: ulangan bawaan Node tidak
+ * mencatat apa pun, jadi kegagalan yang berlangsung setengah menit tidak
+ * meninggalkan satu baris pun untuk menjelaskan ke mana waktunya pergi.
+ */
+export async function bersihkanDirektoriSesi(): Promise<boolean> {
+  const dir = direktoriSesi();
+  for (let percobaan = 1; percobaan <= 9; percobaan++) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true, maxRetries: 0 });
+      if (percobaan > 1) logger.info({ percobaan }, 'direktori sesi akhirnya terhapus');
+      return true;
+    } catch (err) {
+      if (!galatBerkasTerkunci(err)) throw err;
+      logger.debug({ percobaan }, 'direktori sesi masih terkunci');
+      await new Promise((r) => setTimeout(r, percobaan * 1_000));
+    }
+  }
+  logger.error({ direktori: dir }, 'direktori sesi TIDAK bisa dihapus -- perlu dibersihkan manual');
+  return false;
+}
+
 /**
  * ARCHITECTURE §9.6 / TECH_STACK "Pengerasan Puppeteer": TIDAK ADA
  * --no-sandbox. Itu penanganan darurat kontainer Linux; di Windows sandbox
@@ -173,10 +271,34 @@ export async function initWaClient(): Promise<Client> {
   const sessionPath = process.env.WA_SESSION_PATH ?? './.wwebjs_auth';
 
   client = new Client({
-    authStrategy: new LocalAuth({ dataPath: sessionPath }),
+    // `rmMaxRetries: 0` sengaja MENURUNKAN ketahanan pustaka, bukan menaikkannya.
+    //
+    // Diukur di mesin ini (handle eksklusif, seperti berkas LevelDB Chromium):
+    // bawaannya 4 bertahan 32 detik sebelum menyerah, dan 20 masih bertahan di
+    // detik ke-119. Anggaran sepanjang itu terdengar bagus sampai disadari DI
+    // MANA ia dihabiskan: di dalam `client.logout()`, yaitu SEBELUM status sesi
+    // di database sempat dikoreksi. Perangkatnya sudah lepas dari WhatsApp pada
+    // langkah pertama, tapi halaman Koneksi akan menampilkan sesi lama sebagai
+    // masih tersambung selama dua menit itu -- memperpanjang persis kebohongan
+    // yang perbaikan ini ada untuk menghilangkan.
+    //
+    // Jadi: gagal cepat di sini, koreksi status, baru bersihkan berkasnya lewat
+    // `bersihkanDirektoriSesi()` yang anggarannya kita kendalikan dan kita catat.
+    authStrategy: new LocalAuth({ dataPath: sessionPath, rmMaxRetries: 0 }),
     puppeteer: {
       headless: true,
       args: ['--disable-dev-shm-usage'],
+      // Bawaan Puppeteer 180 detik, dan itu terbukti kurang di sini: worker
+      // gagal memulai berulang dengan "Runtime.callFunctionOn timed out"
+      // tepat ~200 detik setiap kali, sementara Chromium sendiri jalan normal.
+      // Yang lama bukan peluncurannya melainkan injeksi awal whatsapp-web.js
+      // ke WhatsApp Web, dan itu tumbuh seiring besarnya sesi tersimpan
+      // (direktori sesi di sini 37 MB).
+      //
+      // Menaikkannya TIDAK menyembunyikan sesi yang menggantung: `sessionWatchdog()`
+      // di index.ts tetap menyalakan ulang worker bila sesi berada di luar
+      // `ready` lebih dari 15 menit, jadi batas atas pemulihannya tidak berubah.
+      protocolTimeout: 300_000,
     },
   });
 

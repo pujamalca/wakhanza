@@ -1,5 +1,5 @@
 import { WaSession, WaGroup } from '@/models';
-import { getClient } from './wa-client';
+import { getClient, lepasPerangkat, bersihkanDirektoriSesi } from './wa-client';
 import { logger, safeError } from '@/lib/logger';
 
 /**
@@ -157,11 +157,30 @@ export async function processSessionCommand(): Promise<void> {
     const client = getClient();
     if (command === 'logout') {
       logger.warn('perintah logout diterima dari dashboard, memutus sesi WhatsApp');
-      await client.logout();
+      // Urutannya menentukan kebenaran, bukan kerapian -- lihat penjelasan di
+      // wa-client.ts. Kegagalan menghapus berkas sesi terjadi SESUDAH
+      // perangkatnya benar-benar dilepas di sisi server, jadi status harus
+      // dikoreksi lebih dulu; menunggu berkasnya bersih berarti membiarkan
+      // halaman Koneksi menampilkan sesi yang sudah tidak ada selama itu.
+      const { direktoriTerkunci } = await lepasPerangkat();
       await WaSession.update(
         { status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null },
         { where: { id: 1 } },
       );
+
+      if (direktoriTerkunci && !(await bersihkanDirektoriSesi())) {
+        // Keterangan, BUKAN laporan kegagalan logout: perangkatnya memang
+        // sudah lepas. Statusnya di atas tetap `qr_pending` dan tidak diubah
+        // lagi di sini.
+        await WaSession.update(
+          {
+            lastError:
+              'Perangkat sudah dilepas dari WhatsApp, tapi berkas sesi lama tidak bisa dihapus (masih dikunci Windows). Hentikan worker, hapus folder .wwebjs_auth\\session, lalu jalankan worker lagi.',
+          },
+          { where: { id: 1 } },
+        );
+      }
+
       await client.initialize();
     } else if (command === 'reconnect') {
       logger.info('perintah sambung ulang diterima dari dashboard');
