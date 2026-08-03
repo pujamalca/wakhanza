@@ -23,6 +23,24 @@ function isDerivedTable(table: string | null): boolean {
   return !!table && table.startsWith('<');
 }
 
+/**
+ * MariaDB memakai `table = NULL` untuk baris EXPLAIN yang TIDAK menyentuh tabel
+ * sama sekali: "Impossible WHERE noticed after reading const tables", "Select
+ * tables optimized away", "No tables used". Semuanya berarti optimizer sudah
+ * membuktikan hasilnya tanpa membaca apa pun -- kebalikan dari pemindaian
+ * penuh, bukan bentuk terburuknya.
+ *
+ * Tanpa pengecualian ini, `type ?? 'ALL'` di bawah membaca kolom kosong itu
+ * sebagai full scan dan pemeriksaannya GAGAL untuk query yang justru paling
+ * murah. Ketahuan lewat query pencarian no. pendaftaran, yang nilai contohnya
+ * memang sengaja tidak ada di database mana pun -- dan nilai contoh yang tidak
+ * cocok dengan data nyata adalah keadaan normal untuk pemeriksaan rencana,
+ * bukan kekecualian.
+ */
+function isTanpaTabel(row: ExplainRow): boolean {
+  return row.table === null;
+}
+
 const DEFAULT_MAX_ROWS = 500;
 
 async function main() {
@@ -50,8 +68,8 @@ async function main() {
         const usingIndex = row.Extra?.includes('Using index') ? '  (Using index)' : '';
         const table = row.table ?? '?';
 
-        if (check.allowFullScan) {
-          console.log(`[--] ${label} ${table} ${type} — pemindaian penuh yang disengaja`);
+        if (isTanpaTabel(row)) {
+          console.log(`[ok] ${label} (tanpa akses tabel: ${row.Extra ?? 'tidak ada tabel dipakai'})`);
           continue;
         }
 
@@ -60,14 +78,22 @@ async function main() {
           continue;
         }
 
+        // Izin pemindaian penuh berlaku per tabel, dan HANYA menggugurkan dua
+        // pemeriksaan yang memang jadi tidak berlaku. Ambang `rows` tetap
+        // ditegakkan: justru pada tabel yang boleh dipindai penuh itulah
+        // asumsi "tabel ini kecil" perlu gagal berisik saat ternyata keliru.
+        const bolehDipindai = check.allowFullScan?.includes(table) ?? false;
+
         const problems: string[] = [];
-        if (type === 'ALL') problems.push(`type=ALL (full scan)`);
-        if (!key) problems.push('key=NULL (tidak pakai indeks)');
+        if (type === 'ALL' && !bolehDipindai) problems.push(`type=ALL (full scan)`);
+        if (!key && !bolehDipindai) problems.push('key=NULL (tidak pakai indeks)');
         if (rowCount > maxRows) problems.push(`rows=${rowCount} melampaui ambang ${maxRows}`);
 
         if (problems.length > 0) {
           failed = true;
           console.error(`[GAGAL] ${label} ${table} ${problems.join(', ')}`);
+        } else if (bolehDipindai && type === 'ALL') {
+          console.log(`[--] ${label} ${table} ${type} — pemindaian penuh yang disengaja  rows~${rowCount}`);
         } else {
           console.log(`[ok] ${label} ${table} ${type} ${key ?? ''}  rows~${rowCount}${usingIndex}`);
         }

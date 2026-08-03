@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/authz';
 import { fetchPatientSegment } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
+import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadBroadcastContext, enqueueMessage, identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
 import { periksaBerkasLampiran, periksaPanjangKeterangan, MAX_LAMPIRAN_MB } from '@/core/media';
@@ -41,8 +42,15 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
     cari: String(formData.get('cari') ?? ''),
   };
   const filters = parseFilters(raw);
-  if (filters.dateFrom > filters.dateTo) {
+  if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo) {
     return { error: 'Tanggal mulai tidak boleh setelah tanggal akhir.' };
+  }
+  // fetchPatientSegment mengembalikan larik kosong untuk cakupan ini, jadi
+  // pesannya akan jatuh ke "tidak ada pasien yang cocok" -- benar hasilnya,
+  // tapi menyesatkan sebabnya: filternya bukan terlalu sempit, melainkan tidak
+  // ada sama sekali.
+  if (segmentScope(filters) === 'tanpa-batas') {
+    return { error: PESAN_TANPA_BATAS };
   }
 
   const recipients = await fetchPatientSegment(filters);
@@ -86,8 +94,11 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
   const campaign = await BroadcastCampaign.create({
     createdBy: session!.user.username,
     filterJson: JSON.stringify({
-      dateFrom: formatSqlDate(filters.dateFrom),
-      dateTo: formatSqlDate(filters.dateTo),
+      // null = tanpa batas waktu. Jejak audit harus bisa membedakan itu dari
+      // jendela tanggal tertentu -- keduanya menghasilkan segmen yang sangat
+      // berbeda dari filter yang sama persis selebihnya.
+      dateFrom: filters.dateFrom ? formatSqlDate(filters.dateFrom) : null,
+      dateTo: filters.dateTo ? formatSqlDate(filters.dateTo) : null,
       kdKab: filters.kdKab,
       kdKec: filters.kdKec,
       kdPj: filters.kdPj,

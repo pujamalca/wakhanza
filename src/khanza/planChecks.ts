@@ -9,8 +9,20 @@ export interface PlanCheck {
   name: string;
   sql: string;
   replacements: Record<string, unknown>;
-  /** Hanya true untuk booking_registrasi — satu-satunya full scan yang disengaja (§4.4). */
-  allowFullScan?: boolean;
+  /**
+   * Alias tabel (sebagaimana muncul di kolom `table` EXPLAIN, jadi `b`/`d`/`p0`
+   * — bukan nama tabel aslinya) yang BOLEH dipindai penuh.
+   *
+   * Dulu ini `boolean`, dan bentuk itu terlalu tumpul dalam dua arah sekaligus:
+   * satu query biasanya menyentuh banyak tabel, jadi mengizinkan pemindaian
+   * pada SATU di antaranya berarti berhenti menjaga SEMUANYA. Query jadwal
+   * dokter menyentuh tiga tabel padahal yang memang kecil cuma `dokter`;
+   * dengan izin menyeluruh, `jadwal` yang tumbuh bebas ikut tidak terjaga.
+   * `maxRows`-nya pun tidak pernah benar-benar jalan -- pemeriksaannya keburu
+   * dilewati, jadi jaring pengaman yang tertulis di komentar sebenarnya tidak
+   * ada. Sekarang izinnya per tabel, dan `maxRows` berlaku untuk semuanya.
+   */
+  allowFullScan?: string[];
   /** Ambang rows dari EXPLAIN sebelum dianggap gagal. Default 500. */
   maxRows?: number;
 }

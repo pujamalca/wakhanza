@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
+import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions, SEGMENT_LIMIT } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
+import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
 import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
 import { Outbox, BroadcastCampaign, BroadcastTemplate } from '@/models';
-import { parseFilters, DATE_PRESETS, type RawFilterInput } from './filters';
+import { parseFilters, DATE_PRESETS, PRESET_SEMUA_WAKTU, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
 import { ComposeForm } from './ComposeForm';
 import { PageHeader, Card, cardClassName, Button, Input, CheckboxList, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
@@ -26,6 +27,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
 
   const sp = await searchParams;
   const filters = parseFilters(sp);
+  const scope = segmentScope(filters);
   const selectedKab = toSet(sp.kab);
   const selectedKec = toSet(sp.kec);
   const selectedPj = toSet(sp.pj);
@@ -79,7 +81,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
 
       <form method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
         <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">Rentang kunjungan</p>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Rentang kunjungan (opsional)</p>
           <div className="flex flex-wrap items-center gap-2">
             {Object.entries(DATE_PRESETS).map(([key, preset]) => (
               <button
@@ -92,21 +94,33 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
                 {preset.label}
               </button>
             ))}
+            <button
+              type="submit"
+              name="preset"
+              value={PRESET_SEMUA_WAKTU}
+              className="rounded-full border px-3 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              Semua waktu
+            </button>
             <span className="text-xs text-muted-foreground">atau</span>
             <input
               type="date"
               name="dateFrom"
-              defaultValue={formatSqlDate(filters.dateFrom)}
+              defaultValue={filters.dateFrom ? formatSqlDate(filters.dateFrom) : ''}
               className="rounded-md border bg-background px-2 py-1 text-xs text-foreground"
             />
             <span className="text-xs">s/d</span>
             <input
               type="date"
               name="dateTo"
-              defaultValue={formatSqlDate(filters.dateTo)}
+              defaultValue={filters.dateTo ? formatSqlDate(filters.dateTo) : ''}
               className="rounded-md border bg-background px-2 py-1 text-xs text-foreground"
             />
           </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Kosongkan keduanya untuk mencari di seluruh riwayat kunjungan -- perlu bila pasien yang dicari terakhir datang
+            lama sekali.
+          </p>
         </div>
 
         <div>
@@ -144,6 +158,18 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           Terapkan filter
         </Button>
       </form>
+
+      {/* Rentang tanggal yang mati harus TERLIHAT mati. Kotak tanggal kosong
+          gampang terbaca sebagai "belum diisi" alih-alih "sengaja tanpa batas",
+          dan bedanya menentukan siapa saja yang masuk segmen. */}
+      {scope === 'tanpa-batas' && (
+        <div className="mb-4 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">{PESAN_TANPA_BATAS}</div>
+      )}
+      {scope === 'semua-waktu' && (
+        <p className="mb-4 text-xs text-muted-foreground">
+          Tanpa batas rentang kunjungan &mdash; mencari di seluruh riwayat, disaring filter lain di atas.
+        </p>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Stat label="Cocok" value={summary.total} />
@@ -198,11 +224,25 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           Menampilkan {summary.preview.length} dari {summary.total} pasien cocok.
         </p>
       )}
+      {/* Angka "cocok" berhenti di batas query, jadi tepat pada angka itu ia
+          berubah arti: bukan lagi jumlah yang cocok, melainkan jumlah yang
+          sempat terbaca. Diam di sini membuat segmen yang terpotong terlihat
+          persis seperti segmen yang utuh. */}
+      {summary.total >= SEGMENT_LIMIT && (
+        <p className="mt-1 text-xs text-warning">
+          Hasil dipotong di {SEGMENT_LIMIT} pasien pertama (kunjungan terbaru lebih dulu) &mdash; yang cocok kemungkinan
+          lebih banyak. Persempit filter supaya jelas siapa saja yang dikirimi.
+        </p>
+      )}
 
       <ComposeForm
         hiddenFilters={{
-          dateFrom: [formatSqlDate(filters.dateFrom)],
-          dateTo: [formatSqlDate(filters.dateTo)],
+          // Kunci tetap dikirim walau nilainya kosong: kosong = "tanpa batas
+          // waktu", sedangkan kunci yang HILANG dibaca server action sebagai
+          // hal yang sama tanpa pernah dinyatakan. Membuatnya eksplisit
+          // menjaga apa yang dikirim tetap sama dengan apa yang dipratinjau.
+          dateFrom: [filters.dateFrom ? formatSqlDate(filters.dateFrom) : ''],
+          dateTo: [filters.dateTo ? formatSqlDate(filters.dateTo) : ''],
           kab: [...selectedKab],
           kec: [...selectedKec],
           pj: [...selectedPj],

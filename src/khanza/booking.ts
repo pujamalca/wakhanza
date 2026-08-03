@@ -64,5 +64,9 @@ registerPlanCheck({
   name: 'BOOK_CONFIRM/BOOK_CANCEL',
   sql: buildBookingSql(),
   replacements: { today: formatSqlDate(new Date()) },
-  allowFullScan: true,
+  // Alias `b` = booking_registrasi, satu-satunya pemindaian penuh yang
+  // disengaja di kelas pemicu ini (§4.4). Tabel lain di query yang sama tetap
+  // dijaga -- dulu izin ini menyeluruh dan ikut membebaskan mereka.
+  allowFullScan: ['b'],
+  maxRows: 5000,
 });

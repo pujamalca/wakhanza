@@ -246,6 +246,10 @@ registerPlanCheck({
   name: 'AUTOREPLY_JADWAL',
   sql: buildJadwalSql({ limit: 60 }).sql,
   replacements: buildJadwalSql({ limit: 60 }).replacements,
-  allowFullScan: true,
+  // Alias `d` = dokter. `jadwal` sendiri (alias `j`) TIDAK diberi izin ini dan
+  // memang tidak membutuhkannya -- ia masuk lewat indeks. Sebelumnya izinnya
+  // menyeluruh, jadi seandainya `jadwal` suatu saat jatuh ke pemindaian penuh,
+  // tidak ada yang akan memberi tahu.
+  allowFullScan: ['d'],
   maxRows: 2000,
 });
