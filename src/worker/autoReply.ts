@@ -269,11 +269,21 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<AutoRep
   return { outcome: 'matched', ruleId: hit.rule.id, ruleLabel: hit.rule.label };
 }
 
-/** Pembungkus yang tidak pernah melempar -- dipanggil dari pendengar event whatsapp-web.js. */
-export async function handleInboundMessageSafely(msg: InboundMessage): Promise<void> {
+/**
+ * Pembungkus yang tidak pernah melempar -- dipanggil dari pendengar event
+ * whatsapp-web.js.
+ *
+ * MENGEMBALIKAN hasilnya (bukan void) karena pemanggil memakainya untuk mengisi
+ * `inbound_message.dibalas` saat mencatat. Kegagalan dilaporkan sebagai
+ * `no_match`: yang pasti benar dalam keadaan itu adalah tidak ada balasan yang
+ * terkirim, dan mencatatnya sebagai "dibalas" akan menyembunyikan justru
+ * pertanyaan yang perlu dijawab manusia.
+ */
+export async function handleInboundMessageSafely(msg: InboundMessage): Promise<AutoReplyResult> {
   try {
-    await handleInboundMessage(msg);
+    return await handleInboundMessage(msg);
   } catch (err) {
     logger.error({ phone: maskPhone(msg.phoneE164), ...safeError(err) }, 'balasan otomatis gagal diproses');
+    return { outcome: 'no_match' };
   }
 }

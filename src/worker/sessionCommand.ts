@@ -90,6 +90,30 @@ async function bacaGrupDariSesi(): Promise<GrupTerbaca[]> {
 async function syncGroups(): Promise<void> {
   const grup = await bacaGrupDariSesi();
 
+  /**
+   * PEMBACAAN KOSONG TIDAK PERNAH MENGHAPUS APA PUN, dan ini bukan
+   * kehati-hatian berlebih -- ia sudah terjadi.
+   *
+   * Status `wa_session` sudah `ready` beberapa detik setelah worker menyala,
+   * tapi koleksi chat di dalam Chromium belum tentu ikut terisi saat itu.
+   * Menekan tombol "Muat daftar grup" di sela itu membaca NOL grup, dan versi
+   * pertama kode ini menafsirkannya sebagai "rumah sakit keluar dari semua
+   * grup" lalu menghapus seluruh barisnya. Keenam grup nyata di mesin ini
+   * lenyap begitu, tanpa satu pun galat -- dan yang hilang bukan cuma daftar:
+   * ia rujukan yang dipakai memasang tujuan di /farmasi.
+   *
+   * Nol grup nyaris selalu berarti "belum tersinkron", hampir tidak pernah
+   * berarti "memang tidak ada". Jadi yang benar adalah membiarkan daftar lama
+   * apa adanya dan berisik soal itu.
+   */
+  if (grup.length === 0) {
+    logger.warn(
+      { tersimpan: await WaGroup.count() },
+      'daftar grup terbaca KOSONG -- daftar lama dipertahankan, kemungkinan sesi belum selesai sinkron',
+    );
+    return;
+  }
+
   const terbaca: string[] = [];
   for (const g of grup) {
     await WaGroup.upsert({
@@ -101,6 +125,10 @@ async function syncGroups(): Promise<void> {
     terbaca.push(g.chatId);
   }
 
+  // Grup yang sudah tidak diikuti lagi dihapus -- tapi hanya sesudah terbukti
+  // pembacaannya berhasil (dijaga penjagaan di atas). Yang TIDAK ikut terhapus
+  // adalah `farmasi_target`: tujuan yang sudah dipasang tidak boleh lenyap
+  // karena satu sinkronisasi kebetulan tidak menyertakan grupnya.
   const semua = await WaGroup.findAll({ attributes: ['chatId'] });
   const basi = semua.map((g) => g.chatId).filter((id) => !terbaca.includes(id));
   if (basi.length > 0) {

@@ -171,6 +171,22 @@ export const IconX = (p: IconProps) => (
   </Icon>
 );
 
+/** Gelembung percakapan -- menu Pesan masuk. */
+export const IconChat = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20 12a7 7 0 0 1-7 7H8l-4 3v-4.5A7 7 0 0 1 8 5h5a7 7 0 0 1 7 7Z" />
+    <path d="M9 11h7M9 14h4" />
+  </Icon>
+);
+
+/** Dua lembar bertumpuk -- tombol salin ID. */
+export const IconCopy = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+  </Icon>
+);
+
 export const IconCheck = (p: IconProps) => (
   <Icon {...p}>
     <path d="m5 12.5 4.5 4.5L19 7" />

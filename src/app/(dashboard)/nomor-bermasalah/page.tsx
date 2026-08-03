@@ -2,7 +2,7 @@ import { QueryTypes, fn, col } from 'sequelize';
 import { PatientContact } from '@/models';
 import { sik } from '@/db/sik';
 import { CorrectionForm } from './CorrectionForm';
-import { PageHeader, FilterChip, Input, Button, LinkButton, EmptyState, IconSearch, IconCheck, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PageHeader, FilterChip, Input, Button, LinkButton, EmptyState, Pagination, IconSearch, IconCheck, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 const REASON_LABELS: Record<string, string> = {
   empty: 'Kosong',
@@ -23,7 +23,10 @@ const REASON_LABELS: Record<string, string> = {
  */
 const REASON_ORDER = ['too_short', 'not_mobile', 'unparseable', 'empty'] as const;
 
-const JUMLAH_PER_HALAMAN = 100;
+// Sama dengan /antrean, /log, dan /audit. Angka sebelumnya 100 -- peninggalan
+// dari sebelum halaman ini punya paginasi, saat 100 adalah BATAS ATAS yang
+// tidak bisa dilewati sama sekali, bukan ukuran satu halaman.
+const JUMLAH_PER_HALAMAN = 50;
 
 async function namesFor(rmList: string[]): Promise<Map<string, string>> {
   if (rmList.length === 0) return new Map();
@@ -37,9 +40,10 @@ async function namesFor(rmList: string[]): Promise<Map<string, string>> {
 export default async function NomorBermasalahPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; reason?: string }>;
+  searchParams: Promise<{ q?: string; reason?: string; page?: string }>;
 }) {
-  const { q, reason } = await searchParams;
+  const { q, reason, page: pageParam } = await searchParams;
+  const page = Math.max(1, Number(pageParam) || 1);
 
   // Dihitung lewat satu query GROUP BY, bukan satu COUNT per alasan: angkanya
   // dipakai untuk menunjukkan sebaran yang timpang itu langsung di chip-nya,
@@ -60,7 +64,21 @@ export default async function NomorBermasalahPage({
     }
   }
 
+  // Jumlah untuk paginasi diambil dari GROUP BY di atas, BUKAN dari
+  // `findAndCountAll` seperti di /audit: `WHERE`-nya sama persis
+  // (`phoneE164 IS NULL` + `reason`), jadi satu COUNT(*) tambahan tiap ganti
+  // halaman tidak menghasilkan angka baru apa pun.
+  const ditampilkan = reason ? (reasonCounts.get(reason) ?? 0) : totalBermasalah;
+
   let rows: PatientContact[];
+  let jumlahBaris: number;
+  let totalHalaman: number;
+  // Nomor halaman yang benar-benar DIPAKAI, bisa berbeda dari yang diminta di
+  // URL. Tanpa penjepitan ini, `?page=99` (atau halaman terakhir yang menyusut
+  // setelah nomornya dikoreksi) menghasilkan tabel kosong berikut kalimat
+  // "Tidak ada nomor bermasalah" -- klaim yang langsung dibantah oleh angka di
+  // chip tepat di atasnya.
+  let halaman: number;
   if (q && q.trim()) {
     const term = q.trim();
     const matches = await sik.query<{ no_rkm_medis: string }>(
@@ -72,13 +90,39 @@ export default async function NomorBermasalahPage({
       rmList.length > 0
         ? await PatientContact.findAll({ where: { noRkmMedis: rmList }, order: [['checkedAt', 'DESC']] })
         : [];
+    // Hasil pencarian sudah dibatasi 50 oleh query `pasien` di atas, jadi
+    // selalu muat satu halaman -- paginasinya tetap dirender supaya jumlahnya
+    // terbaca, bukan supaya ada yang diklik.
+    jumlahBaris = rows.length;
+    totalHalaman = 1;
+    halaman = 1;
   } else {
+    jumlahBaris = ditampilkan;
+    totalHalaman = Math.max(1, Math.ceil(ditampilkan / JUMLAH_PER_HALAMAN));
+    halaman = Math.min(page, totalHalaman);
+
     const where: Record<string, unknown> = { phoneE164: null };
     if (reason) where.reason = reason;
-    rows = await PatientContact.findAll({ where, order: [['checkedAt', 'DESC']], limit: JUMLAH_PER_HALAMAN });
+    rows = await PatientContact.findAll({
+      where,
+      order: [['checkedAt', 'DESC']],
+      limit: JUMLAH_PER_HALAMAN,
+      offset: (halaman - 1) * JUMLAH_PER_HALAMAN,
+    });
   }
 
-  const ditampilkan = reason ? (reasonCounts.get(reason) ?? 0) : totalBermasalah;
+  // Chip alasan dan form pencarian sengaja TIDAK membawa `page` -- keduanya
+  // mengganti CAKUPAN, dan posisi halaman lama tidak berarti apa-apa di
+  // cakupan yang berbeda. Yang dibawa ke sini justru kebalikannya: `reason`
+  // dan `q` harus ikut, kalau tidak tombol Berikutnya membuang saringannya.
+  const hrefFor = (p: number) =>
+    `/nomor-bermasalah?${[
+      reason ? `reason=${encodeURIComponent(reason)}` : '',
+      q ? `q=${encodeURIComponent(q)}` : '',
+      `page=${p}`,
+    ]
+      .filter(Boolean)
+      .join('&')}`;
 
   const nameMap = await namesFor(rows.map((r) => r.noRkmMedis));
 
@@ -113,12 +157,6 @@ export default async function NomorBermasalahPage({
               </FilterChip>
             ))}
           </div>
-          {ditampilkan > JUMLAH_PER_HALAMAN && (
-            <p className="mb-3 text-xs text-muted-foreground">
-              Menampilkan {JUMLAH_PER_HALAMAN} dari {ditampilkan.toLocaleString('id-ID')}. Persempit lewat saringan di
-              atas atau cari nama/no. RM tertentu.
-            </p>
-          )}
           {reason === 'empty' && (
             <p className="mb-3 text-xs text-muted-foreground">
               Nomornya memang belum pernah dicatat di SIMRS Khanza, jadi tidak ada yang bisa dibetulkan dari sini --
@@ -172,6 +210,8 @@ export default async function NomorBermasalahPage({
           </tbody>
         </table>
       </div>
+
+      <Pagination page={halaman} totalPages={totalHalaman} count={jumlahBaris} hrefFor={hrefFor} unit="pasien" />
     </div>
   );
 }

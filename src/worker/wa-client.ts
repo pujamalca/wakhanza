@@ -6,11 +6,13 @@ import { handleInboundMessageSafely } from './autoReply';
 import { isOptOutRequest, optOutTriggerCodes } from '@/core/optOut';
 import {
   isIndividualAddress,
+  isGroupAddress,
   isKnownNonIndividualAddress,
   isLidAddress,
   isPhoneLike,
   phoneFromAddress,
 } from '@/core/waAddress';
+import { catatPesanMasuk } from './inboundLog';
 import { resolveMediaPath } from '@/lib/mediaStorage';
 
 /**
@@ -223,16 +225,44 @@ export async function initWaClient(): Promise<Client> {
   client.on('message', async (message) => {
     if (message.fromMe) return;
 
-    if (!isIndividualAddress(message.from)) {
-      // Status kontak, grup, dan saluran datang terus-menerus ke nomor rumah
-      // sakit dan bukan kesalahan apa pun -- dicatat di level debug supaya
-      // tidak menenggelamkan yang penting. Server yang BELUM dikenal justru
-      // dinaikkan ke warn: lihat alasannya di core/waAddress.ts.
+    const perorangan = isIndividualAddress(message.from);
+    const grup = isGroupAddress(message.from);
+
+    if (!perorangan && !grup) {
+      // Status kontak dan saluran datang terus-menerus ke nomor rumah sakit dan
+      // bukan kesalahan apa pun -- dicatat di level debug supaya tidak
+      // menenggelamkan yang penting. Server yang BELUM dikenal justru dinaikkan
+      // ke warn: lihat alasannya di core/waAddress.ts.
+      //
+      // Keduanya juga TIDAK dicatat ke `inbound_message`: satu nomor rumah
+      // sakit menerima status dari SETIAP kontaknya, dan tabelnya akan tumbuh
+      // ribuan baris sehari berisi hal yang tidak seorang pun cari.
       const rutin = isKnownNonIndividualAddress(message.from);
       logger[rutin ? 'debug' : 'warn'](
         { from: jejakId(message.from), type: message.type },
         rutin ? 'pesan bukan-perorangan dilewati' : 'pesan masuk dilewati: jenis alamat belum dikenal',
       );
+      return;
+    }
+
+    /**
+     * Pesan GRUP dicatat, tapi berhenti di sini.
+     *
+     * Sampai sebelumnya ia dibuang di baris kedua tanpa jejak apa pun, dan
+     * itulah kenapa tidak ada satu pun cara melihat id grup dari dashboard.
+     * Sekarang ia masuk daftar -- tapi TIDAK melanjutkan ke opt-out maupun
+     * balasan otomatis, dan keduanya disengaja:
+     *
+     * - Opt-out per NOMOR, sementara yang mengirim di grup adalah salah satu
+     *   peserta. Satu orang yang mengetik frasa berhenti di dalam grup tidak
+     *   sedang meminta apa pun atas nama dirinya sebagai pasien.
+     * - Membalas otomatis di dalam grup berarti seluruh anggota menerima
+     *   jawaban atas pertanyaan satu orang, dan satu percakapan ramai bisa
+     *   memicu balasan beruntun -- persis pola yang membuat nomor diblokir.
+     */
+    if (grup) {
+      logger.debug({ from: jejakId(message.from), type: message.type }, 'pesan grup dicatat');
+      await catatPesanMasuk(message, { jenis: 'grup', phoneE164: null, dibalas: false });
       return;
     }
 
@@ -251,6 +281,11 @@ export async function initWaClient(): Promise<Client> {
     const phoneE164 = await resolvePhoneE164(message);
     if (!phoneE164) {
       logger.warn({ from: jejakId(message.from) }, 'pesan masuk dilewati: nomor pengirim tidak bisa dipetakan');
+      // TETAP dicatat, justru karena inilah keadaan yang paling perlu terlihat:
+      // pesan pasien yang tidak bisa dipetakan ke nomor pernah hilang
+      // berjam-jam tanpa satu pun jejak. Di layar ia muncul sebagai baris
+      // dengan kolom nomor kosong, bukan sebagai ketiadaan.
+      await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164: null, dibalas: false });
       return;
     }
 
@@ -275,6 +310,7 @@ export async function initWaClient(): Promise<Client> {
       } catch (err) {
         logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti kirim otomatis');
       }
+      await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164, dibalas: true });
       return;
     }
 
@@ -285,10 +321,18 @@ export async function initWaClient(): Promise<Client> {
     // message.id._serialized dipakai sebagai kunci idempoten, jadi pesan yang
     // sama diserahkan dua kali oleh whatsapp-web.js (lazim setelah sesi
     // dipulihkan) tidak menghasilkan dua balasan.
-    await handleInboundMessageSafely({
+    const hasil = await handleInboundMessageSafely({
       waMessageId: message.id?._serialized ?? `${message.from}:${message.timestamp}`,
       phoneE164,
       text: message.body ?? '',
+    });
+
+    // Dicatat PALING AKHIR supaya `dibalas` sudah pasti -- tabelnya tanpa grant
+    // UPDATE, jadi tidak ada kesempatan kedua untuk membetulkannya.
+    await catatPesanMasuk(message, {
+      jenis: 'perorangan',
+      phoneE164,
+      dibalas: hasil.outcome === 'matched' || hasil.outcome === 'fallback',
     });
   });
 

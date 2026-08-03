@@ -6,6 +6,7 @@ import { findUnknownVariables, FARMASI_TEMPLATE_VARIABLES } from '@/core/templat
 import { parseTarget, type JenisTarget } from '@/core/farmasiTarget';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadFarmasiContext, enqueueMessage } from '@/worker/pipeline';
+import { mintaSyncGrup } from '@/lib/waGroups';
 import { requireRole } from '@/lib/authz';
 
 const VARS_HINT = FARMASI_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ');
@@ -135,15 +136,10 @@ export async function mintaSyncGrupAction(): Promise<HasilForm> {
   const { session, response } = await requireRole('admin');
   if (response) return { error: 'Tidak diizinkan.' };
 
-  const sesi = await WaSession.findByPk(1);
-  if (sesi?.status !== 'ready') {
-    return { error: 'WhatsApp belum tersambung, jadi daftar grup tidak bisa dibaca. Buka halaman Koneksi dulu.' };
-  }
-
-  await WaSession.update({ command: 'sync_groups' }, { where: { id: 1 } });
-  await logAudit(session!.user.username, 'farmasi_sync_grup', 'wa_session', 'diminta');
+  const hasil = await mintaSyncGrup(session!.user.username);
   segarkan();
-  return { sukses: 'Permintaan dikirim ke worker. Muat ulang halaman ini beberapa detik lagi.' };
+  revalidatePath('/pesan-masuk'); // daftar grup dipakai di kedua halaman
+  return hasil;
 }
 
 // ---------------------------------------------------------------------------

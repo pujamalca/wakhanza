@@ -2,6 +2,7 @@ import {
   parseWaAddress,
   isIndividualAddress,
   isKnownNonIndividualAddress,
+  isGroupAddress,
   isLidAddress,
   isPhoneLike,
   phoneFromAddress,
@@ -36,6 +37,27 @@ describe('isIndividualAddress', () => {
     for (const bukan of ['12036304@g.us', 'status@broadcast', '1234@newsletter', '1234@server-baru']) {
       expect(isIndividualAddress(bukan)).toBe(false);
     }
+  });
+});
+
+describe('isGroupAddress', () => {
+  it('mengenali grup, dan HANYA grup', () => {
+    expect(isGroupAddress('120363402118136446@g.us')).toBe(true);
+    expect(isGroupAddress('6281234567890-1614840000@g.us')).toBe(true);
+  });
+
+  it('status dan saluran BUKAN grup, walau sama-sama bukan perorangan', () => {
+    // Pembedaan ini yang menentukan apa yang dicatat ke inbound_message: pesan
+    // grup harus masuk daftar, sementara status dari setiap kontak akan
+    // menumpuk ribuan baris sehari yang tidak seorang pun cari.
+    expect(isGroupAddress('status@broadcast')).toBe(false);
+    expect(isGroupAddress('1234@newsletter')).toBe(false);
+  });
+
+  it('alamat perorangan bukan grup', () => {
+    expect(isGroupAddress(CUS_NYATA)).toBe(false);
+    expect(isGroupAddress(LID_NYATA)).toBe(false);
+    expect(isGroupAddress(null)).toBe(false);
   });
 });
 

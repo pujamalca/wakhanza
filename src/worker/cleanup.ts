@@ -1,6 +1,6 @@
 import * as cron from 'node-cron';
 import { Op, QueryTypes } from 'sequelize';
-import { Outbox, SendLog, PatientContact, AutoReplyLog } from '@/models';
+import { Outbox, SendLog, PatientContact, AutoReplyLog, InboundMessage, getSettingNumber } from '@/models';
 import { sik } from '@/db/sik';
 import { TERMINAL_OUTBOX_STATUSES } from '@/core/outboxStatus';
 import { normalizePhone } from '@/core/phone';
@@ -45,9 +45,24 @@ async function cleanupOldRecords(): Promise<void> {
   // dengan masa simpan yang sama.
   const deletedAutoReply = await AutoReplyLog.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
 
+  /**
+   * `inbound_message` punya masa simpannya SENDIRI, dan sengaja lebih pendek
+   * (default 30 hari, `inbox.simpan_hari`).
+   *
+   * Isinya kalimat yang diketik pasien -- bisa memuat keluhan medis, dan tabel
+   * ini bukan rekam medis. Yang dibutuhkan untuk pekerjaan sehari-hari ("siapa
+   * yang mengirim kemarin, apa id grupnya") jauh lebih pendek umurnya daripada
+   * bukti pengiriman di `outbox`, sementara isinya jauh lebih sensitif. Memakai
+   * 90 hari yang sama berarti menyimpan yang paling sensitif paling lama tanpa
+   * ada yang memutuskan begitu.
+   */
+  const hariInbox = await getSettingNumber('inbox.simpan_hari', 30);
+  const cutoffInbox = new Date(Date.now() - hariInbox * 24 * 60 * 60 * 1000);
+  const deletedInbound = await InboundMessage.destroy({ where: { createdAt: { [Op.lt]: cutoffInbox } } });
+
   logger.info(
-    { deletedOutbox, deletedLogs, deletedAutoReply },
-    'pembersihan berkala: outbox, send_log & auto_reply_log lama dihapus',
+    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, hariInbox },
+    'pembersihan berkala: outbox, send_log, auto_reply_log & inbound_message lama dihapus',
   );
 
   await cleanupOrphanMedia();

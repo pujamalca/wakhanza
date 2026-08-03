@@ -15,3 +15,4 @@ export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule
 export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
 export { FarmasiTarget } from './FarmasiTarget';
 export { WaGroup } from './WaGroup';
+export { InboundMessage, type JenisChat } from './InboundMessage';

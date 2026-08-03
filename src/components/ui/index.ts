@@ -13,6 +13,7 @@ export * from './Select';
 export * from './CheckboxList';
 export * from './StatCard';
 export * from './Pagination';
+export * from './CopyButton';
 export * from './Skeleton';
 export * from './table';
 export * from './statusBadge';

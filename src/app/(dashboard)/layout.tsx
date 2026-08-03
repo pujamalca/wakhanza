@@ -17,6 +17,10 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: N
       { href: '/ringkasan', label: 'Ringkasan', icon: 'gauge' },
       { href: '/koneksi', label: 'Koneksi', icon: 'plug' },
       { href: '/antrean', label: 'Antrean pesan', icon: 'inbox' },
+      // Arah MASUK, sementara Antrean di atasnya arah keluar. Sengaja
+      // berdampingan: keduanya menjawab "apa yang lewat nomor ini", dan satu
+      // gangguan sering hanya terlihat dari salah satu arahnya saja.
+      { href: '/pesan-masuk', label: 'Pesan masuk', icon: 'chat', adminOnly: true },
     ],
   },
   {

@@ -67,6 +67,18 @@ export function isKnownNonIndividualAddress(id: string | null | undefined): bool
   return addr !== null && SERVER_RUTIN_BUKAN_PERORANGAN.has(addr.server);
 }
 
+/**
+ * Grup, dan HANYA grup -- bukan "bukan perorangan".
+ *
+ * Dibedakan dari `isKnownNonIndividualAddress()` di atas, yang juga memuat
+ * status (`@broadcast`) dan saluran: keduanya datang terus-menerus dari setiap
+ * kontak dan tidak boleh ikut tercatat sebagai pesan masuk, sementara pesan
+ * grup justru harus.
+ */
+export function isGroupAddress(id: string | null | undefined): boolean {
+  return parseWaAddress(id)?.server === 'g.us';
+}
+
 /** Alamat yang nomor teleponnya sudah pasti tidak ada di dalamnya. */
 export function isLidAddress(id: string | null | undefined): boolean {
   return parseWaAddress(id)?.server === 'lid';

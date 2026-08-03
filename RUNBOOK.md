@@ -80,6 +80,17 @@ Pasien cukup membalas **`Berhenti Kirim Otomatis`** ke nomor RS. Tidak perlu tin
 
 Perlu diketahui: yang berhenti adalah **notifikasi otomatis** (antrean, hasil, obat, tagihan, booking). Pengumuman broadcast, balasan otomatis, dan notifikasi farmasi ke grup apotek TETAP berjalan — begitu memang dirancangnya, dan teks konfirmasinya menyebutkan itu ke pasien.
 
+### "Perlu tahu ID grup atau ID nomor seseorang"
+
+Halaman **Pesan masuk** (menu admin). Dua tabel:
+
+- **Grup yang diikuti nomor rumah sakit** — nama, ID grup, jumlah anggota. Tombol salin di sebelah tiap ID. Tekan **Muat daftar grup** kalau kosong atau ada grup baru.
+- **Pesan masuk** — siapa mengirim apa, kapan, berikut **ID pengirim**. Pada pesan grup ada dua ID: ID orangnya dan ID grupnya.
+
+Kalau daftar grup tetap kosong padahal WhatsApp tersambung: **tunggu beberapa menit lalu tekan lagi**. Status "tersambung" muncul lebih dulu daripada selesainya WhatsApp menyalin riwayat percakapan ke komputer ini — terutama sesudah sesi baru ditautkan ulang.
+
+Isi pesan pasien tersimpan 30 hari lalu dihapus otomatis. Bisa dimatikan lewat tombol **Berhenti simpan isi** di halaman yang sama; daftarnya tetap menampilkan siapa, kapan, dan berapa panjang pesannya.
+
 ### "Grup apotek tidak menerima notifikasi"
 
 Halaman **Farmasi** (menu admin). Periksa berurutan — hampir selalu salah satu dari empat ini:

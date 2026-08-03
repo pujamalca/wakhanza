@@ -14,6 +14,7 @@ import {
   IconBan,
   IconMegaphone,
   IconPill,
+  IconChat,
   IconClock,
   IconSettings,
   IconActivity,
@@ -41,6 +42,7 @@ export type NavIcon =
   | 'ban'
   | 'megaphone'
   | 'pill'
+  | 'chat'
   | 'clock'
   | 'reply'
   | 'settings'
@@ -58,6 +60,7 @@ const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   ban: IconBan,
   megaphone: IconMegaphone,
   pill: IconPill,
+  chat: IconChat,
   clock: IconClock,
   reply: IconReply,
   settings: IconSettings,
