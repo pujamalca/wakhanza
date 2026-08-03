@@ -137,6 +137,40 @@ export async function loadAutoReplyContext(body: string): Promise<PipelineContex
   };
 }
 
+/**
+ * Konteks untuk NOTIFIKASI FARMASI. Isi pesannya dari `app_setting`
+ * (`farmasi.template_*`), bukan dari tabel `template` -- tabel itu berisi tepat
+ * tujuh baris yang dipilih worker lewat `Template.findByPk(triggerCode)` untuk
+ * pesan ke PASIEN, dan menambahkan baris ke sana akan membuat halaman /template
+ * menampilkan pesan yang penerimanya sama sekali berbeda di antara pesan pasien.
+ *
+ * Yang paling penting di sini adalah `genericTemplate`, dan ia SENGAJA bukan
+ * `privacy.generic_template` seperti konteks lain: template generik itu ditulis
+ * untuk pasien ("ada informasi dari rumah sakit, silakan hubungi kami") dan
+ * sama sekali tidak berguna bagi apotek. Padanannya di sini tetap menyebut
+ * nomor resep tapi tidak menyebut pasien maupun poli -- apotek tetap tahu ada
+ * pekerjaan masuk, sementara keterkaitan seseorang dengan poli sensitif tidak
+ * ikut terbaca sekian orang di dalam grup.
+ */
+export async function loadFarmasiContext(
+  triggerCode: string,
+  body: string,
+  genericBody: string,
+): Promise<PipelineContext> {
+  const shared = await loadSharedSettings();
+  return {
+    triggerCode,
+    template: { body },
+    genericTemplate: genericBody,
+    identity: shared.identity,
+    quietStart: shared.quietStart,
+    quietEnd: shared.quietEnd,
+    sensitivePoli: shared.sensitivePoli,
+    sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
+  };
+}
+
 export interface EnqueueInput {
   idempotencyKey: string;
   /**
@@ -164,6 +198,19 @@ export interface EnqueueInput {
    */
   phoneOverride?: string | null;
   /**
+   * Alamat tujuan LENGKAP (`120363xxx@g.us` / `628xxx@c.us`) untuk pesan yang
+   * tidak berangkat dari nomor seorang pasien -- sejauh ini hanya notifikasi
+   * farmasi ke grup/petugas apotek.
+   *
+   * Berbeda dari `phoneOverride`, yang tetap sebuah NOMOR PASIEN dan karena itu
+   * ikut diperiksa terhadap daftar tolak serta pendaftaran WhatsApp. Yang ini
+   * melewati keduanya dengan sengaja: sebuah grup tidak punya nomor untuk
+   * dicocokkan ke `opt_out`, dan `getNumberId()` atas JID grup akan menjawab
+   * "tidak terdaftar" lalu menandai barisnya gagal permanen -- notifikasi yang
+   * tidak pernah sampai tanpa satu pun galat yang menyebut sebabnya.
+   */
+  chatId?: string | null;
+  /**
    * Lampiran gambar/dokumen. HANYA diisi BROADCAST manual -- di sana selalu ada
    * staf yang melihat lampirannya sebelum menekan Kirim. Pemicu lain mengirim
    * tanpa peninjauan tiap kali, jadi sengaja tidak punya jalur ini.
@@ -178,7 +225,13 @@ export interface EnqueueInput {
  */
 export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext): Promise<void> {
   let phoneE164: string | null;
-  if (input.phoneOverride) {
+  if (input.chatId) {
+    // Tujuan sudah berupa alamat lengkap, dan sengaja TIDAK menyentuh
+    // resolvePhone: nomor pasiennya memang tidak relevan di sini, dan
+    // melewatkannya ke sana justru akan menulis baris `patient_contact` atas
+    // pasien yang pesannya bahkan tidak dikirim kepadanya.
+    phoneE164 = null;
+  } else if (input.phoneOverride) {
     phoneE164 = input.phoneOverride;
   } else if (input.noRkmMedis) {
     phoneE164 = (await resolvePhone(input.noRkmMedis, input.rawPhone)).phoneE164;
@@ -229,9 +282,9 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
   const body = appendUniqueCode(rendered, input.idempotencyKey, ctx.uniqueCodeTemplate, scheduledAt);
 
   let status: OutboxStatus = 'pending';
-  if (!phoneE164) {
+  if (!phoneE164 && !input.chatId) {
     status = 'skipped_no_contact';
-  } else if (respectsOptOut(ctx.triggerCode) && (await OptOut.findByPk(phoneE164))) {
+  } else if (phoneE164 && respectsOptOut(ctx.triggerCode) && (await OptOut.findByPk(phoneE164))) {
     // respectsOptOut() DILETAKKAN DI DEPAN pemeriksaan database, bukan
     // sesudahnya: untuk BROADCAST ke ratusan penerima, itu menghemat satu
     // query per baris yang hasilnya toh tidak dipakai.
@@ -246,6 +299,7 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
         campaignId: input.campaignId ?? null,
         noRkmMedis: input.noRkmMedis,
         phoneE164: phoneE164,
+        chatId: input.chatId ?? null,
         body,
         mediaPath: input.media?.path ?? null,
         mediaMime: input.media?.mime ?? null,

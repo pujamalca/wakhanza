@@ -11,6 +11,17 @@ export class Outbox extends Model<InferAttributes<Outbox>, InferCreationAttribut
   declare campaignId: number | null;
   declare noRkmMedis: string | null;
   declare phoneE164: string | null;
+  /**
+   * Alamat tujuan lengkap (`628xxx@c.us` / `120363xxx@g.us`) untuk pesan yang
+   * TIDAK berangkat dari nomor seorang pasien -- sejauh ini hanya notifikasi
+   * farmasi ke grup/petugas apotek.
+   *
+   * NULL = perilaku sembilan pemicu lain, persis seperti sebelumnya: tujuannya
+   * dirakit dispatcher dari `phone_e164` + '@c.us'. Dipisah dari `phone_e164`
+   * karena kolom itu dipakai mencari daftar tolak dan memeriksa pendaftaran
+   * nomor -- keduanya tidak berlaku untuk grup. Lihat migrations/016.
+   */
+  declare chatId: string | null;
   declare body: string;
   /**
    * Lintasan berkas lampiran RELATIF terhadap direktori media (lihat
@@ -38,6 +49,7 @@ Outbox.init(
     campaignId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true, field: 'campaign_id' },
     noRkmMedis: { type: DataTypes.STRING(15), allowNull: true, field: 'no_rkm_medis' },
     phoneE164: { type: DataTypes.STRING(20), allowNull: true, field: 'phone_e164' },
+    chatId: { type: DataTypes.STRING(64), allowNull: true, field: 'chat_id' },
     body: { type: DataTypes.TEXT, allowNull: false },
     mediaPath: { type: DataTypes.STRING(255), allowNull: true, field: 'media_path' },
     mediaMime: { type: DataTypes.STRING(100), allowNull: true, field: 'media_mime' },

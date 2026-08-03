@@ -60,19 +60,57 @@ export const AUTOREPLY_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * NOTIFIKASI FARMASI -- satu-satunya konteks yang penerimanya STAF, dan itu
+ * membalik pertimbangannya.
+ *
+ * Tiga daftar di atas membatasi variabel demi PASIEN yang membacanya. Di sini
+ * pembatasnya justru sebaliknya: yang dilindungi adalah pasien yang TIDAK
+ * membaca pesan ini, karena isinya dibaca sekian orang di sebuah grup WhatsApp.
+ *
+ * {no_resep} ada karena itulah yang membuat pesannya berguna: satu nomor yang
+ * bisa dibuka di SIMRS. Yang sengaja TIDAK ada dan jangan ditambahkan: nama
+ * obat, jumlah, aturan pakai, dan diagnosis -- src/khanza/farmasiStaf.ts memang
+ * tidak pernah mengambilnya dari `sik`, dan menambahkan variabelnya di sini
+ * akan jadi alasan pertama untuk mulai mengambilnya.
+ *
+ * {jumlah_resep} hanya terisi pada pesan REKAP (lihat farmasi.max_per_cycle);
+ * pada pesan satuan ia dirender jadi string kosong seperti variabel lain yang
+ * tidak diisi.
+ */
+export const FARMASI_TEMPLATE_VARIABLES = [
+  'no_resep',
+  'nama_pasien',
+  'no_rm',
+  'nama_poli',
+  'nama_dokter',
+  'tanggal',
+  'jam',
+  'jumlah_resep',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * Gabungan seluruh konteks -- INI yang dimengerti `renderTemplate`, bukan
  * daftar yang boleh dipakai di satu tempat tertentu. Pembatasan per konteks
  * terjadi saat template DISIMPAN lewat findUnknownVariables(body, <daftar>),
- * jadi satu renderer tetap melayani tiga konteks tanpa cabang.
+ * jadi satu renderer tetap melayani empat konteks tanpa cabang.
  */
 export const KNOWN_TEMPLATE_VARIABLES = [
-  ...new Set([...TRIGGER_TEMPLATE_VARIABLES, ...BROADCAST_TEMPLATE_VARIABLES, ...AUTOREPLY_TEMPLATE_VARIABLES]),
+  ...new Set([
+    ...TRIGGER_TEMPLATE_VARIABLES,
+    ...BROADCAST_TEMPLATE_VARIABLES,
+    ...AUTOREPLY_TEMPLATE_VARIABLES,
+    ...FARMASI_TEMPLATE_VARIABLES,
+  ]),
 ] as const;
 
 export type TemplateVariable =
   | (typeof TRIGGER_TEMPLATE_VARIABLES)[number]
   | (typeof BROADCAST_TEMPLATE_VARIABLES)[number]
-  | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number];
+  | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number]
+  | (typeof FARMASI_TEMPLATE_VARIABLES)[number];
 
 export function extractVariables(body: string): string[] {
   const names = new Set<string>();

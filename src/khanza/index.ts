@@ -4,6 +4,7 @@
 export * from './antrian';
 export * from './penunjang';
 export * from './farmasi';
+export * from './farmasiStaf';
 export * from './billing';
 export * from './booking';
 export * from './pasienSegment';

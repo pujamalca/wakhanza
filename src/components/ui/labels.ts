@@ -74,6 +74,12 @@ export const TRIGGER_LABEL: Record<string, string> = {
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
   AUTO_REPLY: 'Balasan otomatis',
+  // Dua-duanya BUKAN pesan ke pasien. Labelnya menyebut "apotek" secara
+  // eksplisit supaya baris di halaman Antrean dan Log tidak terbaca sebagai
+  // pemberitahuan yang gagal sampai ke pasien -- penerimanya memang staf.
+  FARMASI_VALIDASI: 'Apotek: resep divalidasi',
+  FARMASI_PENYERAHAN: 'Apotek: obat diserahkan',
+  FARMASI_UJI: 'Apotek: pesan uji',
 };
 
 /** Kode yang belum dikenal dikembalikan apa adanya, bukan jadi string kosong. */

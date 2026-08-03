@@ -41,8 +41,25 @@ export function nextWindowStart(date: Date, endHour: number): Date {
  *   membuat jawaban datang sembilan jam setelah pertanyaannya, saat pasien
  *   sudah lupa pernah bertanya. Jam tenang ada untuk melindungi pasien dari
  *   pesan yang TIDAK ia minta; balasan atas pertanyaannya sendiri bukan itu.
+ * - FARMASI_VALIDASI / FARMASI_PENYERAHAN: penerimanya BUKAN pasien melainkan
+ *   grup/petugas apotek yang sedang bertugas. Jam tenang melindungi orang yang
+ *   sedang tidur di rumah, bukan shift malam yang justru menunggu pesan ini.
+ *   Menahannya sampai 07.00 punya akibat kedua yang lebih buruk daripada
+ *   sekadar terlambat: seluruh resep semalam menumpuk lalu dikirim serentak
+ *   pagi hari sebagai puluhan pesan basi sekaligus -- persis pola beruntun yang
+ *   memicu deteksi spam WhatsApp, dengan isi yang sudah tidak berguna lagi.
+ * - FARMASI_UJI: staf sedang berdiri di depan layar menunggu pesannya muncul di
+ *   grup. Pesan uji yang ditahan sampai pagi tidak terbaca sebagai "ditahan"
+ *   melainkan sebagai "kode grupnya salah" -- lalu ia mengganti kode yang
+ *   sebenarnya sudah benar.
  */
-const BYPASS_QUIET_HOURS = new Set(['BOOK_CANCEL', 'AUTO_REPLY']);
+const BYPASS_QUIET_HOURS = new Set([
+  'BOOK_CANCEL',
+  'AUTO_REPLY',
+  'FARMASI_VALIDASI',
+  'FARMASI_PENYERAHAN',
+  'FARMASI_UJI',
+]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */
 export function computeScheduledAt(eventAt: Date, triggerCode: string, quietStart: number, quietEnd: number): Date {

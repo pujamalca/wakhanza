@@ -13,3 +13,5 @@ export { BroadcastTemplate } from './BroadcastTemplate';
 export { BroadcastSchedule } from './BroadcastSchedule';
 export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule';
 export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
+export { FarmasiTarget } from './FarmasiTarget';
+export { WaGroup } from './WaGroup';

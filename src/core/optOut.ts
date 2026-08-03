@@ -35,6 +35,11 @@ export const OPT_OUT_PHRASE = 'Berhenti Kirim Otomatis';
  * - AUTO_REPLY -- jawaban atas pesan yang pasiennya sendiri kirim barusan.
  *   Mendiamkan orang yang baru saja bertanya bukan menghormati permintaannya,
  *   melainkan membuat sistem tampak rusak.
+ * - FARMASI_VALIDASI / FARMASI_PENYERAHAN -- tidak dikirim ke pasien sama
+ *   sekali, melainkan ke grup/petugas apotek. Tidak ada nomor pasien yang bisa
+ *   dicocokkan ke daftar tolak, dan seorang pasien tidak bisa memberhentikan
+ *   koordinasi kerja internal rumah sakit. Ini kasus yang paling jelas dari
+ *   ketiganya, dan justru karena itu paling gampang lolos tanpa dipikirkan.
  *
  * Konsekuensinya HARUS tercermin di teks yang dibaca pasien: janji yang
  * diberikan saat ia berhenti tidak boleh lebih luas dari yang benar-benar

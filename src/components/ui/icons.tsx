@@ -101,6 +101,14 @@ export const IconReply = (p: IconProps) => (
   </Icon>
 );
 
+/** Kapsul obat -- menu Farmasi. Digambar di grid 24 yang sama seperti sisanya. */
+export const IconPill = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10.5 3.5a4.95 4.95 0 0 1 7 7l-7 7a4.95 4.95 0 0 1-7-7Z" />
+    <path d="M7 7l7 7" />
+  </Icon>
+);
+
 export const IconClock = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />

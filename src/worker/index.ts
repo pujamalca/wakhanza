@@ -8,6 +8,7 @@ import { runResultReadyCycle } from './pollerResultReady';
 import { runPharmacyReadyCycle } from './pollerPharmacy';
 import { runBillingReadyCycle } from './pollerBilling';
 import { runBookingCycle } from './pollerBooking';
+import { runFarmasiCycles } from './farmasiRunner';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
@@ -113,6 +114,11 @@ async function runAllSisipCycles(): Promise<void> {
   await runResultReadyCycle();
   await runPharmacyReadyCycle();
   await runBillingReadyCycle();
+  // Notifikasi farmasi ikut di sini karena sumbernya sama-sama `resep_obat` dan
+  // kelasnya sama-sama sisip (watermark). Bedanya cuma tujuannya: staf apotek,
+  // bukan pasien. Ia menjaga sakelarnya sendiri (`farmasi.enabled`, default
+  // MATI), jadi aman dipanggil tiap siklus tanpa syarat di sini.
+  await runFarmasiCycles();
 }
 
 /**

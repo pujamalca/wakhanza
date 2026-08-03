@@ -78,7 +78,18 @@ Pesan yang lebih tua dari **90 hari** sudah dipangkas otomatis. Tidak ketemu di 
 
 Pasien cukup membalas **`Berhenti Kirim Otomatis`** ke nomor RS. Tidak perlu tindakan petugas. Daftarnya bisa dilihat di halaman **Daftar tolak**.
 
-Perlu diketahui: yang berhenti adalah **notifikasi otomatis** (antrean, hasil, obat, tagihan, booking). Pengumuman broadcast dan balasan otomatis TETAP berjalan — begitu memang dirancangnya, dan teks konfirmasinya menyebutkan itu ke pasien.
+Perlu diketahui: yang berhenti adalah **notifikasi otomatis** (antrean, hasil, obat, tagihan, booking). Pengumuman broadcast, balasan otomatis, dan notifikasi farmasi ke grup apotek TETAP berjalan — begitu memang dirancangnya, dan teks konfirmasinya menyebutkan itu ke pasien.
+
+### "Grup apotek tidak menerima notifikasi"
+
+Halaman **Farmasi** (menu admin). Periksa berurutan — hampir selalu salah satu dari empat ini:
+
+1. **Sakelar utamanya mati.** Panel paling atas berwarna kuning bila mati. Ia memang mati sejak dipasang; harus dinyalakan sekali.
+2. **Tidak ada tujuan yang aktif.** Sakelar menyala tapi daftar tujuan kosong = tidak ada yang dikirimi. Panel atas menyebutkan ini bila terjadi.
+3. **Kode grupnya salah.** Ini yang paling menyesatkan: **WhatsApp menerima kiriman ke kode grup yang tidak ada tanpa mengeluh**, jadi di halaman Antrean statusnya tetap **Terkirim** walau tidak ada yang menerimanya. Satu-satunya cara memastikan adalah tombol **Kirim uji** di baris tujuan itu, lalu **lihat sendiri apakah pesannya muncul di grup**. Kalau tidak muncul, hapus tujuan itu dan pasang ulang lewat **Muat daftar grup** — jangan mengetik kodenya.
+4. **Kode grup diambil dari tautan undangan.** Tautan `chat.whatsapp.com/...` **bukan** kode grup dan tidak bisa diubah jadi kode grup. Pakai tombol **Muat daftar grup**; nomor WhatsApp RS harus sudah menjadi anggota grupnya.
+
+Bila sedang sangat ramai, yang masuk grup adalah **satu pesan rekap** ("*37 resep* baru diproses apotek...") alih-alih puluhan pesan satuan. Itu disengaja: mengirim puluhan pesan beruntun membuat WhatsApp memblokir nomor RS, dan kalau itu terjadi notifikasi pasien ikut mati.
 
 ---
 
@@ -221,6 +232,14 @@ Empat hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang ber
 3. **Dasar hukum broadcast**, terutama yang terjadwal berulang. Notifikasi tujuh pemicu adalah reaksi atas kejadian pasien itu sendiri; broadcast adalah pengumuman ke riwayat kunjungan lampau. Keduanya berbeda secara kebijakan walau memakai mekanisme teknis yang sama.
 
 4. **Jam kirim pengingat H-1**, sekarang 18:00. Bisa diubah di `/pengaturan` tanpa restart.
+
+5. **Siapa saja yang boleh ada di dalam grup apotek** (halaman **Farmasi**, sekarang **mati**). Ini satu-satunya fitur yang mengirim data pasien ke penerima yang **keanggotaannya diatur di luar sistem ini** — admin grup mana pun bisa menambahkan orang kapan saja tanpa terlihat di dashboard. Tiga hal yang perlu diputuskan sebelum menyalakannya:
+
+   - Pakai grup yang **khusus dibuat untuk apotek**, bukan grup umum rumah sakit. Dari enam grup yang terbaca di nomor RS ini, satu beranggota **722 orang** — angka yang layak dilihat sebelum memilih.
+   - Tunjuk siapa yang **meninjau anggota grup secara berkala**.
+   - Kalau yang dibutuhkan hanya penanda "ada pekerjaan masuk", **kosongkan nama pasien dari isi pesan** dan sisakan nomor resepnya saja — itu sudah cukup untuk membukanya di SIMRS, dan tidak ada identitas pasien yang berpindah ke WhatsApp pribadi tiap anggota grup.
+
+   Nama obat, jumlah, aturan pakai, dan diagnosis **tidak pernah** ikut terkirim — sistemnya memang tidak pernah membacanya dari Khanza. Resep dari poli yang ditandai sensitif (poin 1) otomatis diganti pesan tanpa nama pasien dan tanpa nama poli.
 
 ---
 

@@ -3,8 +3,9 @@ import { db } from '@/db/wakhanza';
 import { Outbox, OptOut, SendLog, getSettingNumber, getSettingJson } from '@/models';
 import { isPermanentAfter, retryDelayMs, isStale } from '@/core/retry';
 import { respectsOptOut } from '@/core/optOut';
+import { isChatIdValid } from '@/core/farmasiTarget';
 import { isWaReady, sendWhatsAppMessage, isRegisteredOnWhatsApp } from './wa-client';
-import { logger, safeError, maskPhone } from '@/lib/logger';
+import { logger, safeError, maskPhone, maskChatId } from '@/lib/logger';
 
 const DEFAULT_STALE_HOURS: Record<string, number> = {};
 
@@ -105,10 +106,30 @@ export async function dispatchTick(): Promise<boolean> {
     return true;
   }
 
-  if (!row.phoneE164) {
-    // Seharusnya tidak pernah pending tanpa nomor (poller sudah menandai
+  /**
+   * Alamat tujuan. Baris notifikasi farmasi sudah membawanya lengkap (grup atau
+   * petugas apotek); sembilan pemicu lain merakitnya dari nomor pasien seperti
+   * sebelumnya.
+   */
+  const chatId = row.chatId ?? (row.phoneE164 ? `${row.phoneE164}@c.us` : null);
+
+  if (!chatId) {
+    // Seharusnya tidak pernah pending tanpa tujuan (poller sudah menandai
     // skipped_no_contact) -- jaring pengaman, bukan alur normal.
     await row.update({ status: 'skipped_no_contact' });
+    return true;
+  }
+
+  /**
+   * Penjaga terakhir sebelum sebuah nilai dari database diserahkan ke WhatsApp,
+   * alasan yang sama persis dengan `resolveMediaPath()` pada lampiran: nilainya
+   * sudah pulang-pergi lewat database, dan inilah yang memastikan satu baris
+   * yang disunting lewat SQL tidak bisa mengarahkan pengiriman ke jenis alamat
+   * yang tidak pernah diputuskan siapa pun (mis. `status@broadcast`).
+   */
+  if (row.chatId && !isChatIdValid(row.chatId)) {
+    await row.update({ status: 'failed_permanent', lastError: `alamat tujuan ditolak: ${row.chatId}` });
+    logger.error({ tujuan: maskChatId(row.chatId), triggerCode: row.triggerCode }, 'alamat tujuan tidak sah, ditolak');
     return true;
   }
 
@@ -116,29 +137,42 @@ export async function dispatchTick(): Promise<boolean> {
   const attempts = row.attempts + 1;
 
   try {
-    const registered = await isRegisteredOnWhatsApp(row.phoneE164);
-    if (!registered) {
-      await row.update({ status: 'failed_permanent', attempts, lastError: 'nomor tidak terdaftar di WhatsApp' });
-      await SendLog.create({
-        outboxId: row.id,
-        attempt: attempts,
-        outcome: 'error',
-        detail: 'not_registered_on_whatsapp',
-        durationMs: Date.now() - startedAt,
-      });
-      logger.warn({ phone: maskPhone(row.phoneE164) }, 'nomor tidak terdaftar di WhatsApp, ditandai permanen');
-      return true;
+    /**
+     * Pemeriksaan pendaftaran hanya berlaku untuk alamat PERORANGAN, dan
+     * diturunkan dari alamatnya -- bukan dari ada-tidaknya `phone_e164`,
+     * supaya tujuan personal farmasi (yang `phone_e164`-nya sengaja NULL)
+     * tetap ikut terjaga.
+     *
+     * Sebuah JID grup dijawab `getNumberId()` sebagai "tidak terdaftar", dan
+     * tanpa cabang ini setiap notifikasi ke grup akan ditandai gagal permanen
+     * dengan alasan yang tidak ada hubungannya dengan sebab sebenarnya.
+     */
+    const nomorPerorangan = chatId.endsWith('@c.us') ? chatId.slice(0, -'@c.us'.length) : null;
+    if (nomorPerorangan) {
+      const registered = await isRegisteredOnWhatsApp(nomorPerorangan);
+      if (!registered) {
+        await row.update({ status: 'failed_permanent', attempts, lastError: 'nomor tidak terdaftar di WhatsApp' });
+        await SendLog.create({
+          outboxId: row.id,
+          attempt: attempts,
+          outcome: 'error',
+          detail: 'not_registered_on_whatsapp',
+          durationMs: Date.now() - startedAt,
+        });
+        logger.warn({ phone: maskPhone(nomorPerorangan) }, 'nomor tidak terdaftar di WhatsApp, ditandai permanen');
+        return true;
+      }
     }
 
     await sendWhatsAppMessage(
-      row.phoneE164,
+      chatId,
       row.body,
       row.mediaPath ? { path: row.mediaPath, name: row.mediaName ?? '' } : null,
     );
     await row.update({ status: 'sent', sentAt: new Date(), attempts });
     await SendLog.create({ outboxId: row.id, attempt: attempts, outcome: 'sent', durationMs: Date.now() - startedAt });
     logger.info(
-      { triggerCode: row.triggerCode, phone: maskPhone(row.phoneE164), berlampiran: !!row.mediaPath },
+      { triggerCode: row.triggerCode, tujuan: maskChatId(chatId), berlampiran: !!row.mediaPath },
       'pesan terkirim',
     );
   } catch (err) {
@@ -171,7 +205,7 @@ export async function dispatchTick(): Promise<boolean> {
       detail: e.message,
       durationMs: Date.now() - startedAt,
     });
-    logger.error({ triggerCode: row.triggerCode, phone: maskPhone(row.phoneE164), attempts, permanent, ...e }, 'pengiriman gagal');
+    logger.error({ triggerCode: row.triggerCode, tujuan: maskChatId(chatId), attempts, permanent, ...e }, 'pengiriman gagal');
   }
 
   return true;

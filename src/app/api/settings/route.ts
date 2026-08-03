@@ -34,6 +34,12 @@ const EDITABLE_KEYS = [
   'autoreply.log_inbound_text',
   'alert.webhook_url',
   'alert.min_interval_minutes',
+  // Seluruh kunci `farmasi.*` sengaja TIDAK di sini, alasan yang sama seperti
+  // `autoreply.enabled` di atas dan satu tambahan: form Pengaturan mengirim
+  // ULANG semua kunci tiap kali Simpan ditekan, termasuk yang tidak disentuh.
+  // Isi pesan farmasi disunting lewat MessageEditor di halamannya sendiri --
+  // membiarkannya ikut di sini berarti membuka jalan agar ia tertimpa oleh
+  // halaman yang bahkan tidak menampilkannya.
 ] as const;
 
 export async function GET() {

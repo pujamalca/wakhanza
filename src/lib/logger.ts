@@ -14,6 +14,21 @@ export function maskPhone(e164: string | null | undefined): string {
 }
 
 /**
+ * Alamat WhatsApp lengkap (`628xxx@c.us`, `120363xxx@g.us`) untuk log.
+ *
+ * Bagian user disamarkan sama seperti nomor, tapi AKHIRANNYA dipertahankan
+ * utuh: `@c.us` vs `@g.us` adalah satu-satunya yang membedakan "terkirim ke
+ * seorang pasien" dari "terkirim ke sebuah grup", dan itu justru pembedaan yang
+ * paling perlu terbaca saat menelusuri ke mana sebuah pesan pergi.
+ */
+export function maskChatId(chatId: string | null | undefined): string {
+  if (!chatId) return '(kosong)';
+  const at = chatId.lastIndexOf('@');
+  if (at <= 0) return maskPhone(chatId);
+  return `${maskPhone(chatId.slice(0, at))}${chatId.slice(at)}`;
+}
+
+/**
  * §9.7: "yang paling sering bocor: objek kesalahan Sequelize" — menyertakan
  * query beserta nilai parameternya. Selalu pakai ini, jangan `logger.error(err)`.
  */

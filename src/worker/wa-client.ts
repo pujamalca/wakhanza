@@ -316,13 +316,22 @@ export interface LampiranKirim {
 }
 
 /**
- * Pesan dikirim ke `<nomor>@c.us` walau obrolan masuknya beralamat `@lid` --
- * WhatsApp menerima JID bernomor untuk pengiriman dan menaruhnya di percakapan
- * yang sama. Dibuktikan end-to-end: balasan atas pesan ber-LID diterima pasien.
+ * Menerima ALAMAT LENGKAP (`628xxx@c.us` atau `120363xxx@g.us`), bukan nomor.
+ *
+ * Dulu parameternya nomor E.164 dan `@c.us` dirakit di sini. Itu benar selama
+ * satu-satunya tujuan adalah pasien perorangan; begitu notifikasi farmasi bisa
+ * menuju sebuah GRUP, perakitan di sini menjadi tempat yang salah -- ia harus
+ * ikut memutuskan jenis alamat padahal yang tahu jenisnya adalah baris outbox.
+ * Sekarang keputusan itu ada di satu tempat (dispatcher), dan fungsi ini cuma
+ * meneruskan.
+ *
+ * Untuk pasien, alamatnya tetap `<nomor>@c.us` walau obrolan masuknya beralamat
+ * `@lid` -- WhatsApp menerima JID bernomor untuk pengiriman dan menaruhnya di
+ * percakapan yang sama. Dibuktikan end-to-end: balasan atas pesan ber-LID
+ * diterima pasien.
  */
-export async function sendWhatsAppMessage(phoneE164: string, body: string, lampiran?: LampiranKirim | null): Promise<void> {
+export async function sendWhatsAppMessage(chatId: string, body: string, lampiran?: LampiranKirim | null): Promise<void> {
   const c = getClient();
-  const chatId = `${phoneE164}@c.us`;
 
   if (!lampiran) {
     await c.sendMessage(chatId, body);
