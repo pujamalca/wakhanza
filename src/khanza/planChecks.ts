@@ -27,6 +27,37 @@ export interface PlanCheck {
   maxRows?: number;
 }
 
+/**
+ * Ambang `rows` untuk pemicu yang memindai JENDELA 30 HARI atas tabel yang
+ * tumbuh seiring jumlah kunjungan: QUEUE_REG (`reg_periksa`), PHARMACY_READY
+ * (`resep_obat`), BILLING_READY (`nota_jalan`).
+ *
+ * Dulu 500, dan angka itu ternyata tidak pernah dikalibrasi terhadap volume
+ * yang hidup. Ia dipilih saat `SIK_DB_NAME` masih menunjuk salinan lama yang
+ * berisi **2 registrasi dalam 30 hari terakhir** -- seluruh 34.237 barisnya
+ * riwayat yang sudah berhenti bertambah. Jendela 30 harinya praktis kosong,
+ * jadi ambang berapa pun akan lolos.
+ *
+ * Diukur terhadap database produksi (3 Agustus 2026): 652 / 668 / 642 baris
+ * dalam jendela yang sama, laju 18-42 registrasi per hari. Jalur aksesnya
+ * TIDAK berubah -- ketiganya tetap `type=range` lewat `PRIMARY`/`tanggal`;
+ * yang bertambah cuma isi jendelanya.
+ *
+ * 3000 dipilih supaya tetap berteriak pada kejutan sungguhan (~100 kunjungan
+ * per hari berkelanjutan, lebih dari dua kali hari tersibuk yang pernah
+ * terlihat) tanpa jadi gagal rutin yang lama-lama diabaikan orang -- dan
+ * ambang yang diabaikan sama saja dengan tidak ada ambang. Ia tetap jauh di
+ * bawah pemindaian penuh `reg_periksa` (12.100 baris dan bertambah ~870 per
+ * bulan), jadi regresi jalur akses tetap tertangkap -- di samping pemeriksaan
+ * `type=ALL` dan `key=NULL` yang memang penjaga utamanya.
+ *
+ * Kalau ini gagal lagi: ukur ulang volumenya lebih dulu. Naik karena rumah
+ * sakit makin ramai itu wajar dan cukup dinaikkan berikut angka barunya; naik
+ * tanpa kenaikan volume berarti query atau indeksnya yang berubah, dan ITU
+ * yang tidak boleh dinaikkan begitu saja.
+ */
+export const MAX_ROWS_JENDELA_30_HARI = 3000;
+
 const registry: PlanCheck[] = [];
 
 export function registerPlanCheck(check: PlanCheck): void {

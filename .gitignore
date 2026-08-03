@@ -2,6 +2,12 @@
 .env
 .env.local
 .env.*.local
+# Cadangan .env sebelum perubahan konfigurasi (mis. peralihan SIK_DB_NAME).
+# Isinya kredensial yang sama persis dengan .env, jadi polanya harus ada di
+# sini SEBELUM cadangan pertama dibuat -- bukan sesudahnya.
+.env.bak
+.env.bak-*
+.env.backup*
 
 # Sesi WhatsApp aktif. Berisi kredensial.
 # WAJIB dicadangkan bersama database, TAPI di luar git.

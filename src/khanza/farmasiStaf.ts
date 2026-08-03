@@ -1,5 +1,5 @@
 import { sikSelect } from '@/db/sik';
-import { registerPlanCheck } from './planChecks';
+import { registerPlanCheck, MAX_ROWS_JENDELA_30_HARI } from './planChecks';
 import { formatResepPrefix, lookbackDate } from './common';
 
 /**
@@ -106,5 +106,5 @@ export async function pollResepPenyerahan(cursorTs: Date, lookbackDays: number):
 
 const replacementsContoh = { lookbackPrefix: formatResepPrefix(lookbackDate(30)), cursorTs: new Date() };
 
-registerPlanCheck({ name: 'FARMASI_VALIDASI', sql: SQL_VALIDASI, replacements: replacementsContoh, maxRows: 500 });
-registerPlanCheck({ name: 'FARMASI_PENYERAHAN', sql: SQL_PENYERAHAN, replacements: replacementsContoh, maxRows: 500 });
+registerPlanCheck({ name: 'FARMASI_VALIDASI', sql: SQL_VALIDASI, replacements: replacementsContoh, maxRows: MAX_ROWS_JENDELA_30_HARI });
+registerPlanCheck({ name: 'FARMASI_PENYERAHAN', sql: SQL_PENYERAHAN, replacements: replacementsContoh, maxRows: MAX_ROWS_JENDELA_30_HARI });

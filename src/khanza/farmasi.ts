@@ -1,5 +1,5 @@
 import { sikSelect } from '@/db/sik';
-import { registerPlanCheck } from './planChecks';
+import { registerPlanCheck, MAX_ROWS_JENDELA_30_HARI } from './planChecks';
 import { formatResepPrefix, lookbackDate } from './common';
 
 export interface PharmacyReadyRow {
@@ -53,5 +53,5 @@ registerPlanCheck({
   name: 'PHARMACY_READY',
   sql: buildPharmacyReadySql(),
   replacements: { lookbackPrefix: formatResepPrefix(lookbackDate(30)), cursorTs: new Date() },
-  maxRows: 500,
+  maxRows: MAX_ROWS_JENDELA_30_HARI,
 });

@@ -1,5 +1,5 @@
 import { sikSelect } from '@/db/sik';
-import { registerPlanCheck } from './planChecks';
+import { registerPlanCheck, MAX_ROWS_JENDELA_30_HARI } from './planChecks';
 import { lookbackDate, formatSqlDate } from './common';
 
 export interface BillingReadyRow {
@@ -63,5 +63,5 @@ registerPlanCheck({
   name: 'BILLING_READY',
   sql: buildBillingReadySql(),
   replacements: { cutoffDate: formatSqlDate(lookbackDate(30)), cursorTs: new Date() },
-  maxRows: 500,
+  maxRows: MAX_ROWS_JENDELA_30_HARI,
 });

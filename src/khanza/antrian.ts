@@ -1,5 +1,5 @@
 import { sikSelect } from '@/db/sik';
-import { registerPlanCheck } from './planChecks';
+import { registerPlanCheck, MAX_ROWS_JENDELA_30_HARI } from './planChecks';
 import { formatRawatPrefix, lookbackDate } from './common';
 
 export interface QueueRegRow {
@@ -47,5 +47,5 @@ registerPlanCheck({
   name: 'QUEUE_REG',
   sql: buildQueueRegSql(),
   replacements: { lookbackPrefix: formatRawatPrefix(lookbackDate(30)), cursorTs: new Date() },
-  maxRows: 500,
+  maxRows: MAX_ROWS_JENDELA_30_HARI,
 });
