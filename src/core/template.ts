@@ -92,6 +92,30 @@ export const FARMASI_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * BALASAN STOK OBAT (`/farmasi`) -- dijawab atas pertanyaan yang masuk, jadi
+ * daftarnya sengaja BERBEDA dari FARMASI_TEMPLATE_VARIABLES di atas.
+ *
+ * Yang TIDAK ada di sini, dan ketiadaannya disengaja: `{nama_pasien}`,
+ * `{no_rm}`, `{no_resep}`. Pemicunya adalah sebuah NOMOR yang mengirim
+ * WhatsApp, yang belum tentu pasien terdaftar mana pun -- alasan yang sama
+ * persis membuat AUTOREPLY_TEMPLATE_VARIABLES juga tidak punya keduanya.
+ * Menyediakannya di sini akan jadi undangan untuk mulai mencari pasien dari
+ * nomor pengirim, dan sejak itu jawaban katalog berubah menjadi data pasien.
+ *
+ * `{cari_obat}` adalah teks yang DIKETIK penanya, dikembalikan apa adanya
+ * supaya pesan "tidak ditemukan" bisa menyebut apa yang dicari.
+ */
+export const STOK_TEMPLATE_VARIABLES = [
+  'stok_obat',
+  'cari_obat',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * Gabungan seluruh konteks -- INI yang dimengerti `renderTemplate`, bukan
  * daftar yang boleh dipakai di satu tempat tertentu. Pembatasan per konteks
  * terjadi saat template DISIMPAN lewat findUnknownVariables(body, <daftar>),
@@ -103,6 +127,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...BROADCAST_TEMPLATE_VARIABLES,
     ...AUTOREPLY_TEMPLATE_VARIABLES,
     ...FARMASI_TEMPLATE_VARIABLES,
+    ...STOK_TEMPLATE_VARIABLES,
   ]),
 ] as const;
 
@@ -110,7 +135,8 @@ export type TemplateVariable =
   | (typeof TRIGGER_TEMPLATE_VARIABLES)[number]
   | (typeof BROADCAST_TEMPLATE_VARIABLES)[number]
   | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number]
-  | (typeof FARMASI_TEMPLATE_VARIABLES)[number];
+  | (typeof FARMASI_TEMPLATE_VARIABLES)[number]
+  | (typeof STOK_TEMPLATE_VARIABLES)[number];
 
 export function extractVariables(body: string): string[] {
   const names = new Set<string>();
@@ -154,7 +180,7 @@ export function sanitizeValue(value: string, maxLength = 60): string {
  * substitusi, jadi `{kontak_rs}` yang kebetulan ada di dalam daftar jadwal
  * tetap tampil apa adanya.
  */
-const MULTILINE_VARIABLES = new Set<string>(['jadwal_dokter', 'jadwal_hari_ini', 'daftar_poli']);
+const MULTILINE_VARIABLES = new Set<string>(['jadwal_dokter', 'jadwal_hari_ini', 'daftar_poli', 'stok_obat']);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {
   return body.replace(VAR_RE, (_match, key: string) => {

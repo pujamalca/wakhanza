@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TargetTable, type TargetRow, type GrupRow } from './TargetTable';
 import { PesanForm, type NilaiPesan } from './PesanForm';
+import { StokForm, type NilaiStok } from './StokForm';
 
 export default async function FarmasiPage() {
   const session = await auth();
@@ -26,6 +27,26 @@ export default async function FarmasiPage() {
       getSetting('farmasi.template_rekap', ''),
       getSettingNumber('farmasi.max_per_cycle', 20),
     ]);
+
+  const [stokMode, stokKeywords, stokMaxHasil, stokHarga, stokTemplate, stokKosong, stokTanpaNama] = await Promise.all([
+    getSetting('farmasi.stok_mode', 'mati'),
+    getSetting('farmasi.stok_keywords', 'stok,harga'),
+    getSettingNumber('farmasi.stok_max_hasil', 5),
+    getSetting('farmasi.stok_harga', 'jualbebas'),
+    getSetting('farmasi.stok_template', ''),
+    getSetting('farmasi.stok_template_kosong', ''),
+    getSetting('farmasi.stok_template_tanpa_nama', ''),
+  ]);
+
+  const nilaiStok: NilaiStok = {
+    mode: stokMode === 'petugas' || stokMode === 'semua' ? stokMode : 'mati',
+    keywords: stokKeywords ?? '',
+    maxHasil: stokMaxHasil,
+    harga: stokHarga === 'ralan' ? 'ralan' : 'jualbebas',
+    template: stokTemplate ?? '',
+    templateKosong: stokKosong ?? '',
+    templateTanpaNama: stokTanpaNama ?? '',
+  };
 
   const barisTarget: TargetRow[] = targets.map((t) => ({
     id: t.id,
@@ -99,6 +120,25 @@ export default async function FarmasiPage() {
           wakhanza tidak pernah menulis apa pun ke sana.
         </p>
         <PesanForm nilai={nilaiPesan} />
+      </section>
+
+      <section className="mt-8">
+        <h2 className="mb-1 text-sm font-medium">Balasan stok &amp; harga obat</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Arah <span className="font-medium">MASUK</span> — menjawab pertanyaan yang dikirim ke nomor rumah sakit
+          (&ldquo;stok paracetamol?&rdquo;) dengan data dari <span className="font-mono">databarang</span> dan{' '}
+          <span className="font-mono">gudangbarang</span> milik SIMRS Khanza. Bagian ini punya sakelarnya sendiri dan{' '}
+          <span className="font-medium">tidak</span> terpengaruh sakelar utama di atas maupun sakelar di Balasan
+          otomatis.
+        </p>
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs">
+          <span className="font-medium">Ini katalog apotek, bukan resep siapa pun.</span> Yang dibaca hanya daftar
+          barang beserta harga dan stok gudang — tidak ada kolom yang menghubungkan sebuah obat dengan seorang pasien,
+          dan pertanyaan dari sebuah nomor tidak pernah dipakai untuk mencari pasien. Yang tetap keputusan apotek:
+          apakah <span className="font-medium">persediaan dan daftar harga</span> boleh dijawab otomatis, dan kepada
+          siapa.
+        </div>
+        <StokForm nilai={nilaiStok} />
       </section>
 
       <div className="mt-6 space-y-2 text-xs text-muted-foreground">

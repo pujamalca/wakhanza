@@ -1,8 +1,11 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { FarmasiTarget, WaSession, logAudit, setSetting } from '@/models';
-import { findUnknownVariables, FARMASI_TEMPLATE_VARIABLES } from '@/core/template';
+import { FarmasiTarget, WaSession, logAudit, setSetting, getSetting } from '@/models';
+import { findUnknownVariables, FARMASI_TEMPLATE_VARIABLES, STOK_TEMPLATE_VARIABLES } from '@/core/template';
+import { parseStokKeywords } from '@/core/stokObat';
+import { susunJawabanStok } from '@/worker/stokReply';
+import { getHospitalIdentity } from '@/khanza/common';
 import { parseTarget, type JenisTarget } from '@/core/farmasiTarget';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadFarmasiContext, enqueueMessage } from '@/worker/pipeline';
@@ -14,6 +17,12 @@ const VARS_HINT = FARMASI_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ');
 export interface HasilForm {
   error?: string;
   sukses?: string;
+}
+
+export interface HasilUji {
+  error?: string;
+  hasil?: string;
+  cabang?: 'ketemu' | 'kosong' | 'tanpa_nama';
 }
 
 function segarkan(): void {
@@ -186,6 +195,108 @@ export async function simpanPesanAction(_prev: HasilForm, formData: FormData): P
   await logAudit(session!.user.username, 'farmasi_pesan_update', 'app_setting', KUNCI_PESAN.join(','));
   segarkan();
   return { sukses: 'Pengaturan pesan disimpan.' };
+}
+
+// ---------------------------------------------------------------------------
+// Balasan stok & harga obat
+// ---------------------------------------------------------------------------
+
+const KUNCI_STOK = ['farmasi.stok_template', 'farmasi.stok_template_kosong', 'farmasi.stok_template_tanpa_nama'] as const;
+
+const VARS_STOK_HINT = STOK_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ');
+
+/**
+ * Modenya dicatat ke `audit_log` sebagai peristiwanya SENDIRI, terpisah dari
+ * penyimpanan teks -- alasan yang sama seperti `farmasi_toggle`: inilah momen
+ * persediaan dan harga apotek mulai dijawab otomatis, dan pada 'semua' mulai
+ * dijawab kepada siapa pun yang mengirim pesan. Menenggelamkannya sebagai satu
+ * nama kunci di dalam penyimpanan pengaturan membuat perubahan paling
+ * berkonsekuensi di bagian ini jadi yang paling sulit ditelusuri.
+ */
+export async function simpanStokAction(_prev: HasilForm, formData: FormData): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const modeBaru = String(formData.get('farmasi.stok_mode') ?? 'mati');
+  if (!['mati', 'petugas', 'semua'].includes(modeBaru)) return { error: 'Mode tidak dikenal.' };
+
+  const keywords = String(formData.get('farmasi.stok_keywords') ?? '').trim();
+  if (modeBaru !== 'mati' && parseStokKeywords(keywords).length === 0) {
+    return { error: 'Isi minimal satu kata kunci, mis. "stok, harga" — tanpa itu tidak ada pertanyaan yang dikenali.' };
+  }
+
+  const maks = Number(formData.get('farmasi.stok_max_hasil') ?? 5);
+  if (!Number.isInteger(maks) || maks < 1 || maks > 20) {
+    return { error: 'Jumlah hasil harus bilangan bulat 1-20. Lebih dari itu, pesannya jadi terlalu panjang untuk dibaca.' };
+  }
+
+  const harga = String(formData.get('farmasi.stok_harga') ?? 'jualbebas');
+  if (!['ralan', 'jualbebas'].includes(harga)) return { error: 'Pilihan harga tidak dikenal.' };
+
+  const teks: Record<string, string> = {};
+  for (const kunci of KUNCI_STOK) {
+    const body = String(formData.get(kunci) ?? '').trim();
+    // Kosong DIIZINKAN dan berarti "diam untuk cabang ini" -- sama seperti
+    // `autoreply.fallback_body`. Yang tidak boleh adalah variabel salah ketik,
+    // yang diam-diam jadi string kosong di pesan yang sudah terkirim.
+    const takDikenal = findUnknownVariables(body, STOK_TEMPLATE_VARIABLES);
+    if (takDikenal.length > 0) {
+      return {
+        error: `Variabel tidak dikenal: ${takDikenal.map((v) => `{${v}}`).join(', ')}. Yang tersedia: ${VARS_STOK_HINT}`,
+      };
+    }
+    teks[kunci] = body;
+  }
+
+  // Template utama tanpa {stok_obat} berarti jawabannya tidak memuat satu pun
+  // obat -- pesan sopan yang tidak menjawab apa pun. Ditolak saat menyimpan,
+  // bukan ditemukan lewat pasien yang kebingungan.
+  if (modeBaru !== 'mati' && teks['farmasi.stok_template'] && !teks['farmasi.stok_template'].includes('{stok_obat}')) {
+    return { error: 'Isi jawaban utama harus memuat {stok_obat} — itulah bagian yang berisi daftar obat dan harganya.' };
+  }
+
+  const modeLama = (await getSetting('farmasi.stok_mode', 'mati')) ?? 'mati';
+
+  for (const [kunci, body] of Object.entries(teks)) await setSetting(kunci, body);
+  await setSetting('farmasi.stok_keywords', keywords);
+  await setSetting('farmasi.stok_max_hasil', String(maks));
+  await setSetting('farmasi.stok_harga', harga);
+  await setSetting('farmasi.stok_mode', modeBaru);
+
+  if (modeLama !== modeBaru) {
+    await logAudit(session!.user.username, 'farmasi_stok_mode', 'farmasi.stok_mode', `${modeLama} -> ${modeBaru}`);
+  }
+  await logAudit(session!.user.username, 'farmasi_stok_update', 'app_setting', KUNCI_STOK.join(','));
+  segarkan();
+  return { sukses: 'Pengaturan balasan stok disimpan.' };
+}
+
+/**
+ * Kotak uji coba. Memakai `susunJawabanStok()` yang SAMA dipanggil worker --
+ * pratinjau yang berbeda dari yang benar-benar terkirim lebih buruk daripada
+ * tanpa pratinjau. Tidak mengirim apa pun, dan sengaja MENGABAIKAN mode akses:
+ * yang sedang diuji admin adalah kata kunci dan isi jawabannya, bukan apakah
+ * nomornya sendiri berhak bertanya.
+ */
+export async function ujiStokAction(_prev: HasilUji, formData: FormData): Promise<HasilUji> {
+  const { response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const teks = String(formData.get('teks') ?? '').trim();
+  if (!teks) return { error: 'Ketik dulu contoh pertanyaannya.' };
+
+  const identity = await getHospitalIdentity();
+  const jawaban = await susunJawabanStok(teks, identity);
+
+  if (!jawaban) {
+    return {
+      hasil: 'Tidak ada kata kunci stok yang cocok — pesan seperti ini akan diteruskan ke aturan di /balasan-otomatis.',
+    };
+  }
+  if (!jawaban.body.trim()) {
+    return { hasil: `Cocok (${jawaban.cabang}), tapi teks untuk cabang itu kosong — tidak ada yang dikirim.` };
+  }
+  return { hasil: jawaban.body, cabang: jawaban.cabang };
 }
 
 // ---------------------------------------------------------------------------

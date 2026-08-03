@@ -22,6 +22,7 @@ import {
   hariKerjaOf,
 } from '@/khanza/jadwalDokter';
 import { loadAutoReplyContext, identityVars, enqueueMessage } from './pipeline';
+import { bacaModeStok, cobaBalasStok } from './stokReply';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 
 /**
@@ -195,7 +196,22 @@ export async function buildReplyVars(body: string, inbound: string, identity: { 
  * masuk untuk semua nomor lain.
  */
 export async function handleInboundMessage(msg: InboundMessage): Promise<AutoReplyResult> {
-  if (!(await getSettingBool('autoreply.enabled', false))) return { outcome: 'disabled' };
+  /**
+   * DUA fitur berbagi alur ini, dan masing-masing punya sakelarnya sendiri:
+   * balasan kata kunci (`autoreply.enabled`) dan balasan stok obat
+   * (`farmasi.stok_mode`, lihat stokReply.ts). Apotek harus bisa menyalakan
+   * jawaban stok tanpa ikut menyalakan balasan otomatis umum -- keduanya
+   * keputusan kebijakan yang berbeda, dengan pemilik yang berbeda pula.
+   *
+   * Yang TIDAK dipisah adalah pemeriksaan di bawah ini (pesan kosong,
+   * penyerahan ulang, kuota per nomor). Memisahkannya berarti satu nomor bisa
+   * menghabiskan kuota lewat satu jalur lalu tetap dilayani lewat jalur lain,
+   * dan kuota itu ada justru karena laju pesan masuk tidak dikendalikan rumah
+   * sakit sama sekali.
+   */
+  const balasanKataKunciAktif = await getSettingBool('autoreply.enabled', false);
+  const modeStok = await bacaModeStok();
+  if (!balasanKataKunciAktif && modeStok === 'mati') return { outcome: 'disabled' };
 
   // Pesan tanpa satu pun huruf atau angka -- stiker, "👍", foto tanpa
   // keterangan. Bukan pertanyaan, jadi tidak dibalas DAN tidak dicatat: satu
@@ -222,6 +238,33 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<AutoRep
     await writeLog(msg.phoneE164, 'rate_limited', null, msg.text);
     logger.warn({ phone: maskPhone(msg.phoneE164) }, 'balasan otomatis: kuota per nomor habis');
     return { outcome: 'rate_limited' };
+  }
+
+  /**
+   * Cabang stok DIDAHULUKAN atas aturan kata kunci, dan itu pilihan sadar:
+   * kata kunci stok bersifat spesifik ("stok", "harga"), sementara aturan
+   * /balasan-otomatis cenderung umum. Urutan sebaliknya membuat satu aturan
+   * bertema luas menelan seluruh pertanyaan stok tanpa ada yang menyadarinya.
+   *
+   * Aman untuk yang tidak memakainya: `cobaBalasStok` mengembalikan
+   * `ditangani: false` untuk pesan yang tidak memuat kata kuncinya, untuk nomor
+   * yang tidak berhak pada mode 'petugas', dan tentu saat modenya 'mati' --
+   * sehingga alurnya lanjut persis seperti sebelum fitur ini ada.
+   */
+  if (modeStok !== 'mati') {
+    const stok = await cobaBalasStok(msg, idempotencyKey);
+    if (stok.ditangani) {
+      await writeLog(msg.phoneE164, 'matched', null, msg.text);
+      return { outcome: 'matched', ruleLabel: `stok obat (${stok.cabang})` };
+    }
+  }
+
+  // Sampai sini pesannya bukan urusan stok. Tanpa balasan kata kunci menyala,
+  // tidak ada lagi yang bisa dikerjakan -- dicatat `no_match` supaya panel
+  // pesan-masuk di /ringkasan tetap melihat bahwa pesannya datang.
+  if (!balasanKataKunciAktif) {
+    await writeLog(msg.phoneE164, 'no_match', null, msg.text);
+    return { outcome: 'no_match' };
   }
 
   const hit = matchRule(msg.text, await loadActiveRules());
