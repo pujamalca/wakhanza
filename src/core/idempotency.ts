@@ -13,3 +13,24 @@ export function buildIdempotencyKey(triggerCode: string, ...naturalKeyParts: Arr
   const raw = [triggerCode, ...naturalKeyParts.map(String)].join('|');
   return createHash('sha1').update(raw, 'utf8').digest('hex');
 }
+
+/**
+ * Kunci untuk SALINAN sebuah pesan ke satu tujuan tambahan (grup/nomor petugas,
+ * migrations/018) -- diturunkan dari kunci pesan aslinya plus alamat tujuannya.
+ *
+ * KENAPA DI-HASH ULANG dan bukan disambung (`${kunci}:${chatId}`): kolom
+ * `outbox.idempotency_key` adalah VARCHAR(64) sementara SHA1 hex sudah memakan
+ * 40 karakter. Sebuah JID grup 24 karakter membuat sambungannya 65 karakter,
+ * dan MariaDB dalam mode non-strict MEMOTONGNYA diam-diam. Yang terpotong justru
+ * ekornya -- yaitu bagian yang membedakan satu tujuan dari tujuan lain -- jadi
+ * tujuan kedua dan seterusnya akan bertabrakan di `uq_idem` dan ditolak sebagai
+ * duplikat. Karena INSERT-nya memang sengaja `ignoreDuplicates`, kegagalan itu
+ * tidak meninggalkan satu pun galat: hanya grup pertama yang pernah menerima
+ * apa pun. Pelajaran yang sama sudah dibayar di `farmasi_target`.
+ *
+ * Alamat tujuan WAJIB masuk kunci, bukan opsional: tanpa itu seluruh tujuan
+ * berbagi satu kunci dan hanya yang pertama yang lolos.
+ */
+export function turunkanKunciTujuan(kunciDasar: string, chatId: string): string {
+  return createHash('sha1').update(`${kunciDasar}|${chatId}`, 'utf8').digest('hex');
+}

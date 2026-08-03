@@ -19,6 +19,8 @@ import {
 } from '@/components/ui';
 import { updateTemplateAction } from './actions';
 import { createBroadcastTemplateAction, updateBroadcastTemplateAction, deleteBroadcastTemplateAction } from './broadcastActions';
+import { TargetPemicuModal, type TargetPemicuRow, type GrupRow } from './TargetPemicuModal';
+import type { TujuanMode } from '@/models';
 
 
 /** Isi pesan dirapatkan jadi satu baris untuk kolom tabel -- teks utuhnya ada di title dan di modal. */
@@ -31,6 +33,8 @@ export interface TriggerTemplateRow {
   label: string;
   body: string;
   isActive: boolean;
+  tujuanMode: TujuanMode;
+  targets: TargetPemicuRow[];
 }
 
 export interface BroadcastTemplateRow {
@@ -48,8 +52,34 @@ export interface BroadcastTemplateRow {
  * halaman ini. Penyuntingan jadi tindakan tersendiri dengan awal dan akhir yang
  * jelas, bukan tujuh form yang semuanya tampak siap disimpan.
  */
-export function TriggerTemplateTable({ rows, readOnly }: { rows: TriggerTemplateRow[]; readOnly: boolean }) {
+/**
+ * Ringkasan penerima untuk kolom tabel. Menampilkan MODE dan jumlah tujuan
+ * aktif berdampingan, karena keduanya baru berarti bersama-sama: "hanya tujuan"
+ * dengan nol tujuan aktif berarti pemicunya tidak mengirim ke mana pun, dan itu
+ * harus terbaca dari daftar tanpa perlu membuka satu per satu.
+ */
+function ringkasTujuan(row: TriggerTemplateRow): { teks: string; peringatan: boolean } {
+  const aktif = row.targets.filter((t) => t.isActive).length;
+  if (row.tujuanMode === 'pasien') return { teks: 'Pasien', peringatan: false };
+  if (row.tujuanMode === 'pasien_dan_tujuan') {
+    return { teks: `Pasien + ${aktif} tujuan`, peringatan: aktif === 0 };
+  }
+  return { teks: aktif === 0 ? 'Tidak ke mana pun' : `${aktif} tujuan (tanpa pasien)`, peringatan: aktif === 0 };
+}
+
+export function TriggerTemplateTable({
+  rows,
+  readOnly,
+  grup,
+  waSiap,
+}: {
+  rows: TriggerTemplateRow[];
+  readOnly: boolean;
+  grup: GrupRow[];
+  waSiap: boolean;
+}) {
   const [editing, setEditing] = useState<TriggerTemplateRow | null>(null);
+  const [mengaturTujuan, setMengaturTujuan] = useState<TriggerTemplateRow | null>(null);
 
   return (
     <>
@@ -60,40 +90,63 @@ export function TriggerTemplateTable({ rows, readOnly }: { rows: TriggerTemplate
               <th className={cellClass}>Jenis pesan</th>
               <th className={`${cellClass} hidden sm:table-cell`}>Judul</th>
               <th className={`${cellClass} hidden lg:table-cell`}>Isi</th>
+              <th className={`${cellClass} hidden md:table-cell`}>Penerima</th>
               <th className={cellClass}>Status</th>
               <th className={`${cellClass} w-px`}></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((t) => (
-              <tr key={t.triggerCode} className={rowClass}>
-                {/* Label manusia di depan, kode pemicu tetap tersedia lewat
-                    tooltip -- baris log dan tiket dukungan memakai kodenya. */}
-                <td className={`${cellClass} font-medium`} title={t.triggerCode}>
-                  {triggerLabel(t.triggerCode)}
-                </td>
-                <td className={`${cellClass} hidden sm:table-cell`}>{t.label}</td>
-                <td className={`${cellClass} hidden max-w-md truncate text-muted-foreground lg:table-cell`} title={t.body}>
-                  {ringkas(t.body)}
-                </td>
-                <td className={cellClass}>
-                  <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
-                </td>
-                <td className={cellClass}>
-                  <div className="flex justify-end">
-                    <Button variant="secondary" size="xs" onClick={() => setEditing(t)}>
-                      {readOnly ? 'Lihat' : 'Ubah'}
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {rows.map((t) => {
+              const tujuan = ringkasTujuan(t);
+              return (
+                <tr key={t.triggerCode} className={rowClass}>
+                  {/* Label manusia di depan, kode pemicu tetap tersedia lewat
+                      tooltip -- baris log dan tiket dukungan memakai kodenya. */}
+                  <td className={`${cellClass} font-medium`} title={t.triggerCode}>
+                    {triggerLabel(t.triggerCode)}
+                  </td>
+                  <td className={`${cellClass} hidden sm:table-cell`}>{t.label}</td>
+                  <td className={`${cellClass} hidden max-w-md truncate text-muted-foreground lg:table-cell`} title={t.body}>
+                    {ringkas(t.body)}
+                  </td>
+                  <td className={`${cellClass} hidden whitespace-nowrap md:table-cell`}>
+                    <Badge variant={tujuan.peringatan ? 'warning' : 'neutral'}>{tujuan.teks}</Badge>
+                  </td>
+                  <td className={cellClass}>
+                    <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
+                  </td>
+                  <td className={cellClass}>
+                    <div className="flex justify-end gap-1">
+                      <Button variant="secondary" size="xs" onClick={() => setMengaturTujuan(t)}>
+                        Tujuan
+                      </Button>
+                      <Button variant="secondary" size="xs" onClick={() => setEditing(t)}>
+                        {readOnly ? 'Lihat' : 'Ubah'}
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {editing && (
         <TriggerTemplateModal key={editing.triggerCode} row={editing} readOnly={readOnly} onClose={() => setEditing(null)} />
+      )}
+
+      {mengaturTujuan && (
+        <TargetPemicuModal
+          key={`tujuan-${mengaturTujuan.triggerCode}`}
+          triggerCode={mengaturTujuan.triggerCode}
+          modeAwal={mengaturTujuan.tujuanMode}
+          targets={mengaturTujuan.targets}
+          grup={grup}
+          waSiap={waSiap}
+          readOnly={readOnly}
+          onClose={() => setMengaturTujuan(null)}
+        />
       )}
     </>
   );

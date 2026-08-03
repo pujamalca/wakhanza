@@ -1,6 +1,6 @@
 import { pollUpcomingBookings, type BookingRow } from '@/khanza/booking';
 import { buildIdempotencyKey } from '@/core/idempotency';
-import { loadPipelineContext, enqueueMessage, identityVars, type PipelineContext } from './pipeline';
+import { loadPipelineContext, enqueuePemicuPasien, identityVars, type PipelineContext } from './pipeline';
 import { advanceCursor, recordCursorError } from './cursor';
 import { logger, safeError } from '@/lib/logger';
 
@@ -76,7 +76,7 @@ async function enqueueBooking(
   idempotencyKey: string,
   eventAt: Date,
 ): Promise<void> {
-  await enqueueMessage(
+  await enqueuePemicuPasien(
     {
       idempotencyKey,
       noRkmMedis: row.no_rkm_medis,

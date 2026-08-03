@@ -1,5 +1,16 @@
-import { Outbox, OptOut, Template, getSettingNumber, getSettingBool, getSettingJson, getSetting } from '@/models';
-import type { OutboxStatus } from '@/models';
+import {
+  Outbox,
+  OptOut,
+  Template,
+  TemplateTarget,
+  getSettingNumber,
+  getSettingBool,
+  getSettingJson,
+  getSetting,
+} from '@/models';
+import type { OutboxStatus, TujuanMode } from '@/models';
+import { turunkanKunciTujuan } from '@/core/idempotency';
+import { isChatIdValid } from '@/core/farmasiTarget';
 import { getHospitalIdentity, type HospitalIdentity } from '@/khanza/common';
 import { renderTemplate, type TemplateVariable } from '@/core/template';
 import { appendUniqueCode, buildUniqueCodeFooter, DEFAULT_UNIQUE_CODE_TEMPLATE } from '@/core/uniqueCode';
@@ -26,6 +37,28 @@ export interface PipelineContext {
   sensitiveExam: string[];
   /** Berlaku untuk SEMUA pemicu, termasuk BROADCAST -- lihat core/uniqueCode.ts. */
   uniqueCodeTemplate: string;
+  /**
+   * Penyebaran ke tujuan tambahan (migrations/018). ADA hanya untuk ketujuh
+   * pemicu pasien -- ketiadaannya pada BROADCAST / AUTO_REPLY / farmasi bukan
+   * kelalaian melainkan pernyataan: ketiganya sudah menentukan penerimanya
+   * sendiri dan tidak punya "pasien" untuk disalin darinya.
+   *
+   * Sengaja bersarang alih-alih dua field datar bernilai default. Dua field
+   * datar akan tampak berlaku untuk semua konteks, dan penulis konteks BARU
+   * akan mengisinya tanpa memikirkan apakah penyebaran memang masuk akal di
+   * sana -- persis jenis kesalahan diam yang sudah pernah terjadi lewat
+   * `ctx.identity` yang ada tapi tidak pernah dibaca.
+   */
+  pemicuPasien?: {
+    mode: TujuanMode;
+    targets: TujuanTambahan[];
+  };
+}
+
+/** Satu tujuan tambahan yang sudah siap pakai -- alamat dan namanya saja. */
+export interface TujuanTambahan {
+  chatId: string;
+  label: string;
 }
 
 /**
@@ -76,6 +109,11 @@ export async function loadPipelineContext(triggerCode: string): Promise<Pipeline
 
   const shared = await loadSharedSettings();
 
+  // Dimuat sekali per SIKLUS, bukan per baris -- sama seperti template dan
+  // pengaturan di atasnya. Satu siklus pagi sibuk bisa berisi puluhan baris,
+  // dan tujuannya sama untuk semuanya.
+  const targets = await muatTujuanTambahan(triggerCode);
+
   return {
     triggerCode,
     template,
@@ -86,7 +124,39 @@ export async function loadPipelineContext(triggerCode: string): Promise<Pipeline
     sensitivePoli: shared.sensitivePoli,
     sensitiveExam: shared.sensitiveExam,
     uniqueCodeTemplate: shared.uniqueCodeTemplate,
+    pemicuPasien: { mode: template.tujuanMode, targets },
   };
+}
+
+/**
+ * Tujuan tambahan yang aktif untuk sebuah pemicu, sudah disaring dari alamat
+ * yang tidak sah.
+ *
+ * `isChatIdValid()` di sini BUKAN pemeriksaan berulang yang mubazir walau
+ * server action sudah memvalidasi saat menyimpan: nilainya pulang-pergi lewat
+ * database, dan satu baris yang disunting lewat SQL mentah tidak melewati
+ * server action mana pun. Alamat yang tidak sah tidak ditolak WhatsApp dengan
+ * galat yang berguna -- ia menghasilkan baris gagal yang di halaman Antrean
+ * terlihat persis seperti gangguan jaringan biasa.
+ */
+async function muatTujuanTambahan(triggerCode: string): Promise<TujuanTambahan[]> {
+  const rows = await TemplateTarget.findAll({
+    where: { triggerCode, isActive: true },
+    order: [['id', 'ASC']],
+  });
+
+  const hasil: TujuanTambahan[] = [];
+  for (const row of rows) {
+    if (!isChatIdValid(row.chatId)) {
+      logger.error(
+        { triggerCode, targetId: row.id, label: row.label },
+        'tujuan tambahan dilewati: alamatnya tidak berbentuk JID yang sah',
+      );
+      continue;
+    }
+    hasil.push({ chatId: row.chatId, label: row.label });
+  }
+  return hasil;
 }
 
 /**
@@ -314,6 +384,94 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     logger.error(
       { triggerCode: ctx.triggerCode, noRkmMedis: input.noRkmMedis, phone: maskPhone(phoneE164), ...safeError(err) },
       'gagal enqueue satu baris outbox',
+    );
+  }
+}
+
+/**
+ * Enqueue untuk KETUJUH PEMICU PASIEN, berikut penyebaran ke tujuan tambahan
+ * (migrations/018). Dipakai ketiga tempat yang memicu pesan pasien --
+ * `sisipCycle`, `pollerBooking`, `scheduler` -- supaya "ke mana pemicu ini
+ * dikirim" dijawab di SATU tempat. Tiga tempat yang menafsirkannya sendiri
+ * adalah persis bentuk kegagalan yang sudah dibayar di `respectsOptOut()`:
+ * cukup satu yang lupa diperbarui untuk membuat satu pemicu diam-diam
+ * berperilaku lain.
+ *
+ * Empat hal yang menempel di sini, dan semuanya AKIBAT, bukan pilihan bebas:
+ *
+ * 1. **Salinan ke tujuan tidak tunduk pada daftar tolak, dan itu terjadi
+ *    sendirinya.** `enqueueMessage` hanya memeriksa `opt_out` bila ada
+ *    `phone_e164`, sementara baris bertujuan `chat_id` memang tidak punya
+ *    (§ EnqueueInput.chatId). Konsisten dengan notifikasi farmasi: seorang
+ *    pasien tidak bisa memberhentikan koordinasi kerja internal rumah sakit.
+ *    Yang HARUS disadari rumah sakit: pasien yang sudah minta berhenti tetap
+ *    namanya muncul di grup, karena yang ia hentikan adalah pesan KEPADANYA.
+ *
+ * 2. **Jam tenang berlaku sama untuk salinan maupun aslinya.** Keduanya memakai
+ *    `trigger_code` yang sama, jadi `computeScheduledAt` memberi `scheduled_at`
+ *    yang sama. Membuat salinannya melewati jam tenang menuntut jam tenang
+ *    per-penerima, dan itu perubahan yang jauh lebih besar daripada yang
+ *    diminta di sini.
+ *
+ * 3. **Poli sensitif tetap dilindungi tanpa kode tambahan.** `checkPrivacy`
+ *    berjalan di dalam `enqueueMessage` untuk setiap baris, jadi salinan ke
+ *    grup ikut diganti template generik. Grup tahu ada informasi untuk seorang
+ *    pasien, tanpa tahu layanan apa.
+ *
+ * 4. **`no_rkm_medis` tetap dicatat pada salinannya.** Tanpa itu, pencarian di
+ *    halaman Antrean menemukan pesan pasiennya tapi tidak menemukan salinan
+ *    yang dikirim ke grup -- dan pertanyaan "ke mana saja pesan ini pergi"
+ *    justru itu yang perlu dijawab saat ada yang menelepon.
+ */
+export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineContext): Promise<void> {
+  const sebar = ctx.pemicuPasien;
+
+  // Konteks tanpa `pemicuPasien` berarti pemicu yang memang tidak punya tujuan
+  // tambahan. Berperilaku persis seperti sebelum fitur ini ada.
+  if (!sebar) {
+    await enqueueMessage(input, ctx);
+    return;
+  }
+
+  const kePasien = sebar.mode !== 'tujuan';
+  const keTujuan = sebar.mode !== 'pasien';
+
+  /**
+   * Mode 'tujuan' tanpa satu pun tujuan aktif berarti pesannya TIDAK PERGI KE
+   * MANA PUN. Bisa terjadi tanpa ada yang sengaja: tujuan terakhir
+   * dinonaktifkan belakangan, atau alamatnya jadi tidak sah setelah disunting
+   * lewat SQL. Tidak dijatuhkan kembali ke pasien -- rumah sakit sudah
+   * memutuskan pesan ini bukan untuk pasien, dan membatalkan keputusan itu
+   * diam-diam lebih buruk daripada tidak mengirim. Tapi juga tidak boleh
+   * senyap, karena tidak ada satu pun baris outbox yang akan menandainya.
+   */
+  if (keTujuan && sebar.targets.length === 0 && !kePasien) {
+    logger.error(
+      { triggerCode: ctx.triggerCode, idempotencyKey: input.idempotencyKey },
+      'pemicu disetel HANYA ke tujuan tambahan tapi tidak ada tujuan aktif -- pesan tidak dikirim ke mana pun',
+    );
+    return;
+  }
+
+  if (kePasien) {
+    await enqueueMessage(input, ctx);
+  }
+
+  if (!keTujuan) return;
+
+  for (const target of sebar.targets) {
+    await enqueueMessage(
+      {
+        ...input,
+        // Alamat lengkap -> enqueueMessage melewati resolvePhone, daftar tolak,
+        // dan pemeriksaan pendaftaran WhatsApp. Lihat EnqueueInput.chatId.
+        chatId: target.chatId,
+        // WAJIB diturunkan berikut alamatnya. Memakai kunci yang sama untuk
+        // pasien dan seluruh tujuan berarti hanya baris PERTAMA yang lolos
+        // uq_idem, dan sisanya hilang tanpa galat (`ignoreDuplicates`).
+        idempotencyKey: turunkanKunciTujuan(input.idempotencyKey, target.chatId),
+      },
+      ctx,
     );
   }
 }

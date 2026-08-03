@@ -1,7 +1,7 @@
 import type { TemplateVariable } from '@/core/template';
 import type { HospitalIdentity } from '@/khanza/common';
 import { getSettingNumber } from '@/models';
-import { loadPipelineContext, enqueueMessage, identityVars } from './pipeline';
+import { loadPipelineContext, enqueuePemicuPasien, identityVars } from './pipeline';
 import { getCursor, advanceCursor, recordCursorError } from './cursor';
 import { logger, safeError } from '@/lib/logger';
 
@@ -55,7 +55,7 @@ export async function runSisipCycle<TRow>(params: SisipCycleParams<TRow>): Promi
     const eventAt = params.getEventAt(row);
     if (eventAt > maxTs) maxTs = eventAt;
 
-    await enqueueMessage(
+    await enqueuePemicuPasien(
       {
         idempotencyKey: params.getIdempotencyKey(row),
         noRkmMedis: params.getNoRkmMedis(row),

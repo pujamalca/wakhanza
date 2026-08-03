@@ -1,7 +1,7 @@
 import * as cron from 'node-cron';
 import { pollBookingsForDate } from '@/khanza/booking';
 import { buildIdempotencyKey } from '@/core/idempotency';
-import { loadPipelineContext, enqueueMessage, identityVars } from './pipeline';
+import { loadPipelineContext, enqueuePemicuPasien, identityVars } from './pipeline';
 import { getSettingNumber } from '@/models';
 import { logger, safeError } from '@/lib/logger';
 
@@ -28,7 +28,7 @@ export async function runBookRemindJob(): Promise<void> {
   let sent = 0;
   for (const row of rows) {
     if (row.status !== 'Belum') continue;
-    await enqueueMessage(
+    await enqueuePemicuPasien(
       {
         idempotencyKey: buildIdempotencyKey('BOOK_REMIND', row.no_rkm_medis, row.tanggal_periksa),
         noRkmMedis: row.no_rkm_medis,

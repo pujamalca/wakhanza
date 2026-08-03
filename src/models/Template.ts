@@ -1,11 +1,21 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes } from 'sequelize';
 import { db } from '@/db/wakhanza';
 
+/**
+ * Ke mana pesan sebuah pemicu dikirim (migrations/018).
+ *
+ * `pasien` adalah default dan berarti persis perilaku sebelum tujuan tambahan
+ * ada -- satu kejadian, satu pasien, satu nomor dari `sik`. Dua nilai lainnya
+ * baru berlaku bila pemicunya punya baris `template_target` yang aktif.
+ */
+export type TujuanMode = 'pasien' | 'pasien_dan_tujuan' | 'tujuan';
+
 export class Template extends Model<InferAttributes<Template>, InferCreationAttributes<Template>> {
   declare triggerCode: string;
   declare label: string;
   declare body: string;
   declare isActive: CreationOptional<boolean>;
+  declare tujuanMode: CreationOptional<TujuanMode>;
   declare updatedAt: CreationOptional<Date>;
   declare updatedBy: string | null;
 }
@@ -16,6 +26,12 @@ Template.init(
     label: { type: DataTypes.STRING(80), allowNull: false },
     body: { type: DataTypes.TEXT, allowNull: false },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+    tujuanMode: {
+      type: DataTypes.ENUM('pasien', 'pasien_dan_tujuan', 'tujuan'),
+      allowNull: false,
+      defaultValue: 'pasien',
+      field: 'tujuan_mode',
+    },
     updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },
   },

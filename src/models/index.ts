@@ -1,6 +1,6 @@
 export { PollCursor } from './PollCursor';
 export { Outbox, type OutboxStatus } from './Outbox';
-export { Template } from './Template';
+export { Template, type TujuanMode } from './Template';
 export { PatientContact, type ContactSource, type ContactRejectReason } from './PatientContact';
 export { OptOut } from './OptOut';
 export { WaSession, type WaSessionStatus, type WaSessionCommand } from './WaSession';
@@ -14,5 +14,6 @@ export { BroadcastSchedule } from './BroadcastSchedule';
 export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule';
 export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
 export { FarmasiTarget } from './FarmasiTarget';
+export { TemplateTarget } from './TemplateTarget';
 export { WaGroup } from './WaGroup';
 export { InboundMessage, type JenisChat } from './InboundMessage';
