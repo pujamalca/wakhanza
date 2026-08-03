@@ -32,6 +32,8 @@ export type AlertKind =
   | 'session_stuck'
   | 'health_check_failed'
   | 'startup_failed'
+  /** Dua worker hidup sekaligus -- satu di antaranya lepas dari kendali PM2. */
+  | 'duplicate_worker'
   | 'test';
 
 /**

@@ -15,6 +15,7 @@ import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
 import { sendAlert } from './alert';
+import { acquireWorkerLock, releaseWorkerLock } from './singleInstance';
 import { randomDelayMs } from '@/core/retry';
 
 let running = true;
@@ -98,6 +99,11 @@ async function shutdown(alasan: string, exitCode = 0): Promise<void> {
   }
   await sik.close();
   await db.close();
+  // Dilepas SESUDAH sesi ditutup: pengganti yang sedang menunggu tidak boleh
+  // menyentuh direktori sesi sebelum Chromium di sini benar-benar selesai
+  // menulis. Sistem operasi juga melepasnya sendiri saat proses mati, jadi ini
+  // hanya mempercepat peralihan -- bukan syarat kebenaran.
+  await releaseWorkerLock();
   process.exit(exitCode);
 }
 
@@ -205,6 +211,19 @@ async function sessionWatchdog(): Promise<void> {
 
 async function main(): Promise<void> {
   logger.info('wakhanza-worker memulai...');
+
+  // PALING AWAL, sebelum database dan sebelum Chromium: yang diperebutkan
+  // adalah direktori sesi, dan instance yang kalah harus tahu SEBELUM
+  // menyentuhnya sama sekali. Lihat singleInstance.ts untuk kenapa yang kalah
+  // MEMINTA pemegangnya mundur alih-alih keluar (keluar memberi makan loop
+  // restart PM2) atau sekadar menunggu (PM2 berakhir melacak proses yang tidak
+  // memegang sesi, sehingga restart tidak pernah menjalankan kode baru).
+  //
+  // Keluarnya WAJIB lewat shutdown(), bukan process.exit(): pemegang yang
+  // mundur harus menutup Chromium dengan rapi, kalau tidak ia meninggalkan
+  // state sesi setengah tertulis untuk instance yang mengambil alih -- persis
+  // kerusakan yang membuat sesi menggantung di `authenticating`.
+  await acquireWorkerLock(() => void shutdown('diminta mundur oleh instance worker yang lebih baru'));
 
   // N1 / ARCHITECTURE §9.1: worker menolak jalan bila prinsip read-only atau
   // append-only audit_log ternyata tidak ditegakkan mesin. Periksa, jangan percaya.
