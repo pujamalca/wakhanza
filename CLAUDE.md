@@ -328,6 +328,18 @@ Query di `src/khanza/` tidak men-`SELECT` kolom sensitif sama sekali (nama pemer
 ### Substitusi template wajib satu lintasan
 `nm_pasien`, `nm_poli`, `nm_dokter` berasal dari input bebas petugas pendaftaran di Khanza. Substitusi `{variabel}` di `core/template.ts` **harus** satu lintasan kiri-ke-kanan, tidak boleh diulang sampai stabil — pasien bernama `{kontak_rs}` tidak boleh membuat nomor telepon RS muncul di posisi namanya sendiri (diuji unit di `template.test.ts`). Variabel tak dikenal ditolak SAAT TEMPLATE DISIMPAN (`src/app/(dashboard)/template/actions.ts`), bukan saat kirim.
 
+### Pencarian antrean: satu kotak untuk tiga hal yang penelepon tahu
+
+`/antrean` hanya bisa disaring per status sampai fitur ini ada. Itu menjawab "apa yang sedang gagal", tapi bukan pertanyaan yang benar-benar datang lewat telepon: **"kenapa pasien ini tidak menerima pesan?"** Satu-satunya jalan menjawabnya adalah SQL langsung ke `outbox` -- yang justru dilarang untuk petugas (`RUNBOOK.md` §7), jadi praktisnya tidak terjawab sama sekali.
+
+Kotaknya menerima **tiga** bentuk masukan sekaligus (di-OR), karena penelepon hanya tahu salah satu: no. RM, nomor WhatsApp-nya sendiri, atau kode pengiriman di baris terakhir pesan. Tiga hal yang menempel:
+
+- **Nomor dinormalkan lewat `normalizePhone()` yang SAMA dipakai pipeline**, bukan dicocokkan apa adanya. Petugas mengetik `0822...` atau `+62822...` sementara yang tersimpan `62822...`; pencarian yang gagal karena bentuk penulisan akan terbaca sebagai "pesannya memang tidak ada" -- kesimpulan yang salah dan mahal. Diverifikasi: ketiga bentuk mengembalikan jumlah yang sama.
+- **Kode pengiriman hanya bisa lewat `body LIKE`, dan itu memang satu pemindaian `outbox` per pencarian.** Kodenya sengaja tidak disimpan di kolom tersendiri (§ kode unik), dan karena diturunkan lewat hash dari `idempotency_key` ia juga tidak bisa dihitung mundur jadi baris tertentu. Ditanggung sadar-sadar: ini tindakan sesekali saat ada yang menelepon, bukan kueri yang berjalan sendiri, dan `outbox` dipangkas pada 90 hari sehingga tidak tumbuh tanpa batas. `no_rkm_medis` sendiri tetap lewat `ix_rm`.
+- **Chip status WAJIB mempertahankan `q`.** Kalau tidak, menyaring "gagal" atas hasil pencarian justru membuang pencariannya dan menampilkan seluruh antrean -- petugas mengira pasiennya punya puluhan pesan gagal.
+
+Nol hasil diberi kalimatnya sendiri yang menyebut masa simpan 90 hari. Tanpa itu, "tidak ditemukan" terbaca sebagai "pesannya tidak pernah dibuat", padahal sebab yang jauh lebih sering adalah pesannya sudah dipangkas.
+
 ### Daftar panjang = TABEL, penyuntingan = MODAL
 
 `/template` dan `/balasan-otomatis` sempat berupa grid kartu yang tiap kartunya berisi form terbuka. Itu salah untuk pekerjaannya dan diganti tabel: kartu menjawab "seperti apa satu template", tabel menjawab **"apa saja yang ada, urutannya bagaimana, mana yang aktif"** -- dan yang kedua itulah yang ditanyakan staf saat membuka halaman. Empat aturan memakan ~1300px sebagai kartu, ~180px sebagai tabel. Yang lebih buruk dari tingginya: semua form terbuka sekaligus berarti tidak ada keadaan "sedang mengubah", sehingga tujuh tombol Simpan tampak sama-sama aktif dan tidak jelas mana yang sedang disunting.
