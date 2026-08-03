@@ -51,6 +51,38 @@ import { sendAlert } from './alert';
  * hidup proses, antara dua instance worker yang sama, di loopback.
  */
 
+/**
+ * Kode keluar khusus untuk instance yang MUNDUR karena digantikan.
+ *
+ * KENAPA PERLU KODE TERSENDIRI -- ini menutup lubang yang membuat seluruh
+ * mekanisme di berkas ini justru berbalik jadi sumber masalahnya sendiri.
+ *
+ * Serah-terima di bawah memindahkan sesi dengan benar, tapi mundurnya pemegang
+ * ITU SENDIRI adalah sebuah exit, dan `autorestart` PM2 meluncurkan pengganti
+ * untuk setiap exit. Pengganti itu lalu mengusir pemegang berikutnya, yang
+ * mundur, yang memicu pengganti lagi. Sekali dua proses berdampingan,
+ * populasinya tidak pernah turun -- terukur 3 Agustus 2026: 115 restart dalam
+ * 15 menit, satu peralihan tiap 5-7 detik, sampai `pm2 delete`.
+ *
+ * `MAKS_PERMINTAAN_MUNDUR` di bawah tidak menolong dan tidak akan pernah:
+ * ia membatasi berapa kali SATU proses meminta, sedangkan yang terjadi adalah
+ * aliran proses BARU yang masing-masing meminta sekali. Seluruh 108 baris
+ * perebutan di log bertanda `permintaanKe: 1` -- tidak pernah 2.
+ *
+ * Karena itu keluarnya harus bisa dibedakan PM2 dari exit lain, lewat
+ * `stop_exit_codes` di ecosystem.config.js. Exit 0 (shutdown biasa) dan exit 1
+ * (watchdog, pemeriksaan kesehatan) tetap memicu restart seperti sebelumnya --
+ * hanya kode ini yang tidak.
+ *
+ * HARGA YANG DIBAYAR, sadar-sadar: proses yang diusir tidak bisa tahu SIAPA
+ * yang mengusirnya. Worker manual yang dijalankan orang di luar PM2 kini
+ * MENANG -- PM2 tidak lagi merebut sesinya kembali seperti yang dijelaskan di
+ * RUNBOOK. Ditukar dengan sengaja: mengalahnya terlihat jelas (`pm2 list`
+ * menampilkan worker `stopped`), sementara churn-nya tidak terlihat sama
+ * sekali dan merusak state sesi tiap putaran.
+ */
+export const KODE_KELUAR_DIGANTIKAN = 75;
+
 const PORT = Number(process.env.WORKER_LOCK_PORT ?? '3101');
 const HOST = '127.0.0.1';
 

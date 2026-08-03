@@ -16,7 +16,7 @@ import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
 import { sendAlert } from './alert';
-import { acquireWorkerLock, releaseWorkerLock } from './singleInstance';
+import { acquireWorkerLock, releaseWorkerLock, KODE_KELUAR_DIGANTIKAN } from './singleInstance';
 import { randomDelayMs } from '@/core/retry';
 
 let running = true;
@@ -229,7 +229,13 @@ async function main(): Promise<void> {
   // mundur harus menutup Chromium dengan rapi, kalau tidak ia meninggalkan
   // state sesi setengah tertulis untuk instance yang mengambil alih -- persis
   // kerusakan yang membuat sesi menggantung di `authenticating`.
-  await acquireWorkerLock(() => void shutdown('diminta mundur oleh instance worker yang lebih baru'));
+  // Kode keluarnya BUKAN 0, dan itu bagian dari perbaikannya -- lihat
+  // KODE_KELUAR_DIGANTIKAN di singleInstance.ts. Mundur dengan exit 0 membuat
+  // PM2 meluncurkan pengganti, yang mengusir pemegang berikutnya, yang mundur:
+  // loop yang tidak pernah konvergen (115 restart dalam 15 menit).
+  await acquireWorkerLock(
+    () => void shutdown('diminta mundur oleh instance worker yang lebih baru', KODE_KELUAR_DIGANTIKAN),
+  );
 
   // N1 / ARCHITECTURE §9.1: worker menolak jalan bila prinsip read-only atau
   // append-only audit_log ternyata tidak ditegakkan mesin. Periksa, jangan percaya.

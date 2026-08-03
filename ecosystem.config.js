@@ -51,6 +51,20 @@ module.exports = {
       // di tengah penulisan dan meninggalkan sesi yang pada start BERIKUTNYA
       // menggantung di `authenticating` tanpa batas waktu.
       kill_timeout: 20000,
+      // Exit 75 = instance ini mundur karena instance lain mengambil alih sesi
+      // (KODE_KELUAR_DIGANTIKAN di src/worker/singleInstance.ts). WAJIB tidak
+      // di-autorestart: pengganti sudah hidup dan sedang memegang sesi, jadi
+      // meluncurkan satu lagi hanya menghasilkan pengusiran berikutnya --
+      // itulah loop 115 restart / 15 menit pada 3 Agustus 2026. Exit 0
+      // (shutdown biasa) dan exit 1 (watchdog sesi, pemeriksaan kesehatan)
+      // sengaja TIDAK didaftarkan: keduanya justru bergantung pada PM2
+      // menyalakan ulang.
+      //
+      // Butuh daemon PM2 >= 5.x yang mengenal opsi ini. Daemon 5.2.2 yang
+      // sempat berjalan di mesin ini TIDAK -- opsinya diterima diam-diam lalu
+      // diabaikan, jadi perbaikannya tampak terpasang padahal tidak berlaku.
+      // Periksa dengan `pm2 ping` (In memory PM2 version) sesudah `pm2 update`.
+      stop_exit_codes: [75],
       env: {
         NODE_ENV: 'production',
       },
