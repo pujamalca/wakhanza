@@ -124,7 +124,32 @@ powershell -ExecutionPolicy Bypass -File scripts/restore-backup.ps1
 
 ---
 
-## 6. Akun dashboard
+## 6. Peringatan gangguan — **belum menyala, dan ini yang paling penting diisi**
+
+Sistem bisa mengirim peringatan otomatis ke luar saat pengiriman berhenti total. Sekarang **kosong**, artinya tidak ada yang memberi tahu siapa pun saat sistem mati.
+
+Ini bukan kekhawatiran teori. Pernah terjadi: sesi WhatsApp tersangkut pukul **01:25**, tidak ada satu pun pesan terkirim maupun diterima, dan **baru ketahuan 14 jam kemudian** — karena satu-satunya tanda ada di dashboard, dan pada jam segitu tidak ada yang membukanya.
+
+**Peringatannya tidak bisa lewat WhatsApp**, dan itu bukan detail kecil: hampir semua yang layak dialarmkan di sistem ini adalah "WhatsApp tidak jalan". Jalur pemberi tahu harus jalur yang tidak ikut mati bersama yang diberitakannya.
+
+### Cara mengisinya
+
+Butuh satu URL. Pilihan yang paling sering dipakai, dari yang paling mudah:
+
+- **Telegram** — buat bot lewat `@BotFather`, masukkan bot ke grup IT RS, lalu pakai:
+  `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID_GRUP>`
+- **Google Chat / Slack / Discord** — buat *incoming webhook* di ruang obrolan yang dipantau, salin URL-nya
+- **Endpoint milik IT rumah sakit** — apa pun yang menerima `POST` JSON
+
+Lalu: buka `/pengaturan` → isi **URL webhook peringatan** → **Simpan** → tekan **Kirim peringatan uji**.
+
+Tombol uji itu menguji **nilai yang sudah tersimpan**, bukan yang sedang diketik — jadi Simpan dulu. Webhook yang tidak pernah dicoba sama saja dengan tidak ada: URL salah ketik, bot yang belum diundang ke grup, atau token kedaluwarsa semuanya diam sampai saat paling buruk untuk menemukannya.
+
+Isi peringatannya **hanya keadaan sistem** — tidak pernah nomor, nama, atau isi pesan pasien. Aman dikirim ke grup chat.
+
+---
+
+## 7. Akun dashboard
 
 ```
 npm run users -- list                            # lihat semua akun
@@ -141,7 +166,7 @@ Dua hal yang membatasi dan perlu diketahui sebelum dibutuhkan:
 
 ---
 
-## 7. Jangan lakukan ini
+## 8. Jangan lakukan ini
 
 - **Jangan menjalankan `npm run worker` secara manual** saat PM2 sudah menjalankannya. Dua worker memperebutkan satu sesi WhatsApp. (Sistem akan menyelesaikannya sendiri, tapi tidak ada gunanya membuat keadaan itu.)
 - **Jangan menghapus folder `.wwebjs_auth`.** Itu sesi WhatsApp — menghapusnya berarti harus scan QR ulang dengan ponsel nomor RS.
@@ -151,7 +176,7 @@ Dua hal yang membatasi dan perlu diketahui sebelum dibutuhkan:
 
 ---
 
-## 8. Keputusan yang menunggu rumah sakit (bukan urusan teknis)
+## 9. Keputusan yang menunggu rumah sakit (bukan urusan teknis)
 
 Empat hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang berhak memutuskannya.
 
@@ -176,7 +201,7 @@ Empat hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang ber
 
 ---
 
-## 9. Kalau harus menghubungi pengembang
+## 10. Kalau harus menghubungi pengembang
 
 Sertakan ini supaya tidak bolak-balik:
 

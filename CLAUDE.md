@@ -330,7 +330,7 @@ Query di `src/khanza/` tidak men-`SELECT` kolom sensitif sama sekali (nama pemer
 
 ### Pencarian antrean: satu kotak untuk tiga hal yang penelepon tahu
 
-`/antrean` hanya bisa disaring per status sampai fitur ini ada. Itu menjawab "apa yang sedang gagal", tapi bukan pertanyaan yang benar-benar datang lewat telepon: **"kenapa pasien ini tidak menerima pesan?"** Satu-satunya jalan menjawabnya adalah SQL langsung ke `outbox` -- yang justru dilarang untuk petugas (`RUNBOOK.md` §7), jadi praktisnya tidak terjawab sama sekali.
+`/antrean` hanya bisa disaring per status sampai fitur ini ada. Itu menjawab "apa yang sedang gagal", tapi bukan pertanyaan yang benar-benar datang lewat telepon: **"kenapa pasien ini tidak menerima pesan?"** Satu-satunya jalan menjawabnya adalah SQL langsung ke `outbox` -- yang justru dilarang untuk petugas (`RUNBOOK.md` §8), jadi praktisnya tidak terjawab sama sekali.
 
 Kotaknya menerima **tiga** bentuk masukan sekaligus (di-OR), karena penelepon hanya tahu salah satu: no. RM, nomor WhatsApp-nya sendiri, atau kode pengiriman di baris terakhir pesan. Tiga hal yang menempel:
 
