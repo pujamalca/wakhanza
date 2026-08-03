@@ -19,6 +19,8 @@ import {
   IconShield,
   IconMenu,
   IconReply,
+  IconUser,
+  IconUsers,
   IconX,
   type IconProps,
 } from './ui/icons';
@@ -41,7 +43,9 @@ export type NavIcon =
   | 'reply'
   | 'settings'
   | 'activity'
-  | 'shield';
+  | 'shield'
+  | 'user'
+  | 'users';
 
 const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   gauge: IconGauge,
@@ -56,6 +60,8 @@ const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   settings: IconSettings,
   activity: IconActivity,
   shield: IconShield,
+  user: IconUser,
+  users: IconUsers,
 };
 
 export interface NavItem {

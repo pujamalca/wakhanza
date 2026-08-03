@@ -1,14 +1,17 @@
 /**
  * Pengelolaan akun dashboard dari baris perintah.
  *
- * Kenapa perlu ada: `seed:admin` MENOLAK bila username sudah ada, dan tidak ada
- * halaman pengelolaan pengguna di dashboard. Artinya sampai sekarang tidak ada
- * satu pun jalan yang didukung untuk mengganti kata sandi, menonaktifkan akun
- * petugas yang sudah pindah, atau membuka akun yang terkunci -- selain menyunting
- * `app_user` lewat SQL mentah, yang berarti menghitung hash bcrypt sendiri di luar
- * aplikasi dan tidak meninggalkan jejak di `audit_log`.
+ * Sejak halaman `/pengguna` ada, ini bukan lagi SATU-SATUNYA jalan -- tapi ia
+ * tetap perlu, dan justru untuk keadaan saat halamannya tidak bisa dipakai:
+ * admin terakhir terkunci, sandi admin hilang, atau dashboard tidak mau hidup.
+ * Itu sebabnya ia tidak dihapus setelah halamannya jadi.
  *
- * Semua tindakan di sini tercatat ke `audit_log` dengan pelaku `cli:<akun OS>`,
+ * Seluruh logikanya ada di `src/lib/userAdmin.ts`, dipakai bersama halaman
+ * Pengguna. Berkas ini hanya menerjemahkan argumen dan mencetak hasil. Pagar
+ * seperti "admin aktif terakhir" hidup di sana, bukan di sini -- pagar yang
+ * ditulis dua kali adalah pagar yang cepat atau lambat berbeda di satu sisi.
+ *
+ * Tindakan dari sini tercatat ke `audit_log` dengan pelaku `cli:<akun OS>`,
  * supaya jelas bedanya dari tindakan lewat dashboard.
  *
  * CATATAN PENTING soal menonaktifkan: sesi dashboard memakai JWT (TECH_STACK.md),
@@ -21,17 +24,25 @@
  *
  * Pemakaian:
  *   npm run users -- list
+ *   npm run users -- add     <username> "<nama>" <peran> <kata-sandi>
  *   npm run users -- disable <username>
  *   npm run users -- enable  <username>
  *   npm run users -- unlock  <username>
  *   npm run users -- passwd  <username> <kata-sandi-baru>
  */
 import os from 'node:os';
-import bcrypt from 'bcrypt';
-import { AppUser, logAudit } from '../src/models';
+import { AppUser } from '../src/models';
 import { db } from '../src/db/wakhanza';
+import {
+  daftarPengguna,
+  buatPengguna,
+  setelSandi,
+  setelAktif,
+  bukaKunci,
+  type Hasil,
+} from '../src/lib/userAdmin';
+import type { AppUserRole } from '../src/core/userPolicy';
 
-const BCRYPT_COST = 12; // sama dengan seed-admin.ts & auth.ts -- ARCHITECTURE §9.3
 const PELAKU = `cli:${os.userInfo().username}`;
 
 function pakai(): never {
@@ -39,6 +50,7 @@ function pakai(): never {
     [
       'Pemakaian:',
       '  npm run users -- list',
+      '  npm run users -- add     <username> "<nama>" <admin|operator> <kata-sandi>',
       '  npm run users -- disable <username>',
       '  npm run users -- enable  <username>',
       '  npm run users -- unlock  <username>',
@@ -48,52 +60,42 @@ function pakai(): never {
   process.exit(1);
 }
 
-async function cari(username: string): Promise<AppUser> {
+async function cariId(username: string): Promise<number> {
   const user = await AppUser.findOne({ where: { username } });
   if (!user) {
     console.error(`[gagal] pengguna '${username}' tidak ada.`);
     process.exit(1);
   }
-  return user;
+  return user.id;
 }
 
-/**
- * Pagar yang tidak boleh dilewati: menonaktifkan admin aktif TERAKHIR mengunci
- * semua orang keluar dari dashboard selamanya, dan satu-satunya jalan kembali
- * adalah menyunting database langsung. Halaman pengaturan, template, broadcast,
- * dan audit semuanya admin-only.
- */
-async function pastikanBukanAdminTerakhir(user: AppUser): Promise<void> {
-  if (user.role !== 'admin' || !user.isActive) return;
-  const adminAktif = await AppUser.count({ where: { role: 'admin', isActive: true } });
-  if (adminAktif <= 1) {
-    console.error(
-      `[gagal] '${user.username}' adalah satu-satunya admin yang masih aktif.\n` +
-        '        Menonaktifkannya mengunci semua orang keluar dari dashboard.\n' +
-        '        Buat admin pengganti dulu: npm run seed:admin -- <username> "<nama>" <password>',
-    );
+/** Pelaku CLI bukan salah satu akun dashboard, jadi tidak ada "diri sendiri" di sini. */
+const BUKAN_AKUN_DASHBOARD = null;
+
+function laporkan(hasil: Hasil, pesanSukses: string): void {
+  if (!hasil.ok) {
+    console.error(`[gagal] ${hasil.error}`);
     process.exit(1);
   }
+  console.log(`[ok] ${pesanSukses}`);
 }
 
 async function main(): Promise<void> {
-  const [, , perintah, username, argumen] = process.argv;
+  const [, , perintah, arg1, arg2, arg3, arg4] = process.argv;
 
   switch (perintah) {
     case 'list': {
-      const users = await AppUser.findAll({ order: [['id', 'ASC']] });
-      const now = Date.now();
+      const users = await daftarPengguna();
       console.log('id  username        peran     aktif  terkunci  nama');
       console.log('--  --------------  --------  -----  --------  ----------------');
       for (const u of users) {
-        const terkunci = u.lockedUntil && u.lockedUntil.getTime() > now ? 'ya' : '-';
         console.log(
           [
             String(u.id).padEnd(2),
             u.username.padEnd(14),
             u.role.padEnd(8),
             (u.isActive ? 'ya' : 'TIDAK').padEnd(5),
-            terkunci.padEnd(8),
+            (u.terkunci ? 'ya' : '-').padEnd(8),
             u.name,
           ].join('  '),
         );
@@ -101,53 +103,49 @@ async function main(): Promise<void> {
       break;
     }
 
-    case 'disable': {
-      if (!username) pakai();
-      const user = await cari(username);
-      if (!user.isActive) {
-        console.log(`[-] '${username}' memang sudah nonaktif.`);
-        break;
+    case 'add': {
+      if (!arg1 || !arg2 || !arg3 || !arg4) pakai();
+      if (arg3 !== 'admin' && arg3 !== 'operator') {
+        console.error("[gagal] peran harus 'admin' atau 'operator'.");
+        process.exit(1);
       }
-      await pastikanBukanAdminTerakhir(user);
-      await user.update({ isActive: false });
-      await logAudit(PELAKU, 'user_disable', String(user.id), `username=${username}`);
-      console.log(`[ok] '${username}' dinonaktifkan -- tidak bisa login lagi.`);
-      console.log('     Sesi yang SEDANG berjalan tetap sah sampai kedaluwarsa (JWT, lihat komentar di skrip ini).');
+      const hasil = await buatPengguna(
+        { username: arg1, name: arg2, role: arg3 as AppUserRole, password: arg4 },
+        PELAKU,
+      );
+      laporkan(hasil, `pengguna '${arg1}' dibuat sebagai ${arg3}.`);
+      break;
+    }
+
+    case 'disable': {
+      if (!arg1) pakai();
+      const id = await cariId(arg1);
+      const hasil = await setelAktif(id, false, PELAKU, BUKAN_AKUN_DASHBOARD);
+      laporkan(hasil, `'${arg1}' dinonaktifkan -- tidak bisa login lagi.`);
+      if (hasil.ok) {
+        console.log('     Sesi yang SEDANG berjalan tetap sah sampai kedaluwarsa (JWT, lihat komentar di skrip ini).');
+      }
       break;
     }
 
     case 'enable': {
-      if (!username) pakai();
-      const user = await cari(username);
-      await user.update({ isActive: true, failedAttempts: 0, lockedUntil: null });
-      await logAudit(PELAKU, 'user_enable', String(user.id), `username=${username}`);
-      console.log(`[ok] '${username}' diaktifkan kembali.`);
+      if (!arg1) pakai();
+      const id = await cariId(arg1);
+      laporkan(await setelAktif(id, true, PELAKU, BUKAN_AKUN_DASHBOARD), `'${arg1}' diaktifkan kembali.`);
       break;
     }
 
     case 'unlock': {
-      if (!username) pakai();
-      const user = await cari(username);
-      await user.update({ failedAttempts: 0, lockedUntil: null });
-      await logAudit(PELAKU, 'user_unlock', String(user.id), `username=${username}`);
-      console.log(`[ok] kunci login '${username}' dilepas.`);
+      if (!arg1) pakai();
+      const id = await cariId(arg1);
+      laporkan(await bukaKunci(id, PELAKU), `kunci login '${arg1}' dilepas.`);
       break;
     }
 
     case 'passwd': {
-      if (!username || !argumen) pakai();
-      if (argumen.length < 8) {
-        console.error('Kata sandi minimal 8 karakter.');
-        process.exit(1);
-      }
-      const user = await cari(username);
-      const passwordHash = await bcrypt.hash(argumen, BCRYPT_COST);
-      // failedAttempts/lockedUntil ikut direset: kata sandi baru yang langsung
-      // ditolak karena kunci lama masih berlaku hanya membingungkan.
-      await user.update({ passwordHash, failedAttempts: 0, lockedUntil: null });
-      // Kata sandinya TIDAK ikut dicatat -- audit_log dibaca admin IT dan vendor.
-      await logAudit(PELAKU, 'user_password_reset', String(user.id), `username=${username}`);
-      console.log(`[ok] kata sandi '${username}' diganti.`);
+      if (!arg1 || !arg2) pakai();
+      const id = await cariId(arg1);
+      laporkan(await setelSandi(id, arg2, PELAKU), `kata sandi '${arg1}' diganti.`);
       break;
     }
 

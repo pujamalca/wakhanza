@@ -151,18 +151,31 @@ Isi peringatannya **hanya keadaan sistem** — tidak pernah nomor, nama, atau is
 
 ## 7. Akun dashboard
 
+**Semuanya ada di dashboard**, tidak perlu baris perintah:
+
+- **`/profil`** — untuk semua orang. Ganti nama tampilan dan **kata sandi sendiri**. Setiap petugas sebaiknya mengganti sandi awalnya di sini begitu akunnya dibuat. Sandi yang dipakai bersama membuat kolom "siapa yang melakukan" di jejak audit berhenti berarti apa-apa.
+- **`/pengguna`** — admin saja. Tambah akun, ubah nama dan peran, setel ulang sandi yang lupa, buka akun terkunci, aktifkan/nonaktifkan.
+
+Akun **dinonaktifkan, bukan dihapus** — jejak audit menyimpan nama penggunanya, dan menghapus akun membuat riwayat lama menunjuk orang yang tidak ada lagi.
+
+### Kalau dashboard-nya sendiri tidak bisa dipakai
+
+Untuk keadaan seperti admin terakhir terkunci, sandi admin hilang, atau `wakhanza-web` tidak mau hidup:
+
 ```
 npm run users -- list                            # lihat semua akun
+npm run users -- add <username> "<nama>" <admin|operator> <sandi>
 npm run users -- passwd <username> <sandi-baru>  # ganti sandi
 npm run users -- disable <username>              # petugas pindah/keluar
 npm run users -- enable <username>
 npm run users -- unlock <username>               # akun terkunci karena salah sandi 5x
 ```
 
-Dua hal yang membatasi dan perlu diketahui sebelum dibutuhkan:
+### Tiga batasan yang perlu diketahui sebelum dibutuhkan
 
 - **Menonaktifkan akun menghentikan LOGIN BERIKUTNYA, bukan sesi yang sedang berjalan.** Petugas yang sudah masuk tetap bisa memakai dashboard sampai sesinya habis (8 jam). Kalau harus diputus saat itu juga, hubungi pengembang — caranya membatalkan sesi SEMUA orang sekaligus.
-- **Admin aktif terakhir tidak bisa dinonaktifkan.** Ini disengaja: tanpa admin, halaman pengaturan/template/broadcast tidak bisa dibuka siapa pun lagi.
+- **Menurunkan peran juga baru berlaku pada login berikutnya**, karena alasan yang sama. Admin yang baru diturunkan jadi operator masih bisa membuka halaman admin sampai sesinya habis.
+- **Admin aktif terakhir tidak bisa dinonaktifkan maupun diturunkan perannya.** Ini disengaja: tanpa admin, halaman pengaturan, broadcast, audit, dan pengelolaan pengguna tidak bisa dibuka siapa pun lagi. **Sebaiknya selalu ada dua admin** supaya satu akun bukan titik kegagalan tunggal — halaman `/pengguna` memberi peringatan bila tinggal satu.
 
 ---
 

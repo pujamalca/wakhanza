@@ -36,9 +36,19 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: N
     ],
   },
   {
+    // Profil sengaja BUKAN adminOnly dan berdiri di grupnya sendiri: ia satu-satunya
+    // menu yang isinya milik pemakainya sendiri, bukan milik rumah sakit. Operator
+    // yang tidak bisa mengganti kata sandinya sendiri akan berakhir memakai sandi
+    // yang diketikkan orang lain untuknya -- dan sandi bersama membuat kolom
+    // `actor` di audit_log berhenti berarti "orang ini".
+    label: 'Akun saya',
+    items: [{ href: '/profil', label: 'Profil saya', icon: 'user' }],
+  },
+  {
     label: 'Sistem',
     items: [
       { href: '/pengaturan', label: 'Pengaturan', icon: 'settings', adminOnly: true },
+      { href: '/pengguna', label: 'Pengguna', icon: 'users', adminOnly: true },
       { href: '/log', label: 'Log pengiriman', icon: 'activity' },
       { href: '/audit', label: 'Audit', icon: 'shield', adminOnly: true },
     ],

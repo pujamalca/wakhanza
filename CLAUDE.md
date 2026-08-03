@@ -46,6 +46,7 @@ npm run scan:contacts -- --dry-run   # hitung nomor pasien yang tidak terpakai, 
 npm run scan:contacts     # isi patient_contact untuk SELURUH pasien sekaligus (lihat di bawah)
 npm run seed:admin -- <username> "<nama>" <password>   # buat user dashboard pertama (role admin)
 npm run users -- list                # daftar akun dashboard + status aktif/terkunci
+npm run users -- add <username> "<nama>" <admin|operator> <sandi>   # sama dengan tombol di /pengguna
 npm run users -- disable <username>  # juga: enable / unlock / passwd <username> <sandi-baru>
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 powershell -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1   # daftarkan cadangan harian (lihat di bawah)
@@ -411,7 +412,22 @@ Dipasang di tiga titik, semuanya keadaan "tidak ada pesan yang bisa terkirim": w
 
 Diverifikasi: keempat perilaku jeda dibuktikan lewat penerima webhook lokal sungguhan (jenis sama tertahan, jenis beda lolos, `test` dua kali beruntun keduanya lolos), payload diperiksa dan tidak memuat data pasien; tombolnya ditekan lewat **browser sungguhan** (Puppeteer, mencari tombol lewat TEKSNYA -- pelajaran dari uji broadcast yang dulu tidak sengaja menekan "Keluar") dengan ketiga jalur: terkirim, URL kosong, dan URL sah tapi tidak ada yang mendengarkan. Tercatat di `audit_log` sebagai `alert_webhook_test`. Dikembalikan ke kosong setelah diuji.
 
-### Akun dashboard: `npm run users`, dan kenapa JWT membatasi artinya "dinonaktifkan"
+### Akun dashboard: dua jalur, satu pagar
+
+`/pengguna` (admin-only) dan `/profil` (semua peran) menggantikan keadaan lama di mana pengelolaan akun HANYA ada di CLI. Yang menempel di sini:
+
+- **Pagar hidup di `core/userPolicy.ts` + `lib/userAdmin.ts`, dipakai BERSAMA oleh halaman dan `scripts/manage-users.ts`.** Begitu dashboard jadi jalur kedua ke `app_user`, pagar yang tinggal di salah satu sisi adalah pagar yang cepat atau lambat dilewati -- yang menambah tombol di halaman tidak punya alasan membuka skrip CLI untuk mencari larangan apa yang pernah ditulis di sana. `userPolicy.ts` sengaja fungsi murni: keadaan yang paling perlu diuji ("satu-satunya admin aktif yang tersisa") kalau dibuat di database berarti menonaktifkan admin sungguhan lebih dulu, dan uji yang gagal di tengah meninggalkan sistem tanpa admin.
+- **CLI TIDAK dihapus setelah halamannya jadi**, dan itu bukan kelalaian: ia justru untuk keadaan saat halamannya tidak bisa dipakai -- admin terakhir terkunci, sandi admin hilang, atau `wakhanza-web` tidak mau hidup.
+- **Menurunkan peran admin terakhir dijaga sama ketatnya dengan menonaktifkannya**, dan ini yang paling gampang lolos: sesudahnya tabel tetap menampilkan satu baris "aktif", jadi tidak ada yang terlihat hilang.
+- **Menonaktifkan/menurunkan DIRI SENDIRI ditolak.** Tidak mengunci siapa pun (admin lain masih ada), tapi pelakunya tetap bisa memakai dashboard sampai sesinya habis lalu tiba-tiba tidak bisa masuk lagi tanpa ada yang menjelaskan kenapa.
+- **Ganti sandi SENDIRI wajib menyertakan sandi lama; admin menyetel sandi orang lain TIDAK.** Bedanya bukan gaya: tanpa sandi lama, satu sesi yang terlanjur terbuka di komputer loket cukup untuk mengunci pemilik akunnya keluar dari akunnya sendiri. Admin memang tidak mengetahui sandi orang lain, jadi di sana yang menjaga adalah `requireRole` dan `audit_log`.
+- **Username tidak bisa diubah**, dan alasannya ditulis di layar alih-alih kotaknya sekadar ditiadakan: ia dipakai sebagai `actor` di `audit_log`, jadi menggantinya memutus seluruh jejak lama dari pemiliknya. Kotak yang hilang tanpa penjelasan terbaca sebagai fitur yang belum dibuat, lalu ditanyakan berulang kali.
+- **Profil dibaca dari DATABASE, bukan dari sesi.** Sesi JWT isinya beku sejak login; membacanya dari sana membuat halaman ini berbohong tepat sesudah penggunanya mengganti namanya sendiri.
+- **Pesan sukses modal dinaikkan ke halaman.** Ditemukan saat pengujian, bukan diperkirakan: "Ubah" dan "Tambah" masih terlihat hasilnya di tabel, tapi SETEL SANDI tidak mengubah apa pun yang tampak -- modal yang menutup diam-diam terbaca sama persis seperti modal yang gagal tanpa pesan.
+
+Diverifikasi: otorisasi halaman lewat HTTP asli (operator 307 ke `/ringkasan`, tanpa login 307 ke `/login`, admin 200) dan menu yang benar per peran; seluruh alur admin lewat **browser sungguhan** (buat, username duplikat ditolak, ubah nama+naikkan peran, setel ulang sandi, dialog konfirmasi, nonaktifkan) plus tombol Nonaktifkan yang mati di baris sendiri dan penolakan server saat menurunkan peran sendiri; halaman Profil lewat browser sungguhan (sandi lama salah ditolak, sandi baru = lama ditolak, penggantian berhasil lalu **sandi barunya dipakai login sungguhan**, ganti nama tersimpan); pagar admin-terakhir lewat CLI dengan admin aktif benar-benar disisakan satu; dan 27 unit test di `userPolicy.test.ts`. Akun uji dibersihkan sesudahnya.
+
+### `npm run users`, dan kenapa JWT membatasi artinya "dinonaktifkan"
 
 `seed:admin` MENOLAK bila username sudah ada, dan tidak ada halaman pengelolaan pengguna. Sampai `scripts/manage-users.ts` ada, tidak ada satu pun jalan yang didukung untuk mengganti kata sandi, menonaktifkan akun petugas yang sudah pindah, atau membuka akun terkunci -- selain menyunting `app_user` lewat SQL mentah, yang berarti menghitung hash bcrypt sendiri di luar aplikasi dan tidak meninggalkan jejak `audit_log`. Semua tindakannya tercatat dengan pelaku `cli:<akun OS>` (dibedakan sengaja dari username staf), dan **kata sandinya tidak pernah ikut dicatat**.
 

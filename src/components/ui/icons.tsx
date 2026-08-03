@@ -128,6 +128,27 @@ export const IconShield = (p: IconProps) => (
   </Icon>
 );
 
+export const IconUser = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
+  </Icon>
+);
+
+/**
+ * Dua sosok, yang belakang terpotong -- bukan tiga sosok sejajar. Pada 16px di
+ * sidebar, tiga bentuk dalam 24 grid saling menempel jadi satu gumpalan dan
+ * tidak lagi terbaca sebagai orang.
+ */
+export const IconUsers = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" />
+    <path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6" />
+    <path d="M18.5 14.9c1.9.8 3 2.4 3 4.1" />
+  </Icon>
+);
+
 /* ── Ikon antarmuka ───────────────────────────────────────────────────────── */
 
 export const IconMenu = (p: IconProps) => (
