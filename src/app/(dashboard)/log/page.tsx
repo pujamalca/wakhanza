@@ -1,5 +1,6 @@
 import { SendLog, Outbox } from '@/models';
 import { formatDurationSeconds } from '@/core/duration';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import {
   PageHeader,
   Badge,
@@ -14,23 +15,20 @@ import {
   cellClass,
 } from '@/components/ui';
 
-const PAGE_SIZE = 50;
-
 export default async function LogPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const { page: pageParam } = await searchParams;
-  const page = Math.max(1, Number(pageParam) || 1);
+  const jumlah = await SendLog.count();
+  const p = hitungPaginasi(bacaHalaman(pageParam), jumlah, UKURAN_HALAMAN.riwayat);
 
-  const { rows, count } = await SendLog.findAndCountAll({
+  const rows = await SendLog.findAll({
     order: [['id', 'DESC']],
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
+    limit: p.limit,
+    offset: p.offset,
   });
 
   const outboxIds = [...new Set(rows.map((r) => r.outboxId))];
   const outboxRows = outboxIds.length > 0 ? await Outbox.findAll({ where: { id: outboxIds } }) : [];
   const outboxMap = new Map(outboxRows.map((o) => [o.id, o]));
-
-  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
     <div>
@@ -92,7 +90,13 @@ export default async function LogPage({ searchParams }: { searchParams: Promise<
         </table>
       </div>
 
-      <Pagination page={page} totalPages={totalPages} count={count} hrefFor={(p) => `/log?page=${p}`} unit="percobaan" />
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/log', {}, n)}
+        unit="percobaan"
+      />
     </div>
   );
 }

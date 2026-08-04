@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import { Op, fn, col } from 'sequelize';
 import { auth } from '@/auth';
 import { AutoReplyRule, AutoReplyLog, parseKeywords, getSettingBool, getSettingNumber, getSetting } from '@/models';
-import { PageHeader, Card } from '@/components/ui';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
+import { PageHeader, Card, Pagination } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
 import { RuleTable } from './RuleTable';
@@ -59,15 +60,25 @@ function Angka({ label, nilai, warna, help }: { label: string; nilai: number; wa
   );
 }
 
-export default async function BalasanOtomatisPage() {
+export default async function BalasanOtomatisPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
   // Konsisten dengan /broadcast dan /audit: operator diarahkan ke Ringkasan,
   // bukan diberi halaman kosong yang tidak bisa dipakai.
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
+  const { page: pageParam } = await searchParams;
+  const p = hitungPaginasi(bacaHalaman(pageParam), await AutoReplyRule.count(), UKURAN_HALAMAN.konfigurasi);
+
   const [enabled, rules, stat, pakai, maxPerJam, fallbackBody, simpanTeks] = await Promise.all([
     getSettingBool('autoreply.enabled', false),
-    AutoReplyRule.findAll({ order: [['priority', 'ASC'], ['id', 'ASC']] }),
+    // Urutan `priority, id` adalah urutan yang MENENTUKAN aturan mana yang
+    // menang -- jadi ia juga urutan halamannya. Aturan berprioritas tertinggi
+    // selalu di halaman 1, tempat orang mencarinya.
+    AutoReplyRule.findAll({
+      order: [['priority', 'ASC'], ['id', 'ASC']],
+      limit: p.limit,
+      offset: p.offset,
+    }),
     ringkasan(),
     pemakaianPerAturan(),
     getSettingNumber('autoreply.max_per_number_per_hour', 5),
@@ -164,6 +175,14 @@ export default async function BalasanOtomatisPage() {
           isActive: r.isActive,
           usage: pakai.get(r.id) ?? 0,
         }))}
+      />
+
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/balasan-otomatis', {}, n)}
+        unit="aturan"
       />
     </div>
   );

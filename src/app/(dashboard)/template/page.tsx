@@ -1,19 +1,28 @@
 import { Template, BroadcastTemplate, TemplateTarget, WaGroup, WaSession } from '@/models';
 import { auth } from '@/auth';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { TriggerTemplateTable, BroadcastTemplateTable } from './TemplateTable';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, Pagination } from '@/components/ui';
 
-export default async function TemplatePage() {
+export default async function TemplatePage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
   const readOnly = session?.user.role !== 'admin';
 
+  const { page: pageParam } = await searchParams;
+  // Hanya tabel template BROADCAST yang dipaginasi. Tabel di atasnya berisi
+  // tepat tujuh baris selamanya -- PK-nya `trigger_code`, satu per pemicu --
+  // jadi kendali halaman di sana tidak akan pernah bisa berpindah ke mana pun.
+  const p = hitungPaginasi(bacaHalaman(pageParam), await BroadcastTemplate.count(), UKURAN_HALAMAN.konfigurasi);
+
   const [templates, broadcastTemplates, semuaTarget, grup, sesi] = await Promise.all([
     Template.findAll({ order: [['triggerCode', 'ASC']] }),
-    BroadcastTemplate.findAll({ order: [['name', 'ASC']] }),
+    BroadcastTemplate.findAll({ order: [['name', 'ASC']], limit: p.limit, offset: p.offset }),
     // Seluruh tujuan dibaca sekali lalu dikelompokkan di memori -- tujuh query
-    // terpisah untuk tabel yang isinya belasan baris tidak sepadan.
+    // terpisah untuk tabel yang isinya belasan baris tidak sepadan. SENGAJA
+    // tidak dipaginasi: ia mengisi modal Tujuan per pemicu, bukan tabel.
     TemplateTarget.findAll({ order: [['id', 'ASC']] }),
+    // Pengisi dropdown pemilih grup, bukan tabel -- alasan yang sama.
     WaGroup.findAll({ order: [['nama', 'ASC']] }),
     WaSession.findByPk(1),
   ]);
@@ -84,6 +93,13 @@ export default async function TemplatePage() {
       <BroadcastTemplateTable
         readOnly={readOnly}
         rows={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body, isActive: t.isActive }))}
+      />
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/template', {}, n)}
+        unit="template"
       />
     </div>
   );

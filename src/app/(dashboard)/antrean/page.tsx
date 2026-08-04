@@ -1,6 +1,7 @@
 import { Op, type WhereOptions } from 'sequelize';
 import { Outbox, type OutboxStatus } from '@/models';
 import { normalizePhone } from '@/core/phone';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { resendOutboxAction } from './actions';
 import {
   PageHeader,
@@ -22,7 +23,6 @@ import {
   cellClass,
 } from '@/components/ui';
 
-const PAGE_SIZE = 50;
 const STATUSES: OutboxStatus[] = [
   'pending',
   'sending',
@@ -71,7 +71,6 @@ export default async function AntreanPage({
   searchParams: Promise<{ status?: string; page?: string; q?: string }>;
 }) {
   const { status, page: pageParam, q: qParam } = await searchParams;
-  const page = Math.max(1, Number(pageParam) || 1);
   const q = qParam?.trim() ?? '';
 
   const active = status && STATUSES.includes(status as OutboxStatus) ? (status as OutboxStatus) : null;
@@ -81,17 +80,18 @@ export default async function AntreanPage({
   if (q) syarat.push(buildSearchWhere(q));
   const where: WhereOptions = syarat.length > 0 ? { [Op.and]: syarat } : {};
 
-  const { rows, count } = await Outbox.findAndCountAll({
+  const jumlah = await Outbox.count({ where });
+  const p = hitungPaginasi(bacaHalaman(pageParam), jumlah, UKURAN_HALAMAN.riwayat);
+
+  const rows = await Outbox.findAll({
     where,
     order: [['id', 'DESC']],
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
+    limit: p.limit,
+    offset: p.offset,
   });
 
-  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
-  const bagian = (p: number) =>
-    [active ? `status=${active}` : '', q ? `q=${encodeURIComponent(q)}` : '', `page=${p}`].filter(Boolean).join('&');
-  const hrefFor = (p: number) => `/antrean?${bagian(p)}`;
+  const saringan = { status: active, q };
+  const hrefFor = (n: number) => hrefHalaman('/antrean', saringan, n);
   // Chip status harus MEMPERTAHANKAN pencarian yang sedang aktif -- kalau
   // tidak, menyaring "gagal" atas hasil pencarian justru membuang pencariannya
   // dan menampilkan seluruh antrean.
@@ -141,7 +141,7 @@ export default async function AntreanPage({
 
       {q && (
         <p className="mb-4 text-sm text-muted-foreground">
-          {count} pesan cocok dengan &ldquo;{q}&rdquo;
+          {p.jumlah} pesan cocok dengan &ldquo;{q}&rdquo;
           {active && ` dan berstatus "${OUTBOX_STATUS_LABEL[active]}"`}.
         </p>
       )}
@@ -232,7 +232,7 @@ export default async function AntreanPage({
         </table>
       </div>
 
-      <Pagination page={page} totalPages={totalPages} count={count} hrefFor={hrefFor} unit="pesan" />
+      <Pagination page={p.halaman} totalPages={p.totalHalaman} count={p.jumlah} hrefFor={hrefFor} unit="pesan" />
     </div>
   );
 }

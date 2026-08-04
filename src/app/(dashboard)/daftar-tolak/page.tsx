@@ -2,13 +2,27 @@ import { auth } from '@/auth';
 import { OptOut } from '@/models';
 import { AddOptOutForm } from './AddOptOutForm';
 import { removeOptOutAction } from './actions';
-import { PageHeader, Button, EmptyState, IconBan, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
+import { PageHeader, Button, EmptyState, Pagination, IconBan, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
-export default async function DaftarTolakPage() {
+export default async function DaftarTolakPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
   const isAdmin = session?.user.role === 'admin';
 
-  const rows = await OptOut.findAll({ order: [['createdAt', 'DESC']], limit: 200 });
+  const { page: pageParam } = await searchParams;
+  // Dulu `limit: 200` tanpa kendali halaman sama sekali: nomor ke-201 tidak
+  // pernah bisa dilihat, dan yang terlihat di layar persis sama dengan daftar
+  // yang utuh -- tanpa galat, tanpa keterangan. Mesin tetap menghormatinya
+  // (`respectsOptOut()` membaca database, bukan halaman ini), tapi petugas yang
+  // mencarinya untuk menghapus tidak akan pernah menemukannya.
+  const jumlah = await OptOut.count();
+  const p = hitungPaginasi(bacaHalaman(pageParam), jumlah, UKURAN_HALAMAN.riwayat);
+
+  const rows = await OptOut.findAll({
+    order: [['createdAt', 'DESC']],
+    limit: p.limit,
+    offset: p.offset,
+  });
 
   return (
     <div>
@@ -66,6 +80,14 @@ export default async function DaftarTolakPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/daftar-tolak', {}, n)}
+        unit="nomor"
+      />
     </div>
   );
 }

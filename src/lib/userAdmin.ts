@@ -60,12 +60,33 @@ function keBaris(u: AppUser, now: number): BarisPengguna {
   };
 }
 
-export async function daftarPengguna(): Promise<BarisPengguna[]> {
-  const users = await AppUser.findAll({ order: [['id', 'ASC']] });
+/**
+ * Satu halaman daftar pengguna. `limit`/`offset` opsional supaya pemanggil
+ * lain (skrip CLI `npm run users -- list`) tetap mendapat seluruh baris tanpa
+ * perlu tahu apa pun soal paginasi dashboard.
+ */
+export async function daftarPengguna(potong?: { limit: number; offset: number }): Promise<BarisPengguna[]> {
+  const users = await AppUser.findAll({
+    order: [['id', 'ASC']],
+    ...(potong ? { limit: potong.limit, offset: potong.offset } : {}),
+  });
   const now = Date.now();
   return users.map((u) => keBaris(u, now));
 }
 
+export async function hitungPengguna(): Promise<number> {
+  return AppUser.count();
+}
+
+/**
+ * SELALU menghitung seluruh tabel, tidak pernah satu halaman.
+ *
+ * Angka ini menyalakan peringatan "hanya ada satu admin aktif" DAN menjadi
+ * masukan pagar di `core/userPolicy.ts`. Kalau ia ikut dipersempit ke halaman
+ * yang sedang dilihat, admin ke-30 yang ada di halaman 2 menjadi tak terhitung:
+ * peringatannya menyala palsu, dan -- jauh lebih buruk -- pagarnya bisa
+ * MENOLAK penonaktifan yang sebenarnya sah, atau sebaliknya.
+ */
 export async function hitungAdminAktif(): Promise<number> {
   return AppUser.count({ where: { role: 'admin', isActive: true } });
 }

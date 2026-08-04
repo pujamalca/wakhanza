@@ -5,6 +5,7 @@ import { scheduleFiltersToSegment, isFollowupSchedule, DEFAULT_FOLLOWUP_OFFSET_D
 import { getHospitalIdentity } from '@/khanza/common';
 import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
 import { BroadcastSchedule, BroadcastTemplate } from '@/models';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { parseScheduleFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from '../broadcast/segment';
 import { toggleScheduleAction, deleteScheduleAction } from './actions';
@@ -19,6 +20,7 @@ import {
   CheckboxList,
   Badge,
   EmptyState,
+  Pagination,
   tableWrapperClass,
   theadClass,
   rowClass,
@@ -27,6 +29,7 @@ import {
 
 interface SearchParams extends RawFilterInput {
   created?: string;
+  page?: string;
 }
 
 function toSet(value: string | string[] | undefined): Set<string> {
@@ -71,8 +74,10 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
   const selectedKec = toSet(sp.kec);
   const selectedPj = toSet(sp.pj);
 
+  const p = hitungPaginasi(bacaHalaman(sp.page), await BroadcastSchedule.count(), UKURAN_HALAMAN.konfigurasi);
+
   const [schedules, regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
-    BroadcastSchedule.findAll({ order: [['id', 'DESC']] }),
+    BroadcastSchedule.findAll({ order: [['id', 'DESC']], limit: p.limit, offset: p.offset }),
     fetchRegionOptions(),
     fetchPaymentOptions(),
     fetchPatientSegment(scheduleFiltersToSegment(filterConfig)),
@@ -167,6 +172,18 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
             </tbody>
           </table>
         </div>
+
+        {/* Seluruh `sp` dibawa apa adanya, termasuk pilihan wilayah/cara bayar
+            yang berbentuk larik. Query string halaman ini juga mengisi form
+            "Buat jadwal baru" di bawah, jadi tombol Berikutnya yang membuangnya
+            akan mengosongkan form yang sedang disusun staf. */}
+        <Pagination
+          page={p.halaman}
+          totalPages={p.totalHalaman}
+          count={p.jumlah}
+          hrefFor={(n) => hrefHalaman('/broadcast-terjadwal', { ...sp }, n)}
+          unit="jadwal"
+        />
       </Card>
 
       <h2 className="mb-2 font-medium">Buat jadwal baru</h2>

@@ -2,12 +2,14 @@ import { Op, fn, col } from 'sequelize';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { InboundMessage, WaGroup, WaSession, getSettingBool, getSettingNumber } from '@/models';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import {
   PageHeader,
   FilterChip,
   Badge,
   CopyButton,
   EmptyState,
+  Pagination,
   IconInbox,
   tableWrapperClass,
   theadClass,
@@ -16,8 +18,6 @@ import {
 } from '@/components/ui';
 import { GrupPanel, type GrupRow } from './GrupPanel';
 import { SimpanTeksSwitch } from './SimpanTeksSwitch';
-
-const PER_HALAMAN = 100;
 
 /** Jenis pesan WhatsApp yang tidak jelas artinya bagi petugas. */
 const TIPE_LABEL: Record<string, string> = {
@@ -62,7 +62,7 @@ function whereUntuk(saringan: Saringan) {
 export default async function PesanMasukPage({
   searchParams,
 }: {
-  searchParams: Promise<{ saring?: string }>;
+  searchParams: Promise<{ saring?: string; page?: string; gpage?: string }>;
 }) {
   const session = await auth();
   // Isi pesan pasien bisa memuat keluhan medis, jadi halaman ini admin-only --
@@ -70,20 +70,40 @@ export default async function PesanMasukPage({
   // untuk operator, tapi akses langsung lewat URL harus ditolak di server.
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
-  const { saring } = await searchParams;
+  const { saring, page: pageParam, gpage: gpageParam } = await searchParams;
   const saringan: Saringan = (['perorangan', 'grup', 'belum-dibalas'] as const).includes(saring as never)
     ? (saring as Saringan)
     : 'semua';
 
-  const [pesan, cocok, jumlahSemua, jumlahPerorangan, jumlahGrup, jumlahBelumDibalas, grup, sesi, simpanTeks, hariSimpan] =
+  // `cocok` sudah dihitung di sini sebelum paginasi ada -- ia cuma tidak pernah
+  // dipakai untuk membatasi apa pun, sehingga baris ke-101 tidak bisa dijangkau
+  // dari mana pun. Sekarang angka yang sama itu yang menentukan offsetnya.
+  const cocok = await InboundMessage.count({ where: whereUntuk(saringan) });
+  const p = hitungPaginasi(bacaHalaman(pageParam), cocok, UKURAN_HALAMAN.riwayat);
+
+  // Halaman ini punya DUA tabel yang berdiri sendiri, jadi masing-masing butuh
+  // parameternya sendiri: `page` untuk pesan, `gpage` untuk grup. Satu parameter
+  // bersama akan membuat pindah halaman di satu tabel ikut menggeser tabel yang
+  // satunya -- dan yang terlihat adalah baris yang "hilang" tanpa sebab.
+  const pg = hitungPaginasi(bacaHalaman(gpageParam), await WaGroup.count(), UKURAN_HALAMAN.konfigurasi);
+
+  // 'semua' adalah keadaan bawaan dan sengaja TIDAK ditulis ke URL -- supaya
+  // tautannya tetap `/pesan-masuk` polos seperti chip pertamanya.
+  const saringUrl = saringan === 'semua' ? null : saringan;
+
+  const [pesan, jumlahSemua, jumlahPerorangan, jumlahGrup, jumlahBelumDibalas, grup, sesi, simpanTeks, hariSimpan] =
     await Promise.all([
-      InboundMessage.findAll({ where: whereUntuk(saringan), order: [['id', 'DESC']], limit: PER_HALAMAN }),
-      InboundMessage.count({ where: whereUntuk(saringan) }),
+      InboundMessage.findAll({
+        where: whereUntuk(saringan),
+        order: [['id', 'DESC']],
+        limit: p.limit,
+        offset: p.offset,
+      }),
       InboundMessage.count(),
       InboundMessage.count({ where: { jenis: 'perorangan' } }),
       InboundMessage.count({ where: { jenis: 'grup' } }),
       InboundMessage.count({ where: { jenis: 'perorangan', dibalas: false } }),
-      WaGroup.findAll({ order: [['nama', 'ASC']] }),
+      WaGroup.findAll({ order: [['nama', 'ASC']], limit: pg.limit, offset: pg.offset }),
       WaSession.findByPk(1),
       getSettingBool('inbox.simpan_teks', true),
       getSettingNumber('inbox.simpan_hari', 30),
@@ -119,7 +139,19 @@ export default async function PesanMasukPage({
         description="Pesan yang diterima nomor WhatsApp rumah sakit, dari perorangan maupun grup — berikut ID pengirim dan ID grupnya."
       />
 
-      <GrupPanel grup={barisGrup} waSiap={sesi?.status === 'ready'} />
+      <GrupPanel
+        grup={barisGrup}
+        waSiap={sesi?.status === 'ready'}
+        paginasi={
+          <Pagination
+            page={pg.halaman}
+            totalPages={pg.totalHalaman}
+            count={pg.jumlah}
+            hrefFor={(n) => hrefHalaman('/pesan-masuk', { saring: saringUrl, page: p.halaman }, n, 'gpage')}
+            unit="grup"
+          />
+        }
+      />
 
       <SimpanTeksSwitch aktif={simpanTeks} hariSimpan={hariSimpan} />
 
@@ -138,12 +170,6 @@ export default async function PesanMasukPage({
             Belum dibalas ({jumlahBelumDibalas.toLocaleString('id-ID')})
           </FilterChip>
         </div>
-
-        {cocok > PER_HALAMAN && (
-          <p className="mb-3 text-xs text-muted-foreground">
-            Menampilkan {PER_HALAMAN} terbaru dari {cocok.toLocaleString('id-ID')}.
-          </p>
-        )}
 
         {pesan.length === 0 ? (
           <EmptyState icon={<IconInbox className="h-6 w-6" />} title="Belum ada pesan masuk yang tercatat">
@@ -234,6 +260,17 @@ export default async function PesanMasukPage({
             </table>
           </div>
         )}
+
+        {/* Saringan ikut terbawa; `page` sengaja TIDAK dibawa oleh chip di atas
+            -- chip mengganti CAKUPAN, dan posisi halaman lama tidak berarti
+            apa-apa di cakupan yang berbeda. */}
+        <Pagination
+          page={p.halaman}
+          totalPages={p.totalHalaman}
+          count={p.jumlah}
+          hrefFor={(n) => hrefHalaman('/pesan-masuk', { saring: saringUrl, gpage: pg.halaman }, n)}
+          unit="pesan"
+        />
       </section>
 
       <div className="mt-4 space-y-2 text-xs text-muted-foreground">

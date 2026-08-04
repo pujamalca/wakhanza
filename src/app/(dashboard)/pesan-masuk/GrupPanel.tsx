@@ -22,7 +22,20 @@ export interface GrupRow {
   pesan: number;
 }
 
-export function GrupPanel({ grup, waSiap }: { grup: GrupRow[]; waSiap: boolean }) {
+/**
+ * `paginasi` diserahkan dari Server Component induk supaya kendalinya berada DI
+ * DALAM `<section>` ini -- kalau dirender sesudahnya, jarak `mb-8` milik section
+ * memisahkannya dari tabel yang ia kendalikan.
+ */
+export function GrupPanel({
+  grup,
+  waSiap,
+  paginasi,
+}: {
+  grup: GrupRow[];
+  waSiap: boolean;
+  paginasi?: React.ReactNode;
+}) {
   const [hasil, setHasil] = useState<HasilAksi>({});
   const [pending, start] = useTransition();
 
@@ -99,6 +112,7 @@ export function GrupPanel({ grup, waSiap }: { grup: GrupRow[]; waSiap: boolean }
           </table>
         </div>
       )}
+      {paginasi}
     </section>
   );
 }

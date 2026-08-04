@@ -1,22 +1,30 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { FarmasiTarget, WaGroup, WaSession, getSetting, getSettingBool, getSettingNumber } from '@/models';
-import { PageHeader } from '@/components/ui';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
+import { PageHeader, Pagination } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TargetTable, type TargetRow, type GrupRow } from './TargetTable';
 import { PesanForm, type NilaiPesan } from './PesanForm';
 import { StokForm, type NilaiStok } from './StokForm';
 
-export default async function FarmasiPage() {
+export default async function FarmasiPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
   // Nav menyembunyikan tautan ini untuk operator, tapi akses langsung lewat URL
   // harus tetap ditolak di server (pola sama seperti /audit dan /broadcast).
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
+  const { page: pageParam } = await searchParams;
+  const p = hitungPaginasi(bacaHalaman(pageParam), await FarmasiTarget.count(), UKURAN_HALAMAN.konfigurasi);
+
   const [enabled, targets, grup, sesi, validasiEnabled, penyerahanEnabled, tValidasi, tPenyerahan, tGeneric, tRekap, maxPerCycle] =
     await Promise.all([
       getSettingBool('farmasi.enabled', false),
-      FarmasiTarget.findAll({ order: [['id', 'ASC']] }),
+      FarmasiTarget.findAll({ order: [['id', 'ASC']], limit: p.limit, offset: p.offset }),
+      // SENGAJA tidak dipaginasi: ini mengisi dropdown pemilih grup di dalam
+      // TargetTable, bukan tabelnya. Daftar pilihan yang terpotong akan
+      // menyembunyikan grup tanpa satu pun tanda, dan staf menyimpulkan grupnya
+      // belum tersinkron.
       WaGroup.findAll({ order: [['nama', 'ASC']] }),
       WaSession.findByPk(1),
       getSettingBool('farmasi.validasi_enabled', true),
@@ -106,6 +114,13 @@ export default async function FarmasiPage() {
       <section className="mb-8">
         <h2 className="mb-1 text-sm font-medium">Tujuan pengiriman</h2>
         <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
+        <Pagination
+          page={p.halaman}
+          totalPages={p.totalHalaman}
+          count={p.jumlah}
+          hrefFor={(n) => hrefHalaman('/farmasi', {}, n)}
+          unit="tujuan"
+        />
         {barisGrup.length > 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
             Daftar grup terakhir dimuat {barisGrup[0]?.syncedAt}. Grup yang baru dibuat belum muncul sampai daftarnya

@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { AuditLog } from '@/models';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { PageHeader, EmptyState, Pagination, IconShield, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
-
-const PAGE_SIZE = 50;
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
@@ -12,14 +11,17 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
   const { page: pageParam } = await searchParams;
-  const page = Math.max(1, Number(pageParam) || 1);
+  // Dihitung SESUDAH count supaya nomor halaman di luar rentang dijepit ke
+  // halaman terakhir alih-alih menampilkan tabel kosong yang tak bisa
+  // ditinggalkan -- lihat core/pagination.ts.
+  const jumlah = await AuditLog.count();
+  const p = hitungPaginasi(bacaHalaman(pageParam), jumlah, UKURAN_HALAMAN.riwayat);
 
-  const { rows, count } = await AuditLog.findAndCountAll({
+  const rows = await AuditLog.findAll({
     order: [['id', 'DESC']],
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
+    limit: p.limit,
+    offset: p.offset,
   });
-  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
     <div>
@@ -58,7 +60,13 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         </table>
       </div>
 
-      <Pagination page={page} totalPages={totalPages} count={count} hrefFor={(p) => `/audit?page=${p}`} unit="tindakan" />
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/audit', {}, n)}
+        unit="tindakan"
+      />
     </div>
   );
 }

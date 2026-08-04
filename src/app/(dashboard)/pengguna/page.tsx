@@ -1,16 +1,23 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { daftarPengguna, hitungAdminAktif } from '@/lib/userAdmin';
-import { PageHeader } from '@/components/ui';
+import { daftarPengguna, hitungAdminAktif, hitungPengguna } from '@/lib/userAdmin';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
+import { PageHeader, Pagination } from '@/components/ui';
 import { UserTable } from './UserTable';
 
-export default async function PenggunaPage() {
+export default async function PenggunaPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
   // Nav menyembunyikan tautan ini untuk operator, tapi akses langsung lewat URL
   // harus tetap ditolak di server (pola sama seperti /audit dan /broadcast).
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
-  const [users, adminAktif] = await Promise.all([daftarPengguna(), hitungAdminAktif()]);
+  const { page: pageParam } = await searchParams;
+  // `hitungAdminAktif()` sengaja TIDAK ikut dipersempit ke halaman ini -- lihat
+  // alasannya di lib/userAdmin.ts. Peringatan "tinggal satu admin" dan pagar
+  // penonaktifan keduanya bergantung padanya.
+  const [jumlah, adminAktif] = await Promise.all([hitungPengguna(), hitungAdminAktif()]);
+  const p = hitungPaginasi(bacaHalaman(pageParam), jumlah, UKURAN_HALAMAN.konfigurasi);
+  const users = await daftarPengguna({ limit: p.limit, offset: p.offset });
 
   return (
     <div>
@@ -44,6 +51,14 @@ export default async function PenggunaPage() {
           // sebagai hydration mismatch.
           createdAt: u.createdAt.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
         }))}
+      />
+
+      <Pagination
+        page={p.halaman}
+        totalPages={p.totalHalaman}
+        count={p.jumlah}
+        hrefFor={(n) => hrefHalaman('/pengguna', {}, n)}
+        unit="akun"
       />
 
       <div className="mt-4 space-y-2 text-xs text-muted-foreground">
