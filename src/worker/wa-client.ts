@@ -504,10 +504,75 @@ export async function checkHealth(timeoutMs = 10_000): Promise<boolean> {
   const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs));
   try {
     await Promise.race([c.getState(), timeout]);
-    return true;
   } catch (err) {
     logger.error(safeError(err), 'pemeriksaan kesehatan client WhatsApp gagal -- Chromium mungkin menggantung');
     return false;
+  }
+
+  /**
+   * `getState()` TIDAK cukup, dan itu sebabnya pemeriksaan ini pernah menjawab
+   * "sehat" pada halaman yang tidak bisa mengirim apa pun: ia membaca
+   * `window.require('WAWebSocketModel')` -- modul milik WhatsApp SENDIRI, yang
+   * selamat dari navigasi -- sementara yang dibutuhkan pengiriman adalah objek
+   * suntikan `window.WWebJS`, yang justru dihapus tiap kali frame bernavigasi.
+   *
+   * Anggarannya panjang (bukan sekali coba) supaya sela penyuntikan ulang yang
+   * NORMAL -- biasanya di bawah satu detik -- tidak dibaca sebagai gangguan.
+   * Watchdog memakai hasil fungsi ini untuk MENYALAKAN ULANG worker, dan
+   * penautan ulang yang terlalu sering justru memperlambat sinkronisasi
+   * WhatsApp (lihat BATAS_TIDAK_SIAP_MS di worker/index.ts). Yang harus
+   * dijaringnya adalah halaman yang tidak pernah tersuntik lagi, bukan halaman
+   * yang sedang menyuntik.
+   */
+  if (!(await tungguHalamanSiap(timeoutMs))) {
+    logger.error('pemeriksaan kesehatan gagal: window.WWebJS tidak kunjung tersuntik ke halaman');
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Apakah objek suntikan `window.WWebJS` ADA di halaman saat ini.
+ *
+ * `pupPage` tidak ada di tipe publik whatsapp-web.js, jadi cast-nya memang
+ * perlu -- dan justru karena itu ketiadaannya diperlakukan sebagai
+ * **"anggap siap"**, bukan "belum siap". Alasannya menentukan: hasil fungsi ini
+ * dipakai untuk MENUNDA pengiriman, jadi kalau bentuk pustakanya berubah dan
+ * probe-nya tidak bisa lagi dijalankan, gagal-tertutup berarti dispatcher
+ * berhenti mengirim SELAMANYA tanpa satu pun galat -- jauh lebih buruk daripada
+ * bug yang sedang diperbaiki. Jaring pengaman sebenarnya ada di sisi tangkapan
+ * (`galatHalamanBelumSiap`); probe ini cuma menghindarkan galatnya, bukan
+ * satu-satunya yang menanganinya.
+ */
+async function halamanSiap(): Promise<boolean> {
+  const page = (getClient() as unknown as { pupPage?: { evaluate: (script: string) => Promise<unknown> } }).pupPage;
+  if (!page) {
+    logger.warn('probe halaman dilewati: pupPage tidak tersedia -- dianggap siap');
+    return true;
+  }
+  try {
+    return (await page.evaluate("typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChat === 'function'")) === true;
+  } catch (err) {
+    // Konteks yang hancur saat probe berjalan ADALAH jawabannya: halamannya
+    // sedang bernavigasi.
+    logger.debug(safeError(err), 'probe halaman gagal -- dianggap belum siap');
+    return false;
+  }
+}
+
+/**
+ * Menunggu sampai halaman benar-benar bisa dipakai mengirim, atau menyerah.
+ *
+ * Pengalihan ke penjajakan berulang (bukan sekali periksa) disengaja: sela
+ * penyuntikan ulang normalnya sangat pendek, jadi menunggu sebentar jauh lebih
+ * murah daripada menunda satu siklus dispatcher penuh.
+ */
+export async function tungguHalamanSiap(budgetMs: number): Promise<boolean> {
+  const batas = Date.now() + budgetMs;
+  for (;;) {
+    if (await halamanSiap()) return true;
+    if (Date.now() >= batas) return false;
+    await new Promise((r) => setTimeout(r, 250));
   }
 }
 

@@ -2,9 +2,10 @@ import { Op } from 'sequelize';
 import { db } from '@/db/wakhanza';
 import { Outbox, OptOut, SendLog, getSettingNumber, getSettingJson } from '@/models';
 import { isPermanentAfter, retryDelayMs, isStale } from '@/core/retry';
+import { galatHalamanBelumSiap } from '@/core/waError';
 import { respectsOptOut } from '@/core/optOut';
 import { isChatIdValid } from '@/core/farmasiTarget';
-import { isWaReady, sendWhatsAppMessage, isRegisteredOnWhatsApp } from './wa-client';
+import { isWaReady, tungguHalamanSiap, sendWhatsAppMessage, isRegisteredOnWhatsApp } from './wa-client';
 import { logger, safeError, maskPhone, maskChatId } from '@/lib/logger';
 
 const DEFAULT_STALE_HOURS: Record<string, number> = {};
@@ -64,6 +65,24 @@ export async function recoverInterruptedSends(): Promise<number> {
  */
 export async function dispatchTick(): Promise<boolean> {
   if (!(await isWaReady())) return false;
+
+  /**
+   * `isWaReady()` membaca baris `wa_session` yang ditulis saat event READY --
+   * keadaan HISTORIS, bukan keadaan halaman sekarang. Objek suntikan
+   * `window.WWebJS` yang dibutuhkan pengiriman dihapus tiap kali frame
+   * bernavigasi dan disuntikkan ulang secara asinkron, tanpa event apa pun
+   * (lihat `core/waError.ts`). Menembak ke sela itu menghasilkan galat yang
+   * dulu menghabiskan satu dari tiga percobaan milik baris pesan.
+   *
+   * Anggarannya pendek: kalau halamannya memang sedang menyuntik, menunggu
+   * sedetik-dua jauh lebih murah daripada melewatkan siklus; kalau lebih lama
+   * dari itu, melewatkan siklus memang jawabannya -- dan yang menjaring
+   * halaman yang tidak pernah pulih adalah pemeriksaan kesehatan, bukan sini.
+   */
+  if (!(await tungguHalamanSiap(2_000))) {
+    logger.debug('halaman WhatsApp sedang menyuntik ulang, siklus kirim dilewati');
+    return false;
+  }
 
   const maxPerHour = await getSettingNumber('dispatch.max_per_hour', 200);
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -177,6 +196,42 @@ export async function dispatchTick(): Promise<boolean> {
     );
   } catch (err) {
     const e = safeError(err);
+
+    /**
+     * "Belum sempat mencoba" BUKAN "sudah dicoba dan gagal".
+     *
+     * Halaman yang sedang menyuntik ulang `window.WWebJS` melempar galat yang
+     * bentuknya sama seperti kegagalan kirim, tapi artinya berlawanan --
+     * pesannya tidak pernah sampai ke WhatsApp sama sekali. Menghitungnya
+     * sebagai satu dari TIGA percobaan berarti gangguan halaman beberapa detik
+     * bisa menandai notifikasi pasien `failed_permanent`, dan sejak itu ia
+     * hanya bergerak kalau ada manusia menekan "Kirim ulang".
+     *
+     * Karena itu: `attempts` TIDAK dinaikkan dan `send_log` TIDAK ditulis --
+     * baris log percobaan yang tidak pernah terjadi hanya membuat riwayatnya
+     * berbohong. `lastError` tetap diisi supaya keadaannya terlihat di layar,
+     * dan statusnya tetap `pending` sehingga jujur: belum terkirim, masih akan
+     * dicoba.
+     *
+     * Jeda 5 detik, bukan backoff 1/5/25 menit: yang ditunggu di sini
+     * penyuntikan ulang yang normalnya di bawah satu detik, bukan gangguan
+     * jaringan. Tidak ada risiko berputar selamanya -- `isStale()` (F5.3) tetap
+     * membatalkan pesan yang pemicunya kelewat tua, dan halaman yang tidak
+     * pernah pulih dijaring pemeriksaan kesehatan lalu worker dimulai ulang.
+     */
+    if (galatHalamanBelumSiap(err)) {
+      await row.update({
+        status: 'pending',
+        lastError: `halaman WhatsApp belum siap: ${e.message}`,
+        scheduledAt: new Date(Date.now() + 5_000),
+      });
+      logger.warn(
+        { triggerCode: row.triggerCode, tujuan: maskChatId(chatId), attempts: row.attempts, ...e },
+        'halaman WhatsApp belum siap saat kirim -- dicoba lagi, percobaan tidak dihitung',
+      );
+      return true;
+    }
+
     const permanent = isPermanentAfter(attempts);
     /**
      * Saat percobaan habis, statusnya `failed_permanent` -- BUKAN `failed`.
