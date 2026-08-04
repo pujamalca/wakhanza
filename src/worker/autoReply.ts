@@ -12,6 +12,7 @@ import {
 } from '@/models';
 import { matchRule, detectPoli, normalizeInbound, type MatchableRule } from '@/core/autoReply';
 import { extractVariables } from '@/core/template';
+import { formatTanggalPesan, formatJamPesan } from '@/core/tanggalPesan';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import {
   fetchJadwalDokter,
@@ -22,7 +23,7 @@ import {
   hariKerjaOf,
 } from '@/khanza/jadwalDokter';
 import { loadAutoReplyContext, identityVars, enqueueMessage } from './pipeline';
-import { bacaModeStok, cobaBalasStok } from './stokReply';
+import { bacaModeStok, cobaBalasPersediaan, daruratTanyaAktif } from './stokReply';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 
 /**
@@ -113,14 +114,6 @@ async function buildJadwalVars(
   return vars;
 }
 
-function formatTanggal(d: Date): string {
-  return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function formatJamSekarang(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}.${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
 async function writeLog(
   phoneE164: string,
   outcome: AutoReplyOutcome,
@@ -184,8 +177,8 @@ export async function buildReplyVars(body: string, inbound: string, identity: { 
   const now = new Date();
   return {
     ...identityVars(identity),
-    tanggal: formatTanggal(now),
-    jam: formatJamSekarang(now),
+    tanggal: formatTanggalPesan(now),
+    jam: formatJamPesan(now),
     ...(await buildJadwalVars(body, inbound, identity.kontakRs)),
   };
 }
@@ -197,11 +190,12 @@ export async function buildReplyVars(body: string, inbound: string, identity: { 
  */
 export async function handleInboundMessage(msg: InboundMessage): Promise<AutoReplyResult> {
   /**
-   * DUA fitur berbagi alur ini, dan masing-masing punya sakelarnya sendiri:
-   * balasan kata kunci (`autoreply.enabled`) dan balasan stok obat
-   * (`farmasi.stok_mode`, lihat stokReply.ts). Apotek harus bisa menyalakan
-   * jawaban stok tanpa ikut menyalakan balasan otomatis umum -- keduanya
-   * keputusan kebijakan yang berbeda, dengan pemilik yang berbeda pula.
+   * TIGA fitur berbagi alur ini, dan masing-masing punya sakelarnya sendiri:
+   * balasan kata kunci (`autoreply.enabled`), balasan stok/harga satu obat
+   * (`farmasi.stok_mode`), dan rekap darurat stok (`farmasi.darurat_enabled` +
+   * `farmasi.darurat_tanya`) -- keduanya yang terakhir di stokReply.ts. Apotek
+   * harus bisa menyalakan salah satunya tanpa yang lain: ketiganya keputusan
+   * kebijakan yang berbeda, dengan pemilik yang berbeda pula.
    *
    * Yang TIDAK dipisah adalah pemeriksaan di bawah ini (pesan kosong,
    * penyerahan ulang, kuota per nomor). Memisahkannya berarti satu nomor bisa
@@ -211,7 +205,8 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<AutoRep
    */
   const balasanKataKunciAktif = await getSettingBool('autoreply.enabled', false);
   const modeStok = await bacaModeStok();
-  if (!balasanKataKunciAktif && modeStok === 'mati') return { outcome: 'disabled' };
+  const rekapAktif = await daruratTanyaAktif();
+  if (!balasanKataKunciAktif && modeStok === 'mati' && !rekapAktif) return { outcome: 'disabled' };
 
   // Pesan tanpa satu pun huruf atau angka -- stiker, "👍", foto tanpa
   // keterangan. Bukan pertanyaan, jadi tidak dibalas DAN tidak dicatat: satu
@@ -241,25 +236,30 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<AutoRep
   }
 
   /**
-   * Cabang stok DIDAHULUKAN atas aturan kata kunci, dan itu pilihan sadar:
-   * kata kunci stok bersifat spesifik ("stok", "harga"), sementara aturan
-   * /balasan-otomatis cenderung umum. Urutan sebaliknya membuat satu aturan
-   * bertema luas menelan seluruh pertanyaan stok tanpa ada yang menyadarinya.
+   * Cabang PERSEDIAAN DIDAHULUKAN atas aturan kata kunci, dan itu pilihan
+   * sadar: kata kuncinya spesifik ("stok", "harga", "darurat stok"), sementara
+   * aturan /balasan-otomatis cenderung umum. Urutan sebaliknya membuat satu
+   * aturan bertema luas menelan seluruh pertanyaan persediaan tanpa ada yang
+   * menyadarinya.
    *
-   * Aman untuk yang tidak memakainya: `cobaBalasStok` mengembalikan
+   * Urutan DI DALAMNYA (rekap lebih dulu, lalu pencarian satu obat) ditetapkan
+   * `cobaBalasPersediaan` -- satu tempat, bukan diulang di sini dan di jalur
+   * grup.
+   *
+   * Aman untuk yang tidak memakainya: keduanya mengembalikan
    * `ditangani: false` untuk pesan yang tidak memuat kata kuncinya, untuk nomor
-   * yang tidak berhak pada mode 'petugas', dan tentu saat modenya 'mati' --
-   * sehingga alurnya lanjut persis seperti sebelum fitur ini ada.
+   * yang tidak berhak, dan tentu saat sakelarnya mati -- sehingga alurnya
+   * lanjut persis seperti sebelum fitur ini ada.
    */
-  if (modeStok !== 'mati') {
-    const stok = await cobaBalasStok(msg, idempotencyKey);
+  if (modeStok !== 'mati' || rekapAktif) {
+    const stok = await cobaBalasPersediaan(msg, idempotencyKey);
     if (stok.ditangani) {
       await writeLog(msg.phoneE164, 'matched', null, msg.text);
-      return { outcome: 'matched', ruleLabel: `stok obat (${stok.cabang})` };
+      return { outcome: 'matched', ruleLabel: `persediaan (${stok.cabang})` };
     }
   }
 
-  // Sampai sini pesannya bukan urusan stok. Tanpa balasan kata kunci menyala,
+  // Sampai sini pesannya bukan urusan persediaan. Tanpa balasan kata kunci menyala,
   // tidak ada lagi yang bisa dikerjakan -- dicatat `no_match` supaya panel
   // pesan-masuk di /ringkasan tetap melihat bahwa pesannya datang.
   if (!balasanKataKunciAktif) {

@@ -1,4 +1,4 @@
-import { buildIdempotencyKey, turunkanKunciTujuan } from './idempotency';
+import { buildIdempotencyKey, turunkanKunciTujuan, turunkanKunciBagian } from './idempotency';
 
 describe('buildIdempotencyKey', () => {
   it('menghasilkan 40 karakter hex (SHA1)', () => {
@@ -76,5 +76,42 @@ describe('turunkanKunciTujuan', () => {
     const lain = buildIdempotencyKey('QUEUE_REG', '2026/08/03/000043');
     const chat = '120363402118136446@g.us';
     expect(turunkanKunciTujuan(dasar, chat)).not.toBe(turunkanKunciTujuan(lain, chat));
+  });
+});
+
+describe('turunkanKunciBagian', () => {
+  const dasar = buildIdempotencyKey('AUTO_REPLY', 'false_628123@c.us_ABCDEF');
+
+  /**
+   * INTI-nya. Beberapa pemanggil memeriksa lebih dulu apakah kunci DASAR sudah
+   * ada di `outbox` untuk menolak pesan yang diserahkan ulang. Kalau bagian
+   * pertama ikut diturunkan, kunci dasar itu tidak pernah benar-benar tertulis,
+   * pemeriksaannya selalu meleset, dan satu restart worker membanjiri
+   * penerimanya dengan jawaban lama.
+   */
+  it('bagian pertama memakai kunci dasarnya apa adanya', () => {
+    expect(turunkanKunciBagian(dasar, 0)).toBe(dasar);
+  });
+
+  it('bagian berikutnya berbeda satu sama lain dan dari kunci dasar', () => {
+    const kunci = [0, 1, 2, 3].map((i) => turunkanKunciBagian(dasar, i));
+    expect(new Set(kunci).size).toBe(4);
+  });
+
+  it('tetap 40 karakter hex, jadi muat di VARCHAR(64)', () => {
+    expect(turunkanKunciBagian(dasar, 7)).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('deterministik -- jalan ulang atas jatuh tempo yang sama tidak menambah pesan', () => {
+    expect(turunkanKunciBagian(dasar, 2)).toBe(turunkanKunciBagian(dasar, 2));
+  });
+
+  it('bagian yang sama dari kejadian berbeda tetap berbeda', () => {
+    const lain = buildIdempotencyKey('AUTO_REPLY', 'false_628123@c.us_ZZZZZZ');
+    expect(turunkanKunciBagian(dasar, 1)).not.toBe(turunkanKunciBagian(lain, 1));
+  });
+
+  it('indeks negatif diperlakukan seperti bagian pertama, bukan kunci ketiga', () => {
+    expect(turunkanKunciBagian(dasar, -1)).toBe(dasar);
   });
 });

@@ -1,4 +1,10 @@
-import { computeNextRunAt, resolveScheduleWindow, DEFAULT_FOLLOWUP_OFFSET_DAYS } from './schedule';
+import {
+  computeNextRunAt,
+  resolveScheduleWindow,
+  DEFAULT_FOLLOWUP_OFFSET_DAYS,
+  MIN_INTERVAL_DAYS,
+  MAX_INTERVAL_DAYS,
+} from './schedule';
 
 // 31 Juli 2026 = Jumat (getDay() === 5).
 const at = (h: number, m = 0) => new Date(2026, 6, 31, h, m, 0, 0);
@@ -165,5 +171,75 @@ describe('resolveScheduleWindow: followup', () => {
     const { dateFrom, dateTo } = resolveScheduleWindow({ windowMode: 'followup', lookbackDays: 30, offsetDays: 3 }, at(10));
     dateTo.setDate(dateTo.getDate() + 10);
     expect(dateFrom.getDate()).toBe(28);
+  });
+});
+
+/**
+ * `every_n_days` -- dipakai peringatan DARURAT STOK ("sekali tiga hari").
+ *
+ * Sengaja TIDAK ada di `RepeatKind` milik broadcast: ENUM MariaDB
+ * `broadcast_schedule.repeat_kind` tidak memuatnya, dan tipe yang lebih lebar
+ * akan membuat TypeScript meloloskan nilai yang baru gagal di tingkat database.
+ */
+describe('computeNextRunAt: every_n_days', () => {
+  const tiga = { repeatKind: 'every_n_days' as const, timeOfDay: '18:00', intervalDays: 3 };
+
+  it('jam kirim yang belum lewat hari ini dipakai hari itu juga', () => {
+    const next = computeNextRunAt(tiga, at(9));
+    expect(next?.getDate()).toBe(31);
+    expect(next?.getHours()).toBe(18);
+  });
+
+  /**
+   * Melompat N hari PENUH, bukan 1 hari lalu N-1 lagi. Akibatnya disengaja:
+   * jadwal yang dibuat pukul 20:00 pertama kali jalan tiga hari lagi, bukan
+   * besok. Jaraknya seragam sejak kejadian pertama, dan itu lebih penting
+   * daripada memajukan yang pertama -- jarak tak seragam membuat "kenapa
+   * peringatannya datang hari ini" tidak bisa dijawab dari pengaturannya.
+   */
+  it('jam kirim yang sudah lewat melompat N hari penuh', () => {
+    expect(computeNextRunAt(tiga, at(20))?.getDate()).toBe(3); // 31 Juli + 3 = 3 Agustus
+  });
+
+  it('tepat pada jamnya dihitung sudah lewat', () => {
+    expect(computeNextRunAt(tiga, at(18))?.getDate()).toBe(3);
+  });
+
+  it('menyeberangi pergantian bulan', () => {
+    const next = computeNextRunAt(tiga, at(20));
+    expect(next?.getMonth()).toBe(7); // Agustus
+  });
+
+  it('interval dijepit ke batas atas dan bawah', () => {
+    const dasar = at(20);
+    const besar = computeNextRunAt({ ...tiga, intervalDays: 999 }, dasar);
+    expect(Math.round((besar!.getTime() - dasar.getTime()) / 86_400_000)).toBe(MAX_INTERVAL_DAYS);
+
+    // 1 punya namanya sendiri ('daily'); dijepit ke MIN supaya tidak ada dua
+    // jalan menuju perilaku yang sama.
+    const kecil = computeNextRunAt({ ...tiga, intervalDays: 1 }, dasar);
+    expect(Math.round((kecil!.getTime() - dasar.getTime()) / 86_400_000)).toBe(MIN_INTERVAL_DAYS);
+  });
+
+  it('pecahan dibulatkan ke bawah lebih dulu', () => {
+    const dasar = at(20);
+    const next = computeNextRunAt({ ...tiga, intervalDays: 4.9 }, dasar);
+    expect(Math.round((next!.getTime() - dasar.getTime()) / 86_400_000)).toBe(4);
+  });
+
+  /**
+   * Tanpa intervalDays ia TIDAK menebak angka bawaan. Jadwal yang diam-diam
+   * memilih angkanya sendiri adalah jadwal yang jalan pada hari yang tidak
+   * pernah dipilih siapa pun; null membuat pemanggil menolak menyimpannya.
+   */
+  it('tanpa intervalDays -> null', () => {
+    expect(computeNextRunAt({ repeatKind: 'every_n_days', timeOfDay: '18:00' }, at(9))).toBeNull();
+    expect(computeNextRunAt({ repeatKind: 'every_n_days', timeOfDay: '18:00', intervalDays: null }, at(9))).toBeNull();
+  });
+
+  it('detik dan milidetik selalu dinolkan', () => {
+    const next = computeNextRunAt(tiga, new Date(2026, 6, 31, 9, 0, 37, 512));
+    expect(next?.getSeconds()).toBe(0);
+    expect(next?.getMilliseconds()).toBe(0);
   });
 });

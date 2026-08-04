@@ -52,6 +52,13 @@ export function nextWindowStart(date: Date, endHour: number): Date {
  *   grup. Pesan uji yang ditahan sampai pagi tidak terbaca sebagai "ditahan"
  *   melainkan sebagai "kode grupnya salah" -- lalu ia mengganti kode yang
  *   sebenarnya sudah benar.
+ * - FARMASI_STOK_DARURAT: penerimanya staf, seperti dua pemicu farmasi di atas.
+ *   Tapi alasan utamanya di sini BERBEDA dan lebih menentukan: waktu kirimnya
+ *   dipilih staf sendiri lewat `stok_alert_schedule.time_of_day`. Menundukkannya
+ *   pada jam tenang berarti diam-diam mengabaikan jam yang baru saja mereka
+ *   setel -- apotek shift malam yang sengaja memilih 05:00 akan menerimanya
+ *   07:00 tanpa satu pun keterangan kenapa. Pagar terhadap pesan larut malam di
+ *   sini adalah form jadwalnya, bukan jam tenang.
  */
 const BYPASS_QUIET_HOURS = new Set([
   'BOOK_CANCEL',
@@ -59,6 +66,7 @@ const BYPASS_QUIET_HOURS = new Set([
   'FARMASI_VALIDASI',
   'FARMASI_PENYERAHAN',
   'FARMASI_UJI',
+  'FARMASI_STOK_DARURAT',
 ]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */

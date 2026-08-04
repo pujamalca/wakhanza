@@ -83,13 +83,24 @@ GRANT UPDATE, DELETE ON wakhanza.schema_migrations TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.broadcast_schedule TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.broadcast_template TO 'wakhanza_rw'@'localhost';
 GRANT UPDATE, DELETE ON wakhanza.auto_reply_rule    TO 'wakhanza_rw'@'localhost';
--- auto_reply_log dapat DELETE tapi TIDAK UPDATE: ia dipangkas berkala oleh
--- worker/cleanup.ts (tumbuh seiring pesan masuk), tapi satu baris log yang
--- sudah tertulis tidak pernah ditulis ulang.
+-- Tujuan notifikasi apotek + daftar grup hasil pembacaan sesi (migrations/016).
+GRANT UPDATE, DELETE ON wakhanza.farmasi_target     TO 'wakhanza_rw'@'localhost';
+GRANT UPDATE, DELETE ON wakhanza.wa_group           TO 'wakhanza_rw'@'localhost';
+-- Tujuan tambahan per pemicu pasien (migrations/018).
+GRANT UPDATE, DELETE ON wakhanza.template_target    TO 'wakhanza_rw'@'localhost';
+-- Jadwal peringatan darurat stok (migrations/021): next_run_at/last_run_at
+-- ditulis worker tiap kali jalan, dan staf bisa menjeda/menghapusnya.
+GRANT UPDATE, DELETE ON wakhanza.stok_alert_schedule TO 'wakhanza_rw'@'localhost';
+-- auto_reply_log dan inbound_message dapat DELETE tapi TIDAK UPDATE: keduanya
+-- dipangkas berkala oleh worker/cleanup.ts (tumbuh seiring pesan masuk), tapi
+-- satu baris catatan yang sudah tertulis tidak pernah ditulis ulang.
 GRANT DELETE ON wakhanza.auto_reply_log             TO 'wakhanza_rw'@'localhost';
+GRANT DELETE ON wakhanza.inbound_message            TO 'wakhanza_rw'@'localhost';
 -- audit_log dan broadcast_campaign sengaja TIDAK PERNAH diberi UPDATE/DELETE,
 -- di level mana pun -- keduanya insert-only by design (jejak akuntabilitas).
 ```
+
+**Daftar ini sempat tertinggal, dan itu bentuk kegagalan tersendiri.** Grant untuk `farmasi_target`, `wa_group`, `template_target`, dan `inbound_message` sudah diterapkan di mesin ini sejak fitur masing-masing dibuat, tapi tidak pernah ikut dicatat di sini -- ketahuan saat menambahkan `stok_alert_schedule`. Daftar grant yang tidak lengkap lebih buruk daripada tidak ada: pemasangan baru akan berjalan sampai seseorang menekan tombol jeda atau hapus, lalu gagal dengan `ERROR 1142` yang tidak menyebut bahwa penyebabnya ada di berkas ini. Isinya sekarang disamakan dengan keluaran `SHOW GRANTS FOR 'wakhanza_rw'@'localhost'` yang sebenarnya berlaku. **Setiap tabel baru yang butuh UPDATE/DELETE wajib ditambahkan di sini pada commit yang sama dengan migrasinya.**
 
 Kalau suatu hari ada kode yang keliru menjalankan `UPDATE sik.pasien`, MariaDB menolaknya dengan error hak akses. Keselamatan database rumah sakit tidak boleh bergantung pada ingatan programmer.
 

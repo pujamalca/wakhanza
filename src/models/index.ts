@@ -16,4 +16,5 @@ export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
 export { FarmasiTarget } from './FarmasiTarget';
 export { TemplateTarget } from './TemplateTarget';
 export { WaGroup } from './WaGroup';
+export { StokAlertSchedule } from './StokAlertSchedule';
 export { InboundMessage, type JenisChat } from './InboundMessage';

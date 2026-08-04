@@ -116,10 +116,37 @@ export const STOK_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * DARURAT STOK (`/farmasi`) -- peringatan persediaan yang dikirim TANPA ada
+ * yang bertanya, jadi ia lagi-lagi berbeda dari dua daftar farmasi di atas.
+ *
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya: `{nama_pasien}`, `{no_rm}`,
+ * `{no_resep}`. Peringatan persediaan gudang tidak berurusan dengan seorang
+ * pasien pun; menyediakan variabelnya akan jadi alasan pertama untuk mulai
+ * menggabungkan katalog dengan `resep_obat`, dan penggabungan itulah yang
+ * mengubah daftar barang menjadi rekam medis (lihat khanza/stokObat.ts).
+ *
+ * `{daftar_stok}` berbentuk banyak baris dan karena itu masuk
+ * MULTILINE_VARIABLES di bawah -- aman HANYA karena core/stokDarurat.ts
+ * memanggil sanitizeValue() sendiri untuk tiap nama barang dan satuan.
+ */
+export const DARURAT_TEMPLATE_VARIABLES = [
+  'daftar_stok',
+  'jumlah_habis',
+  'jumlah_menipis',
+  'jumlah_total',
+  'nama_jenis',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * Gabungan seluruh konteks -- INI yang dimengerti `renderTemplate`, bukan
  * daftar yang boleh dipakai di satu tempat tertentu. Pembatasan per konteks
  * terjadi saat template DISIMPAN lewat findUnknownVariables(body, <daftar>),
- * jadi satu renderer tetap melayani empat konteks tanpa cabang.
+ * jadi satu renderer tetap melayani semua konteks tanpa cabang.
  */
 export const KNOWN_TEMPLATE_VARIABLES = [
   ...new Set([
@@ -128,6 +155,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...AUTOREPLY_TEMPLATE_VARIABLES,
     ...FARMASI_TEMPLATE_VARIABLES,
     ...STOK_TEMPLATE_VARIABLES,
+    ...DARURAT_TEMPLATE_VARIABLES,
   ]),
 ] as const;
 
@@ -136,7 +164,8 @@ export type TemplateVariable =
   | (typeof BROADCAST_TEMPLATE_VARIABLES)[number]
   | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number]
   | (typeof FARMASI_TEMPLATE_VARIABLES)[number]
-  | (typeof STOK_TEMPLATE_VARIABLES)[number];
+  | (typeof STOK_TEMPLATE_VARIABLES)[number]
+  | (typeof DARURAT_TEMPLATE_VARIABLES)[number];
 
 export function extractVariables(body: string): string[] {
   const names = new Set<string>();
@@ -180,7 +209,13 @@ export function sanitizeValue(value: string, maxLength = 60): string {
  * substitusi, jadi `{kontak_rs}` yang kebetulan ada di dalam daftar jadwal
  * tetap tampil apa adanya.
  */
-const MULTILINE_VARIABLES = new Set<string>(['jadwal_dokter', 'jadwal_hari_ini', 'daftar_poli', 'stok_obat']);
+const MULTILINE_VARIABLES = new Set<string>([
+  'jadwal_dokter',
+  'jadwal_hari_ini',
+  'daftar_poli',
+  'stok_obat',
+  'daftar_stok',
+]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {
   return body.replace(VAR_RE, (_match, key: string) => {

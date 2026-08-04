@@ -29,14 +29,28 @@ export interface BarisStokObat {
  * satu kata sisa yang tidak terbuang cuma membuat pencarian tidak menemukan
  * apa-apa, bukan menemukan yang salah. Sengaja tidak memuat nama obat mana pun.
  */
-const KATA_PENGAPIT = new Set([
+export const KATA_PENGAPIT = new Set([
   'apakah', 'apa', 'ada', 'adakah', 'berapa', 'brp', 'harganya', 'stoknya',
   'sisa', 'sisanya', 'masih', 'punya', 'tersedia', 'ketersediaan', 'cek',
+  // Kata keadaan persediaan. Ditambahkan bersama tanya-jawab darurat stok:
+  // tanpa ini "stok habis paracetamol" menyisakan "habis paracetamol" sebagai
+  // pencarian `LIKE`, yang tidak pernah cocok dengan satu pun nama barang --
+  // pertanyaan yang jelas maksudnya dijawab "tidak ditemukan". Tidak satu pun
+  // di antaranya bisa menjadi nama obat, jadi membuangnya tidak berisiko.
+  'habis', 'kosong', 'menipis', 'kritis', 'darurat', 'rekap', 'menipisnya',
   'tolong', 'mohon', 'minta', 'mau', 'ingin', 'beli', 'obat', 'obatnya',
   'ya', 'yah', 'ka', 'kak', 'min', 'admin', 'pak', 'bu', 'bapak', 'ibu',
   'selamat', 'pagi', 'siang', 'sore', 'malam', 'permisi', 'assalamualaikum',
   'di', 'ke', 'dari', 'untuk', 'buat', 'yang', 'dan', 'atau', 'nya', 'itu',
   'ini', 'saya', 'aku', 'kami', 'anda', 'gimana', 'bagaimana', 'info',
+  // Partikel percakapan dan kata daftar. Ditambahkan bersama tanya-jawab
+  // darurat stok, karena di sana sisa kata yang tak terbuang MEMBATALKAN
+  // kecocokan -- "rekap stok dong" berhenti dibaca sebagai permintaan rekap
+  // hanya karena kata "dong". Semuanya himpunan tertutup bahasa sehari-hari,
+  // dan tidak satu pun bisa menjadi nama obat.
+  'dong', 'deh', 'sih', 'kok', 'nih', 'tuh', 'lah', 'aja', 'saja', 'juga',
+  'dulu', 'sekarang', 'daftar', 'list', 'semua', 'oke', 'ok', 'makasih',
+  'terima', 'kasih', 'hari', 'kalau', 'kalo', 'boleh',
 ]);
 
 export interface PermintaanStok {

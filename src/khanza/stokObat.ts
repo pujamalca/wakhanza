@@ -1,5 +1,6 @@
 import { sikSelect } from '@/db/sik';
 import { registerPlanCheck } from './planChecks';
+import { JUMLAH_STOK_SQL, joinGudangSql, type ModeBatch } from './stokGudang';
 import type { BarisStokObat } from '@/core/stokObat';
 
 /**
@@ -32,15 +33,24 @@ import type { BarisStokObat } from '@/core/stokObat';
  * membuatnya hilang dari hasil, sehingga jawabannya berbunyi "tidak ditemukan"
  * padahal obatnya ada di katalog -- dua keadaan yang sangat berbeda bagi orang
  * yang bertanya.
+ *
+ * Penjumlahan stoknya diturunkan dari `stokGudang.ts`, BERSAMA dengan
+ * peringatan darurat stok. Sampai berkas itu ada, query ini menjumlahkan
+ * seluruh baris `gudangbarang` tanpa menyaring gudang nonaktif maupun cabang
+ * batch -- dua penyaring yang dipakai Khanza sendiri. Di database ini hasilnya
+ * kebetulan sama (seluruh 907 baris ada di bangsal aktif dan tanpa batch),
+ * tapi "kebetulan sama hari ini" bukan alasan membiarkan dua penurunan hidup
+ * berdampingan: yang muncul kalau keduanya menyimpang bukan galat, melainkan
+ * pasien diberi tahu "tersedia" pada menit yang sama apotek menerima
+ * peringatan "habis".
  */
-function buildStokSql(): string {
+function buildStokSql(pakaiBatch: ModeBatch): string {
   return `
     SELECT b.kode_brng, b.nama_brng, b.ralan, b.jualbebas, b.stokminimal,
            COALESCE(s.satuan, '') AS satuan,
-           COALESCE(SUM(g.stok), 0) AS stok
+           ${JUMLAH_STOK_SQL} AS stok
     FROM databarang b
-    LEFT JOIN kodesatuan s ON s.kode_sat = b.kode_sat
-    LEFT JOIN gudangbarang g ON g.kode_brng = b.kode_brng
+    LEFT JOIN kodesatuan s ON s.kode_sat = b.kode_sat${joinGudangSql(pakaiBatch)}
     WHERE b.status = '1'
       AND b.nama_brng LIKE :cari
     GROUP BY b.kode_brng, b.nama_brng, b.ralan, b.jualbebas, b.stokminimal, s.satuan
@@ -55,18 +65,18 @@ function buildStokSql(): string {
  * `limit` dibaca pemanggil sebagai `maks + 1` supaya "ada yang terpotong" bisa
  * dibedakan dari "kebetulan pas" -- pola yang sama dipakai jadwal dokter.
  */
-export async function cariStokObat(cari: string, limit: number): Promise<BarisStokObat[]> {
+export async function cariStokObat(cari: string, limit: number, pakaiBatch: ModeBatch): Promise<BarisStokObat[]> {
   // Karakter wildcard SQL yang kebetulan diketik pasien dinetralkan. Tanpa ini,
   // pesan berisi '%' cocok dengan SELURUH katalog dan jawabannya jadi daftar
   // acak sepanjang limit -- bukan celah keamanan (parameternya tetap terikat),
   // tapi jawaban yang membingungkan.
   const aman = cari.replace(/[\\%_]/g, (c) => `\\${c}`);
-  return sikSelect<BarisStokObat>(buildStokSql(), { cari: `%${aman}%`, limit });
+  return sikSelect<BarisStokObat>(buildStokSql(pakaiBatch), { cari: `%${aman}%`, limit });
 }
 
 registerPlanCheck({
   name: 'FARMASI_STOK',
-  sql: buildStokSql(),
+  sql: buildStokSql(false),
   replacements: { cari: '%paracetamol%', limit: 6 },
   /**
    * Alias `b` = `databarang`. Pemindaian penuh di sini TIDAK bisa dihindari:
@@ -83,6 +93,23 @@ registerPlanCheck({
    * `maxRows` tetap ditegakkan supaya asumsi "katalog itu kecil" gagal berisik
    * saat ternyata keliru.
    */
+  allowFullScan: ['b'],
+  maxRows: 5000,
+});
+
+/**
+ * Cabang batch didaftarkan TERPISAH, bukan diasumsikan sama rencananya.
+ *
+ * Bentuk SQL-nya berbeda pada kondisi ON join `gudangbarang`, dan kondisi ON
+ * adalah persis tempat optimizer memutuskan memakai indeks atau tidak. Instalasi
+ * yang menyalakan `farmasi.stok_pakai_batch` menjalankan query INI, bukan yang
+ * di atas -- membiarkannya tak terperiksa berarti pemeriksaan rencananya hijau
+ * untuk jalur yang justru tidak dipakai di sana.
+ */
+registerPlanCheck({
+  name: 'FARMASI_STOK_BATCH',
+  sql: buildStokSql(true),
+  replacements: { cari: '%paracetamol%', limit: 6 },
   allowFullScan: ['b'],
   maxRows: 5000,
 });

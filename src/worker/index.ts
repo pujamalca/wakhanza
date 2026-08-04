@@ -10,6 +10,7 @@ import { runBillingReadyCycle } from './pollerBilling';
 import { runBookingCycle } from './pollerBooking';
 import { runFarmasiCycles } from './farmasiRunner';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
+import { runDueStokDarurat } from './stokDaruratRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
@@ -280,6 +281,12 @@ async function main(): Promise<void> {
   // seperti kelas pindai, karena sama-sama scan tabel penuh (broadcast_schedule
   // jauh lebih kecil dari booking_registrasi, jadi ini longgar, bukan ketat).
   void loop('broadcast-schedule', runDueBroadcastSchedules, scanIntervalMs);
+  // DARURAT STOK -- interval pindai, bukan interval poller. Yang dipindai tiap
+  // siklus cuma `stok_alert_schedule` (beberapa baris); pemindaian katalog yang
+  // mahal baru terjadi saat ada jadwal yang benar-benar jatuh tempo, dan
+  // `next_run_at` dimajukan bahkan ketika pesannya tidak jadi dikirim justru
+  // supaya itu tetap sekali sehari alih-alih tiap siklus.
+  void loop('stok-darurat', runDueStokDarurat, scanIntervalMs);
   void dispatcherLoop();
   void loop(
     'heartbeat',

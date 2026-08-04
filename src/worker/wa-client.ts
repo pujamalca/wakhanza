@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 import { handleInboundMessageSafely } from './autoReply';
-import { cobaBalasStokDariGrup } from './stokReply';
+import { cobaBalasPersediaanDariGrup } from './stokReply';
 import { isOptOutRequest, optOutTriggerCodes } from '@/core/optOut';
 import {
   isIndividualAddress,
@@ -386,9 +386,10 @@ export async function initWaClient(): Promise<Client> {
      */
     if (grup) {
       /**
-       * SATU-SATUNYA hal yang dibalas di dalam grup: pertanyaan stok/harga
-       * obat, dan hanya dari grup yang dicentang `boleh_tanya` di
-       * `farmasi_target` (migrations/020).
+       * SATU-SATUNYA hal yang dibalas di dalam grup: pertanyaan PERSEDIAAN --
+       * stok/harga satu obat, atau rekap barang yang di bawah ambang minimal --
+       * dan hanya dari grup yang dicentang `boleh_tanya` di `farmasi_target`
+       * (migrations/020).
        *
        * Aturan umumnya tetap berlaku dan tidak dilonggarkan: nomor rumah sakit
        * TIDAK membalas di grup. Sebabnya masih sama -- menjawab pertanyaan satu
@@ -400,7 +401,7 @@ export async function initWaClient(): Promise<Client> {
        * ketiganya harus tetap ada:
        *   1. Grupnya didaftarkan admin satu per satu -- bukan grup mana pun
        *      yang kebetulan mengundang nomor RS.
-       *   2. Hanya kata kunci stok yang dijawab; aturan /balasan-otomatis
+       *   2. Hanya kata kunci persediaan yang dijawab; aturan /balasan-otomatis
        *      SENGAJA tidak ikut, karena kata kuncinya jauh lebih longgar.
        *   3. Ada kuota per jam per grup (`farmasi.stok_max_per_grup_per_jam`).
        *
@@ -410,12 +411,12 @@ export async function initWaClient(): Promise<Client> {
        */
       let dibalas = false;
       try {
-        const hasil = await cobaBalasStokDariGrup(message);
+        const hasil = await cobaBalasPersediaanDariGrup(message);
         dibalas = hasil.ditangani;
       } catch (err) {
         // Kegagalan menjawab satu grup tidak boleh menjatuhkan pencatatan
         // pesan masuk -- itu satu-satunya jejak bahwa pesannya pernah datang.
-        logger.error({ from: jejakId(message.from), ...safeError(err) }, 'balasan stok grup gagal diproses');
+        logger.error({ from: jejakId(message.from), ...safeError(err) }, 'balasan persediaan grup gagal diproses');
       }
 
       logger.debug({ from: jejakId(message.from), type: message.type, dibalas }, 'pesan grup dicatat');

@@ -1,0 +1,23 @@
+-- 023_bebaskan_batas_lama.sql
+-- Membebaskan jadwal yang tersetel di BATAS ATAS lama (200).
+--
+-- 022 sudah membebaskan yang bernilai 30 -- bawaan kolom, yang tidak pernah
+-- dipilih siapa pun. Yang terlewat justru kasus yang lebih jelas: jadwal yang
+-- staf setel ke 200. Angka itu bukan penilaian bahwa dua ratus baris sudah
+-- cukup; ia satu-satunya cara meminta "sebanyak yang sistem izinkan", karena
+-- isian di dashboard memang berhenti di sana.
+--
+-- Terukur pada instalasi ini, bukan diperkirakan: jadwal "apotek" tersetel 200
+-- dengan `last_jumlah = 201`. Pembacaan meminta `max_baris + 1` justru supaya
+-- "terpotong" bisa dibedakan dari "kebetulan pas" -- jadi angka 201 itu adalah
+-- bukti langsung bahwa daftarnya memang tergunting, dan pesan yang terkirim
+-- ditutup catatan "...dan 1 barang lain di bawah ambang minimal."
+--
+-- Membiarkannya berarti pencabutan batas di 022 tidak mengubah apa pun bagi
+-- satu-satunya jadwal yang benar-benar berjalan.
+--
+-- 200 dipilih sebagai satu-satunya nilai yang dibebaskan, BUKAN "semua yang di
+-- atas 100" atau semacamnya: hanya batas atas lama yang bisa dipastikan bukan
+-- pilihan sadar. Jadwal yang disetel 10 atau 50 memang meminta rekap pendek,
+-- dan mengubahnya akan membuang keputusan yang sungguh-sungguh diambil.
+UPDATE stok_alert_schedule SET max_baris = 0 WHERE max_baris = 200;

@@ -36,6 +36,12 @@ coverage/
 # akan bisa diunduh siapa saja yang menebak namanya.
 uploads/
 
+# Skrip verifikasi sekali pakai. Ditaruh di dalam repo (bukan di direktori temp)
+# semata supaya alias `@/` milik tsconfig berlaku; tidak pernah ikut di-commit.
+.tmp-*.mts
+.tmp-*.ts
+.tmp-*.mjs
+
 # OS
 Thumbs.db
 .DS_Store

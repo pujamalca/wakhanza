@@ -1,8 +1,15 @@
 import { Op } from 'sequelize';
-import { FarmasiTarget, Outbox, getSetting, getSettingNumber } from '@/models';
+import { FarmasiTarget, Outbox, getSetting, getSettingBool, getSettingNumber } from '@/models';
 import { deteksiPermintaanStok, parseStokKeywords, formatStokObat } from '@/core/stokObat';
+import {
+  deteksiPermintaanDarurat,
+  parseFrasaDarurat,
+  JAWABAN_GUDANG_AMAN,
+  SEMUA_BARIS,
+} from '@/core/stokDarurat';
+import { susunPesanDarurat } from './stokDaruratRunner';
 import { normalizeInbound } from '@/core/autoReply';
-import { buildIdempotencyKey } from '@/core/idempotency';
+import { buildIdempotencyKey, turunkanKunciBagian } from '@/core/idempotency';
 import { kunciPesanMasuk, type PesanMasukBerkunci } from '@/core/waAddress';
 import { cariStokObat } from '@/khanza/stokObat';
 import { loadAutoReplyContext, identityVars, enqueueMessage } from './pipeline';
@@ -151,7 +158,13 @@ export async function susunJawabanStok(
 
   // maks + 1 dibaca supaya "ada yang terpotong" bisa dibedakan dari "kebetulan
   // pas" -- pola yang sama dipakai jadwal dokter.
-  const rows = await cariStokObat(permintaan.cari, maks + 1);
+  //
+  // `farmasi.stok_pakai_batch` (migrations/021) memilih CABANG perhitungan
+  // stoknya, dan dibaca di sini alih-alih di dalam `khanza/` supaya modul itu
+  // tetap tidak pernah menyentuh database `wakhanza` -- batas yang membuat
+  // `npm run verify:db` bisa membuktikan `sik` hanya dibaca.
+  const pakaiBatch = await getSettingBool('farmasi.stok_pakai_batch', false);
+  const rows = await cariStokObat(permintaan.cari, maks + 1, pakaiBatch);
 
   if (rows.length === 0) {
     const body = (await getSetting('farmasi.stok_template_kosong', '')) ?? '';
@@ -188,6 +201,158 @@ function renderDenganVars(body: string, vars: Record<string, string>): string {
   // substitusi tidak pernah diperiksa ulang, jadi nama obat yang kebetulan
   // berisi `{kontak_rs}` tetap tampil apa adanya.
   return body.replace(/\{([a-z_]+)\}/g, (cocok, kunci: string) => vars[kunci] ?? cocok);
+}
+
+// ---------------------------------------------------------------------------
+// DARURAT STOK yang DITANYAKAN -- rekap, bukan pencarian satu barang
+// ---------------------------------------------------------------------------
+
+/**
+ * Tanya-jawab darurat stok menyala.
+ *
+ * DUA sakelar, dan keduanya perlu. `farmasi.darurat_enabled` adalah sakelar
+ * fiturnya secara keseluruhan -- selama mati, tidak ada peringatan persediaan
+ * dalam bentuk apa pun. `farmasi.darurat_tanya` memisahkan arah MASUK dari arah
+ * keluar, karena keduanya pertanyaan berbeda: rumah sakit sangat wajar ingin
+ * rekap terjadwal tiap pagi tanpa nomornya ikut menjawab kapan pun ada yang
+ * mengetik "stok habis". Pelajaran yang sudah dibayar saat migrations/020
+ * memisahkan `boleh_tanya` dari `is_active` -- pilihan yang digabung adalah
+ * pilihan yang hilang.
+ *
+ * Bawaannya MENYALA, berbeda dari sakelar utamanya yang mati. Yang menahan
+ * seluruhnya tetap `darurat_enabled`, jadi tidak ada yang berubah tanpa
+ * keputusan sadar; sakelar ini ada untuk MEMATIKAN arah masuk, bukan untuk
+ * menambah satu langkah lagi sebelum fiturnya bisa dipakai.
+ */
+export async function daruratTanyaAktif(): Promise<boolean> {
+  if (!(await getSettingBool('farmasi.darurat_enabled', false))) return false;
+  return getSettingBool('farmasi.darurat_tanya', true);
+}
+
+/**
+ * Cabang REKAP persediaan di dalam alur pesan masuk.
+ *
+ * Bedanya dari `cobaBalasStok` di bawah bukan cuma isi jawabannya:
+ *
+ * - **Tidak ada mode `semua`.** Balasan stok boleh dibuka untuk umum karena
+ *   yang dijawabnya setara daftar harga di loket -- seorang pasien memang perlu
+ *   tahu apakah obatnya ada sebelum datang. Rekap ini kebalikannya: ia daftar
+ *   kekurangan gudang, informasi kerja internal yang tidak menjawab satu pun
+ *   pertanyaan yang wajar diajukan pasien. Karena itu penanya WAJIB terdaftar
+ *   `boleh_tanya`, perorangan maupun grup, apa pun `farmasi.stok_mode`.
+ *
+ * - **Didahulukan atas balasan stok biasa**, dengan alasan yang sama yang
+ *   menaruh balasan stok di depan aturan /balasan-otomatis: frasanya lebih
+ *   spesifik. "stok menipis" memuat kata "stok", jadi urutan sebaliknya
+ *   membuat setiap permintaan rekap dibaca sebagai pencarian obat bernama
+ *   "menipis" lalu dijawab "tidak ditemukan".
+ */
+export async function cobaBalasDarurat(
+  msg: InboundMessage,
+  idempotencyKey: string,
+  asalMasuk?: AsalPertanyaan,
+): Promise<HasilStokReply> {
+  if (!(await daruratTanyaAktif())) return TIDAK_DITANGANI;
+
+  const asal: AsalPertanyaan = asalMasuk ?? {
+    jenis: 'perorangan',
+    chatId: `${msg.phoneE164}@c.us`,
+    phoneE164: msg.phoneE164,
+  };
+
+  // Izin SEBELUM frasa dibaca, sama seperti balasan stok: nomor tak berhak
+  // harus jatuh ke jalur berikutnya seolah fitur ini tidak ada, bukan
+  // "tertangani" lalu didiamkan.
+  if ((await FarmasiTarget.count({ where: { chatId: asal.chatId, bolehTanya: true } })) === 0) {
+    return TIDAK_DITANGANI;
+  }
+
+  const frasa = parseFrasaDarurat((await getSetting('farmasi.darurat_keywords', '')) ?? '');
+  const permintaan = deteksiPermintaanDarurat(msg.text, frasa);
+  if (!permintaan.cocok) return TIDAK_DITANGANI;
+
+  if (asal.jenis === 'grup' && (await kuotaGrupHabis(asal.chatId))) {
+    logger.warn({ chatId: asal.chatId }, 'rekap darurat stok: kuota grup habis, tidak dijawab');
+    return { ditangani: true, cabang: 'ketemu' };
+  }
+
+  const [bodyAda, bodyKosong, pakaiBatch] = await Promise.all([
+    getSetting('farmasi.template_darurat', ''),
+    getSetting('farmasi.template_darurat_kosong', ''),
+    getSettingBool('farmasi.stok_pakai_batch', false),
+  ]);
+
+  const hasil = await susunPesanDarurat({
+    kdJenis: null,
+    // SEMUA barang. Yang bertanya sedang menyusun daftar pesanan; jawaban yang
+    // dipotong justru menyembunyikan barang yang harus ikut dibeli hari itu.
+    maxBaris: SEMUA_BARIS,
+    pakaiBatch,
+    bodyAda: bodyAda ?? '',
+    /**
+     * Gudang aman TIDAK boleh dijawab dengan diam.
+     *
+     * Jalur terjadwal memperlakukan "Pesan saat aman" yang kosong sebagai
+     * sengaja diam, dan itu benar di sana. Di sini ada orang yang baru saja
+     * bertanya, dan mendiamkannya membuat sistemnya tampak rusak -- alasan yang
+     * sama persis dengan AUTO_REPLY yang melewati jam tenang.
+     */
+    bodyKosong: (bodyKosong ?? '').trim() || JAWABAN_GUDANG_AMAN,
+    saatIni: new Date(),
+  });
+
+  if (!hasil.body?.trim()) {
+    logger.info({ asal: jejakAsal(asal) }, 'rekap darurat stok: isi pesannya kosong, sengaja tidak menjawab');
+    return { ditangani: true, cabang: 'kosong' };
+  }
+
+  const ctx = await loadAutoReplyContext(hasil.body);
+  for (const [i, varsBagian] of hasil.bagian.entries()) {
+    await enqueueMessage(
+      {
+        // Bagian pertama memakai kunci dasarnya apa adanya, sehingga
+        // pemeriksaan penyerahan-ulang di pemanggil tetap menemukannya.
+        idempotencyKey: turunkanKunciBagian(idempotencyKey, i),
+        noRkmMedis: null,
+        rawPhone: null,
+        ...(asal.jenis === 'grup' ? { chatId: asal.chatId } : { phoneOverride: asal.phoneE164 }),
+        eventAt: new Date(),
+        vars: varsBagian,
+      },
+      ctx,
+    );
+  }
+
+  logger.info(
+    {
+      asal: jejakAsal(asal),
+      frasa: permintaan.frasa,
+      total: hasil.ringkasan.total,
+      bagian: hasil.bagian.length,
+    },
+    'rekap darurat stok terkirim ke antrean',
+  );
+  return { ditangani: true, cabang: hasil.ringkasan.total > 0 ? 'ketemu' : 'kosong' };
+}
+
+/**
+ * Satu pintu untuk seluruh pertanyaan PERSEDIAAN, dan urutannya ditetapkan di
+ * SINI saja.
+ *
+ * Dua pemanggil memakainya (perorangan lewat `handleInboundMessage`, grup lewat
+ * `cobaBalasPersediaanDariGrup`), dan masing-masing menentukan urutannya sendiri
+ * adalah persis bentuk kegagalan yang sudah dibayar di `respectsOptOut()` dan
+ * `kunciPesanMasuk()`: cukup satu yang berbeda untuk membuat satu jalur
+ * diam-diam berperilaku lain, tanpa satu pun galat.
+ */
+export async function cobaBalasPersediaan(
+  msg: InboundMessage,
+  idempotencyKey: string,
+  asal?: AsalPertanyaan,
+): Promise<HasilStokReply> {
+  const rekap = await cobaBalasDarurat(msg, idempotencyKey, asal);
+  if (rekap.ditangani) return rekap;
+  return cobaBalasStok(msg, idempotencyKey, asal);
 }
 
 /**
@@ -291,10 +456,13 @@ export async function cobaBalasStok(
  * satu restart worker bisa membanjiri grup dengan jawaban atas pertanyaan yang
  * sudah dijawab kemarin.
  */
-export async function cobaBalasStokDariGrup(
+export async function cobaBalasPersediaanDariGrup(
   pesan: PesanMasukBerkunci & { body: string | undefined },
 ): Promise<HasilStokReply> {
-  if (await bacaModeStok() === 'mati') return TIDAK_DITANGANI;
+  // Kedua fitur diperiksa, bukan cuma balasan stok: keduanya punya sakelar
+  // sendiri, dan apotek yang menyalakan rekap darurat tanpa balasan stok harus
+  // tetap bisa bertanya dari grupnya.
+  if ((await bacaModeStok()) === 'mati' && !(await daruratTanyaAktif())) return TIDAK_DITANGANI;
 
   const teks = pesan.body ?? '';
   if (!normalizeInbound(teks)) return TIDAK_DITANGANI;
@@ -309,7 +477,7 @@ export async function cobaBalasStokDariGrup(
     return TIDAK_DITANGANI;
   }
 
-  return cobaBalasStok(
+  return cobaBalasPersediaan(
     // `phoneE164` diisi string kosong dan TIDAK pernah dipakai untuk grup --
     // jalur grup mengalamati lewat chatId. Bentuk InboundMessage dipertahankan
     // supaya kedua jalur memanggil fungsi yang sama persis.

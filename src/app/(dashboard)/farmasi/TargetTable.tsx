@@ -26,6 +26,7 @@ import {
   mintaSyncGrupAction,
   type HasilForm,
 } from './actions';
+import { toggleTerimaDaruratAction } from './daruratActions';
 
 export interface TargetRow {
   id: number;
@@ -35,6 +36,7 @@ export interface TargetRow {
   isActive: boolean;
   /** Boleh MENGAJUKAN pertanyaan stok/harga dari alamat ini (migrations/020). */
   bolehTanya: boolean;
+  terimaDaruratStok: boolean;
 }
 
 export interface GrupRow {
@@ -115,6 +117,7 @@ export function TargetTable({
                 <th className={`${cellClass} hidden md:table-cell`}>Alamat</th>
                 <th className={cellClass}>Status</th>
                 <th className={`${cellClass} hidden lg:table-cell`}>Boleh tanya</th>
+                <th className={`${cellClass} hidden xl:table-cell`}>Terima darurat stok</th>
                 <th className={`${cellClass} w-px`}></th>
               </tr>
             </thead>
@@ -150,6 +153,23 @@ export function TargetTable({
                       <span className="text-xs text-muted-foreground">
                         {t.bolehTanya ? (t.jenis === 'grup' ? 'ya, dijawab di grup' : 'ya') : 'tidak'}
                       </span>
+                    </label>
+                  </td>
+                  {/* Kolom KETIGA, dan sekali lagi terpisah. Status = ke mana
+                      notifikasi resep dikirim, Boleh tanya = siapa yang boleh
+                      membuat nomor RS menjawab, ini = siapa yang menerima rekap
+                      persediaan. Grup shift apotek sangat wajar perlu tahu tiap
+                      resep tanpa perlu rekap tiap pagi, dan nomor kepala
+                      instalasi sangat wajar justru kebalikannya. */}
+                  <td className={`${cellClass} hidden xl:table-cell`}>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={t.terimaDaruratStok}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaDaruratAction(t.id, !t.terimaDaruratStok))}
+                      />
+                      <span className="text-xs text-muted-foreground">{t.terimaDaruratStok ? 'ya' : 'tidak'}</span>
                     </label>
                   </td>
                   <td className={cellClass}>

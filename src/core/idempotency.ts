@@ -34,3 +34,24 @@ export function buildIdempotencyKey(triggerCode: string, ...naturalKeyParts: Arr
 export function turunkanKunciTujuan(kunciDasar: string, chatId: string): string {
   return createHash('sha1').update(`${kunciDasar}|${chatId}`, 'utf8').digest('hex');
 }
+
+/**
+ * Kunci untuk BAGIAN ke-`indeks` dari satu pesan yang dipecah karena terlalu
+ * panjang (darurat stok, `core/stokDarurat.ts`'s `pecahDaftarDarurat`).
+ *
+ * Bagian PERTAMA sengaja memakai kunci dasarnya apa adanya, bukan turunan.
+ * Sebabnya bukan kerapian: beberapa pemanggil memeriksa lebih dulu apakah kunci
+ * dasarnya sudah ada di `outbox` untuk menolak pesan yang diserahkan ulang
+ * (`handleInboundMessage`). Kalau bagian pertama ikut diturunkan, kunci dasar
+ * itu tidak pernah benar-benar tertulis, pemeriksaannya selalu meleset, dan
+ * satu restart worker membanjiri penerimanya dengan jawaban lama. Pesan yang
+ * TIDAK terpecah pun jadi berperilaku persis seperti sebelum pemecahan ada.
+ *
+ * Di-HASH ULANG dan bukan disambung, dengan alasan yang sama seperti
+ * `turunkanKunciTujuan`: kolomnya VARCHAR(64) dan MariaDB non-strict memotong
+ * kelebihannya tanpa satu pun galat.
+ */
+export function turunkanKunciBagian(kunciDasar: string, indeks: number): string {
+  if (indeks <= 0) return kunciDasar;
+  return createHash('sha1').update(`${kunciDasar}#bagian${indeks}`, 'utf8').digest('hex');
+}

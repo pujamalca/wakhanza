@@ -40,6 +40,10 @@ export const OPT_OUT_PHRASE = 'Berhenti Kirim Otomatis';
  *   dicocokkan ke daftar tolak, dan seorang pasien tidak bisa memberhentikan
  *   koordinasi kerja internal rumah sakit. Ini kasus yang paling jelas dari
  *   ketiganya, dan justru karena itu paling gampang lolos tanpa dipikirkan.
+ * - FARMASI_STOK_DARURAT -- peringatan persediaan gudang. Alasan yang sama
+ *   seperti dua pemicu farmasi di atas, ditambah satu yang lebih telanjang
+ *   lagi: isinya tidak menyebut seorang pasien pun. Tidak ada yang bisa
+ *   diberhentikan atas nama siapa.
  *
  * Konsekuensinya HARUS tercermin di teks yang dibaca pasien: janji yang
  * diberikan saat ia berhenti tidak boleh lebih luas dari yang benar-benar

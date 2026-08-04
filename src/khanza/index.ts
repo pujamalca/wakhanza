@@ -11,3 +11,4 @@ export * from './pasienSegment';
 export * from './broadcastSchedule';
 export * from './jadwalDokter';
 export * from './stokObat';
+export * from './stokDarurat';

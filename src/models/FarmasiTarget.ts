@@ -26,6 +26,16 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
    * pemberitahuan tanpa nomor RS ikut menjawab di dalamnya.
    */
   declare bolehTanya: CreationOptional<boolean>;
+  /**
+   * Menerima peringatan DARURAT STOK dari alamat ini (migrations/021).
+   *
+   * Kolom KETIGA, dan sekali lagi terpisah karena menjawab pertanyaan ketiga:
+   * `isActive` = ke mana notifikasi resep dikirim, `bolehTanya` = siapa yang
+   * boleh bertanya, ini = siapa yang menerima rekap persediaan. Grup shift
+   * apotek sangat wajar perlu tahu tiap resep tanpa perlu rekap tiap pagi, dan
+   * nomor kepala instalasi sangat wajar justru kebalikannya.
+   */
+  declare terimaDaruratStok: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -40,6 +50,12 @@ FarmasiTarget.init(
     label: { type: DataTypes.STRING(80), allowNull: false },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
     bolehTanya: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'boleh_tanya' },
+    terimaDaruratStok: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_darurat_stok',
+    },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
