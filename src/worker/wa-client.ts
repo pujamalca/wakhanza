@@ -13,6 +13,7 @@ import {
   isKnownNonIndividualAddress,
   isLidAddress,
   isPhoneLike,
+  kunciPesanMasuk,
   phoneFromAddress,
 } from '@/core/waAddress';
 import { catatPesanMasuk } from './inboundLog';
@@ -474,11 +475,12 @@ export async function initWaClient(): Promise<Client> {
     // app_setting `autoreply.enabled` masih '0' -- yaitu perilaku versi 1 yang
     // satu arah, tidak berubah sampai rumah sakit menyalakannya sendiri.
     //
-    // message.id._serialized dipakai sebagai kunci idempoten, jadi pesan yang
-    // sama diserahkan dua kali oleh whatsapp-web.js (lazim setelah sesi
-    // dipulihkan) tidak menghasilkan dua balasan.
+    // Kuncinya dipakai sebagai kunci idempoten, jadi pesan yang sama
+    // diserahkan dua kali oleh whatsapp-web.js (lazim setelah sesi dipulihkan)
+    // tidak menghasilkan dua balasan. Lewat `kunciPesanMasuk()` karena
+    // `id._serialized` tidak selalu ada -- alasannya di sana.
     const hasil = await handleInboundMessageSafely({
-      waMessageId: message.id?._serialized ?? `${message.from}:${message.timestamp}`,
+      waMessageId: kunciPesanMasuk(message),
       phoneE164,
       text: message.body ?? '',
     });

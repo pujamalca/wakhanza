@@ -1,6 +1,7 @@
 import type { Message } from 'whatsapp-web.js';
 import { InboundMessage, getSettingBool, type JenisChat } from '@/models';
 import { logger, safeError, maskChatId } from '@/lib/logger';
+import { kunciPesanMasuk } from '@/core/waAddress';
 
 /**
  * Mencatat SETIAP pesan masuk perorangan dan grup ke `inbound_message`.
@@ -47,10 +48,11 @@ export async function catatPesanMasuk(message: Message, info: CatatanMasuk): Pro
 
     await InboundMessage.create(
       {
-        // Cadangan `from:timestamp` untuk pesan yang entah bagaimana tidak
-        // membawa id -- tanpa nilai, UNIQUE KEY-nya justru menolak baris kedua
-        // mana pun dan seluruh pencatatan berhenti diam-diam.
-        waMessageId: (message.id?._serialized ?? `${message.from}:${message.timestamp}`).slice(0, 160),
+        // Cadangan `from:timestamp` untuk pesan yang tidak membawa id -- tanpa
+        // nilai, UNIQUE KEY-nya justru menolak baris kedua mana pun dan seluruh
+        // pencatatan berhenti diam-diam. Lewat `kunciPesanMasuk()` supaya sama
+        // persis dengan yang dipakai balasan otomatis dan balasan stok grup.
+        waMessageId: kunciPesanMasuk(message).slice(0, 160),
         chatId: message.from.slice(0, 64),
         jenis: info.jenis,
         // Di grup, pengirimnya adalah PESERTA, bukan grupnya. Inilah "id user"

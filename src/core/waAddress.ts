@@ -101,3 +101,39 @@ export function phoneFromAddress(id: string | null | undefined): string | null {
   if (!addr || addr.server !== 'c.us') return null;
   return isPhoneLike(addr.user) ? addr.user : null;
 }
+
+/** Bentuk minimal pesan masuk yang dibutuhkan untuk menurunkan kuncinya. */
+export interface PesanMasukBerkunci {
+  id?: { _serialized?: string } | undefined;
+  from: string;
+  timestamp?: number | undefined;
+}
+
+/**
+ * Kunci stabil untuk satu pesan masuk -- dipakai sebagai kunci idempoten dan
+ * sebagai penanda penyerahan ulang.
+ *
+ * **`id._serialized` TIDAK selalu ada, dan itu bukan kelainan.** Di
+ * whatsapp-web.js, `Message.id` diisi apa adanya dari objek `MsgKey` milik
+ * WhatsApp Web (`this.id = data.id`), sementara `_serialized` di sana adalah
+ * getter pada PROTOTYPE. Objeknya menyeberang dari Chromium ke Node lewat
+ * serialisasi puppeteer, dan getter prototipe tidak ikut menyeberang -- jadi
+ * ada-tidaknya bergantung pada jalur mana yang kebetulan dipakai untuk pesan
+ * itu. Terbukti hilang pada pesan GRUP di mesin ini.
+ *
+ * Cadangannya `from:timestamp`, sama seperti yang sudah dipakai pencatatan
+ * pesan masuk dan balasan otomatis sejak awal. Ia stabil untuk keperluan yang
+ * sebenarnya -- pesan yang SAMA diserahkan ulang menghasilkan kunci yang sama
+ * -- dan tabrakannya (dua pesan berbeda dari obrolan yang sama pada detik yang
+ * sama) gagal ke arah yang aman: satu pesan tidak dijawab, bukan satu pesan
+ * dijawab dua kali.
+ *
+ * Fungsi ini ada supaya ketiga pemanggilnya tidak bisa lagi berbeda tafsir.
+ * Sebelumnya jalur grup adalah satu-satunya yang memperlakukan id hilang
+ * sebagai fatal lalu diam, sementara dua jalur lain memakai cadangan --
+ * bentuk kegagalan yang sama persis dengan yang sudah dibayar di
+ * `respectsOptOut()` dan `core/outboxStatus.ts`.
+ */
+export function kunciPesanMasuk(pesan: PesanMasukBerkunci): string {
+  return pesan.id?._serialized ?? `${pesan.from}:${pesan.timestamp ?? 0}`;
+}

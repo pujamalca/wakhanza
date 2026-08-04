@@ -3,6 +3,7 @@ import { FarmasiTarget, Outbox, getSetting, getSettingNumber } from '@/models';
 import { deteksiPermintaanStok, parseStokKeywords, formatStokObat } from '@/core/stokObat';
 import { normalizeInbound } from '@/core/autoReply';
 import { buildIdempotencyKey } from '@/core/idempotency';
+import { kunciPesanMasuk, type PesanMasukBerkunci } from '@/core/waAddress';
 import { cariStokObat } from '@/khanza/stokObat';
 import { loadAutoReplyContext, identityVars, enqueueMessage } from './pipeline';
 import { logger, maskPhone } from '@/lib/logger';
@@ -290,22 +291,18 @@ export async function cobaBalasStok(
  * satu restart worker bisa membanjiri grup dengan jawaban atas pertanyaan yang
  * sudah dijawab kemarin.
  */
-export async function cobaBalasStokDariGrup(pesan: {
-  id: { _serialized?: string } | undefined;
-  from: string;
-  body: string | undefined;
-}): Promise<HasilStokReply> {
+export async function cobaBalasStokDariGrup(
+  pesan: PesanMasukBerkunci & { body: string | undefined },
+): Promise<HasilStokReply> {
   if (await bacaModeStok() === 'mati') return TIDAK_DITANGANI;
 
   const teks = pesan.body ?? '';
   if (!normalizeInbound(teks)) return TIDAK_DITANGANI;
 
-  const waMessageId = pesan.id?._serialized;
-  if (!waMessageId) {
-    logger.warn({ from: pesan.from }, 'balasan stok grup: pesan tanpa id, dilewati');
-    return TIDAK_DITANGANI;
-  }
-
+  // `id._serialized` sering HILANG pada pesan grup -- lihat `kunciPesanMasuk()`
+  // untuk sebabnya. Dulu di sini pesannya dilewati begitu saja, sehingga tidak
+  // satu pun pertanyaan dari grup pernah dijawab.
+  const waMessageId = kunciPesanMasuk(pesan);
   const idempotencyKey = buildIdempotencyKey('AUTO_REPLY', waMessageId);
   if (await Outbox.findOne({ where: { idempotencyKey }, attributes: ['id'] })) {
     logger.info({ from: pesan.from }, 'balasan stok grup: pesan yang sama diserahkan ulang, dilewati');

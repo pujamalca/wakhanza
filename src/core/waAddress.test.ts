@@ -6,6 +6,7 @@ import {
   isLidAddress,
   isPhoneLike,
   phoneFromAddress,
+  kunciPesanMasuk,
 } from './waAddress';
 
 /** LID sungguhan yang ditangkap dari sesi produksi saat bug ini ditemukan. */
@@ -101,5 +102,37 @@ describe('phoneFromAddress', () => {
 
   it('menolak grup', () => {
     expect(phoneFromAddress('12036304@g.us')).toBeNull();
+  });
+});
+
+/**
+ * Sampai ini ada, jalur balasan stok grup memperlakukan `_serialized` yang
+ * hilang sebagai fatal lalu diam -- sehingga TIDAK SATU PUN pertanyaan dari
+ * grup pernah dijawab, tanpa satu pun galat. Dua jalur lain sudah memakai
+ * cadangan sejak awal; yang diuji di sini adalah bahwa ketiganya kini sepakat.
+ */
+describe('kunciPesanMasuk', () => {
+  it('memakai _serialized bila ada', () => {
+    expect(
+      kunciPesanMasuk({ id: { _serialized: 'false_628@c.us_ABC' }, from: '628@c.us', timestamp: 1785806906 }),
+    ).toBe('false_628@c.us_ABC');
+  });
+
+  it('jatuh ke from:timestamp saat _serialized hilang -- keadaan nyata pada pesan grup', () => {
+    expect(kunciPesanMasuk({ id: {}, from: '12036@g.us', timestamp: 1785806906 })).toBe('12036@g.us:1785806906');
+    expect(kunciPesanMasuk({ id: undefined, from: '12036@g.us', timestamp: 1785806906 })).toBe(
+      '12036@g.us:1785806906',
+    );
+  });
+
+  it('pesan yang SAMA diserahkan ulang menghasilkan kunci yang sama', () => {
+    const pesan = { id: {}, from: '12036@g.us', timestamp: 1785806906 };
+    expect(kunciPesanMasuk(pesan)).toBe(kunciPesanMasuk({ ...pesan }));
+  });
+
+  it('tanpa timestamp tetap menghasilkan kunci, bukan string kosong', () => {
+    // Kunci kosong akan membuat UNIQUE KEY menolak baris kedua mana pun dan
+    // seluruh pencatatan berhenti diam-diam.
+    expect(kunciPesanMasuk({ from: '12036@g.us' })).toBe('12036@g.us:0');
   });
 });
