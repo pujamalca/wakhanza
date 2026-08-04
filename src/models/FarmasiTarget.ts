@@ -17,6 +17,15 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
   declare chatId: string;
   declare label: string;
   declare isActive: CreationOptional<boolean>;
+  /**
+   * Boleh MENGAJUKAN pertanyaan stok/harga dari alamat ini (migrations/020).
+   *
+   * Sengaja terpisah dari `isActive`, karena keduanya menjawab pertanyaan
+   * berbeda: `isActive` = ke mana notifikasi resep dikirim, `bolehTanya` =
+   * siapa yang boleh bertanya. Sebuah grup sangat wajar cuma menerima
+   * pemberitahuan tanpa nomor RS ikut menjawab di dalamnya.
+   */
+  declare bolehTanya: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -30,6 +39,7 @@ FarmasiTarget.init(
     chatId: { type: DataTypes.STRING(64), allowNull: false, unique: true, field: 'chat_id' },
     label: { type: DataTypes.STRING(80), allowNull: false },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+    bolehTanya: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'boleh_tanya' },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },

@@ -130,6 +130,37 @@ export async function toggleTargetAction(id: number, aktif: boolean): Promise<Ha
   return { sukses: aktif ? `"${row.label}" diaktifkan.` : `"${row.label}" dinonaktifkan.` };
 }
 
+/**
+ * Izin BERTANYA, terpisah dari aktif/nonaktif (migrations/020).
+ *
+ * Dicatat sebagai peristiwa audit tersendiri, bukan ikut `farmasi_target_toggle`:
+ * yang berubah di sini bukan ke mana pesan dikirim melainkan siapa yang boleh
+ * membuat nomor rumah sakit MENJAWAB -- dan untuk sebuah grup, itu berarti
+ * nomor RS mulai ikut berbicara di dalam percakapan yang anggotanya diatur di
+ * luar sistem ini.
+ */
+export async function toggleBolehTanyaAction(id: number, boleh: boolean): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const row = await FarmasiTarget.findByPk(id);
+  if (!row) return { error: 'Tujuan tidak ditemukan.' };
+
+  await row.update({ bolehTanya: boleh, updatedBy: session!.user.username, updatedAt: new Date() });
+  await logAudit(
+    session!.user.username,
+    'farmasi_target_boleh_tanya',
+    String(id),
+    `${row.jenis} ${row.chatId} -> ${boleh ? 'boleh bertanya' : 'tidak boleh bertanya'}`,
+  );
+  segarkan();
+  return {
+    sukses: boleh
+      ? `"${row.label}" sekarang boleh menanyakan stok & harga${row.jenis === 'grup' ? ' — jawabannya muncul di dalam grup itu' : ''}.`
+      : `"${row.label}" tidak lagi bisa menanyakan stok & harga.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Daftar grup
 // ---------------------------------------------------------------------------

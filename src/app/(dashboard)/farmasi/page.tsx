@@ -54,6 +54,7 @@ export default async function FarmasiPage() {
     chatId: t.chatId,
     label: t.label,
     isActive: t.isActive,
+    bolehTanya: t.bolehTanya,
   }));
 
   const barisGrup: GrupRow[] = grup.map((g) => ({

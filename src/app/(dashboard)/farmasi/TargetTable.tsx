@@ -21,6 +21,7 @@ import {
   ubahTargetAction,
   hapusTargetAction,
   toggleTargetAction,
+  toggleBolehTanyaAction,
   kirimUjiAction,
   mintaSyncGrupAction,
   type HasilForm,
@@ -32,6 +33,8 @@ export interface TargetRow {
   chatId: string;
   label: string;
   isActive: boolean;
+  /** Boleh MENGAJUKAN pertanyaan stok/harga dari alamat ini (migrations/020). */
+  bolehTanya: boolean;
 }
 
 export interface GrupRow {
@@ -111,6 +114,7 @@ export function TargetTable({
                 <th className={`${cellClass} hidden sm:table-cell`}>Jenis</th>
                 <th className={`${cellClass} hidden md:table-cell`}>Alamat</th>
                 <th className={cellClass}>Status</th>
+                <th className={`${cellClass} hidden lg:table-cell`}>Boleh tanya</th>
                 <th className={`${cellClass} w-px`}></th>
               </tr>
             </thead>
@@ -129,6 +133,24 @@ export function TargetTable({
                   </td>
                   <td className={cellClass}>
                     <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
+                  </td>
+                  {/* Kolom TERSENDIRI, bukan digabung ke Status. Keduanya
+                      menjawab pertanyaan berbeda: Status = ke mana notifikasi
+                      resep dikirim, ini = siapa yang boleh membuat nomor RS
+                      menjawab. Sebuah grup sangat wajar cuma menerima
+                      pemberitahuan tanpa nomor RS ikut bicara di dalamnya. */}
+                  <td className={`${cellClass} hidden lg:table-cell`}>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={t.bolehTanya}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleBolehTanyaAction(t.id, !t.bolehTanya))}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {t.bolehTanya ? (t.jenis === 'grup' ? 'ya, dijawab di grup' : 'ya') : 'tidak'}
+                      </span>
+                    </label>
                   </td>
                   <td className={cellClass}>
                     <div className="flex justify-end gap-1">
