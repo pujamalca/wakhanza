@@ -51,6 +51,29 @@ export interface PermintaanStok {
 /** Panjang minimal potongan nama yang mau dicari. */
 const MIN_PANJANG_CARI = 3;
 
+/**
+ * Membuang sebutan (`@<id>`) sebelum teksnya dinormalisasi.
+ *
+ * WAJIB dikerjakan LEBIH DULU, dan urutan itulah inti perbaikannya:
+ * `normalizeInbound()` mengubah setiap karakter non-alfanumerik jadi spasi,
+ * sehingga `@115634008510549` menjadi kata `115634008510549` yang tidak lagi
+ * bisa dibedakan dari angka yang memang diketik orang. Sesudah normalisasi,
+ * informasinya sudah hilang.
+ *
+ * Ditemukan dari pesan grup SUNGGUHAN, bukan diperkirakan: pertanyaan
+ * "@115634008510549 sisa stok obat" dijawab `Maaf, "115634008510549" tidak
+ * ditemukan di daftar obat kami`. Di dalam grup, me-mention nomor rumah sakit
+ * justru cara paling wajar memanggilnya -- jadi ini bentuk pertanyaan yang
+ * umum, bukan kekecualian.
+ *
+ * Hanya `@` yang diikuti ANGKA yang dibuang. Sebutan WhatsApp selalu berupa id
+ * numerik, sementara `@` diikuti huruf bisa saja bagian nama dagang; membuang
+ * keduanya berarti menebak-nebak di tempat yang tidak perlu.
+ */
+export function buangMention(teks: string): string {
+  return teks.replace(/@\d+/g, ' ');
+}
+
 function cocokKataUtuh(teks: string, kunci: string): boolean {
   if (!kunci) return false;
   return ` ${teks} `.includes(` ${kunci} `);
@@ -78,7 +101,7 @@ function cocokKataUtuh(teks: string, kunci: string): boolean {
  *    sungguhan.
  */
 export function deteksiPermintaanStok(teks: string, keywords: string[]): PermintaanStok {
-  const norm = normalizeInbound(teks);
+  const norm = normalizeInbound(buangMention(teks));
   if (!norm) return { cocok: false, cari: '' };
 
   const kunciNorm = keywords.map((k) => normalizeInbound(k)).filter(Boolean);

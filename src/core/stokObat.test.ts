@@ -1,4 +1,11 @@
-import { deteksiPermintaanStok, parseStokKeywords, formatStokObat, formatRupiah, type BarisStokObat } from './stokObat';
+import {
+  deteksiPermintaanStok,
+  buangMention,
+  parseStokKeywords,
+  formatStokObat,
+  formatRupiah,
+  type BarisStokObat,
+} from './stokObat';
 
 const KUNCI = ['stok', 'harga'];
 
@@ -69,6 +76,29 @@ describe('deteksiPermintaanStok', () => {
 
   it('daftar kata kunci kosong tidak pernah cocok', () => {
     expect(deteksiPermintaanStok('stok paracetamol', []).cocok).toBe(false);
+  });
+
+  /**
+   * Bentuk pertanyaan yang benar-benar datang dari grup apotek, dan dulu
+   * dijawab `Maaf, "115634008510549" tidak ditemukan`. Di dalam grup,
+   * me-mention nomor rumah sakit adalah cara paling wajar memanggilnya.
+   */
+  it('sebutan @<id> tidak ikut jadi nama obat', () => {
+    expect(deteksiPermintaanStok('@115634008510549 stok paracetamol', KUNCI).cari).toBe('paracetamol');
+    expect(deteksiPermintaanStok('stok paracetamol @115634008510549', KUNCI).cari).toBe('paracetamol');
+  });
+
+  it('sebutan tanpa nama obat diperlakukan sebagai tidak menyebut nama', () => {
+    const h = deteksiPermintaanStok('@115634008510549 sisa stok obat', KUNCI);
+    expect(h.cocok).toBe(true);
+    expect(h.cari).toBe('');
+  });
+
+  it('hanya @ diikuti angka yang dibuang', () => {
+    expect(buangMention('@115634008510549 halo')).toBe('  halo');
+    // Nama dagang yang kebetulan memuat '@' tidak boleh ikut hilang -- sebutan
+    // WhatsApp selalu id numerik.
+    expect(buangMention('stok vitamin@c')).toBe('stok vitamin@c');
   });
 });
 
