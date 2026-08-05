@@ -1,6 +1,7 @@
 import { pollPharmacyReady, type PharmacyReadyRow } from '@/khanza/farmasi';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { runSisipCycle } from './sisipCycle';
+import { varsPharmacyReady } from './triggerVars';
 
 function parseSikDateTime(date: string, time: string): Date {
   return new Date(`${date}T${time}`);
@@ -16,13 +17,6 @@ export async function runPharmacyReadyCycle(): Promise<void> {
     getNoRkmMedis: (row) => row.no_rkm_medis,
     getRawPhone: (row) => row.no_tlp,
     getKdPoli: (row) => row.kd_poli,
-    getVars: (row) => ({
-      nama_pasien: row.nm_pasien ?? '',
-      no_rm: row.no_rkm_medis,
-      nama_poli: row.nm_poli ?? '',
-      tanggal: row.tgl_penyerahan,
-      jam: row.jam_penyerahan,
-      jenis_layanan: 'Farmasi',
-    }),
+    getVars: varsPharmacyReady,
   });
 }

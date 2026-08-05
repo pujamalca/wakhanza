@@ -15,6 +15,7 @@ export interface ResultReadyRow {
   nm_pasien: string | null;
   no_tlp: string | null;
   nm_poli: string | null;
+  png_jawab: string | null;
 }
 
 const TABLE_BY_JENIS: Record<PenunjangJenis, string> = {
@@ -31,6 +32,12 @@ const TABLE_BY_JENIS: Record<PenunjangJenis, string> = {
  * `kd_jenis_prw_list` (kode, BUKAN nama dari jns_perawatan_lab/radiologi)
  * dikumpulkan untuk pemeriksaan privasi F4.3 -- lihat core/privacy.ts. Nama
  * pemeriksaan TIDAK PERNAH diambil di sini sama sekali (§5.2).
+ *
+ * Penjamin justru kebalikannya: NAMA-nya (`pj.png_jawab`) yang diambil dan
+ * kodenya (`r.kd_pj`) yang tidak -- lihat core/penjamin.ts. Bedanya bukan
+ * inkonsistensi: kode jenis perawatan dipakai MESIN untuk memutuskan privasi
+ * dan namanya memang tidak boleh keluar, sementara nama penjamin dipakai
+ * MANUSIA yang membaca pesannya dan kodenya tidak berguna bagi siapa pun.
  */
 function buildResultReadySql(jenis: PenunjangJenis) {
   const table = TABLE_BY_JENIS[jenis];
@@ -38,7 +45,8 @@ function buildResultReadySql(jenis: PenunjangJenis) {
     SELECT g.no_rawat, g.tgl_periksa, g.jam_terakhir, g.jumlah_item, g.kd_jenis_prw_list,
            r.no_rkm_medis, r.kd_poli,
            p.nm_pasien, p.no_tlp,
-           pk.nm_poli
+           pk.nm_poli,
+           pj.png_jawab
     FROM (
       SELECT no_rawat, tgl_periksa,
              MAX(jam) AS jam_terakhir,
@@ -52,6 +60,7 @@ function buildResultReadySql(jenis: PenunjangJenis) {
     JOIN reg_periksa r ON r.no_rawat = g.no_rawat
     LEFT JOIN pasien p ON p.no_rkm_medis = r.no_rkm_medis
     LEFT JOIN poliklinik pk ON pk.kd_poli = r.kd_poli
+    LEFT JOIN penjab pj ON pj.kd_pj = r.kd_pj
     ORDER BY g.jam_terakhir
     LIMIT 200
   `;

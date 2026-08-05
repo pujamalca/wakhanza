@@ -13,6 +13,17 @@ import { appendUniqueCode } from '../src/core/uniqueCode';
 import { buildIdempotencyKey } from '../src/core/idempotency';
 import { getHospitalIdentity } from '../src/khanza/common';
 import { identityVars, loadUniqueCodeTemplate } from '../src/worker/pipeline';
+// Pemetaan baris -> variabel WAJIB dipinjam dari worker, bukan ditulis ulang
+// di sini. Sebelumnya ditulis ulang, dan penambahan {cara_bayar} langsung
+// membuktikan kenapa itu salah: pratinjaunya menampilkan variabel kosong
+// sementara worker mengisinya.
+import {
+  varsQueueReg,
+  varsResultReady,
+  varsPharmacyReady,
+  varsBillingReady,
+  varsBooking,
+} from '../src/worker/triggerVars';
 import { sik } from '../src/db/sik';
 import { db } from '../src/db/wakhanza';
 import { pollQueueReg } from '../src/khanza/antrian';
@@ -127,7 +138,7 @@ async function main() {
       noRkmMedis: r.no_rkm_medis,
       rawPhone: r.no_tlp,
       kdPoli: r.kd_poli,
-      vars: { ...idVars, nama_pasien: r.nm_pasien ?? '', no_rm: r.no_rkm_medis, no_antrian: r.no_reg, nama_poli: r.nm_poli ?? '', nama_dokter: r.nm_dokter ?? '', tanggal: r.tgl_registrasi, jam: r.jam_reg },
+      vars: { ...idVars, ...varsQueueReg(r) },
     })),
     sensitivePoli,
     sensitiveExam,
@@ -142,7 +153,7 @@ async function main() {
         rawPhone: r.no_tlp,
         kdPoli: r.kd_poli,
         kdJenisPrw: r.kd_jenis_prw_list?.split(',') ?? [],
-        vars: { ...idVars, nama_pasien: r.nm_pasien ?? '', no_rm: r.no_rkm_medis, nama_poli: r.nm_poli ?? '', tanggal: r.tgl_periksa, jam: r.jam_terakhir, jenis_layanan: jenis === 'lab' ? 'Laboratorium' : 'Radiologi' },
+        vars: { ...idVars, ...varsResultReady(r, jenis) },
       })),
       sensitivePoli,
       sensitiveExam,
@@ -157,7 +168,7 @@ async function main() {
       noRkmMedis: r.no_rkm_medis,
       rawPhone: r.no_tlp,
       kdPoli: r.kd_poli,
-      vars: { ...idVars, nama_pasien: r.nm_pasien ?? '', no_rm: r.no_rkm_medis, nama_poli: r.nm_poli ?? '', tanggal: r.tgl_penyerahan, jam: r.jam_penyerahan, jenis_layanan: 'Farmasi' },
+      vars: { ...idVars, ...varsPharmacyReady(r) },
     })),
     sensitivePoli,
     sensitiveExam,
@@ -170,7 +181,7 @@ async function main() {
       noRkmMedis: r.no_rkm_medis,
       rawPhone: r.no_tlp,
       kdPoli: r.kd_poli,
-      vars: { ...idVars, nama_pasien: r.nm_pasien ?? '', no_rm: r.no_rkm_medis, tanggal: r.tanggal, jam: r.jam, jenis_layanan: 'Kasir' },
+      vars: { ...idVars, ...varsBillingReady(r) },
     })),
     sensitivePoli,
     sensitiveExam,
@@ -179,15 +190,7 @@ async function main() {
   const bookings = await pollUpcomingBookings();
   const confirmRows = bookings.filter((b) => b.status === 'Belum');
   const cancelRows = bookings.filter((b) => b.status === 'Batal' || b.status === 'Dokter Berhalangan');
-  const bookingVars = (b: (typeof bookings)[number]) => ({
-    ...idVars,
-    nama_pasien: b.nm_pasien ?? '',
-    no_rm: b.no_rkm_medis,
-    nama_poli: b.nm_poli ?? '',
-    nama_dokter: b.nm_dokter ?? '',
-    tanggal: b.tanggal_periksa,
-    jam: b.jam_booking ?? '',
-  });
+  const bookingVars = (b: (typeof bookings)[number]) => ({ ...idVars, ...varsBooking(b) });
   await reportSection(
     'BOOK_CONFIRM',
     confirmRows.map((r) => ({ noRkmMedis: r.no_rkm_medis, rawPhone: r.no_tlp, kdPoli: r.kd_poli, vars: bookingVars(r) })),

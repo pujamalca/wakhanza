@@ -16,6 +16,7 @@ export interface BookingRow {
   no_tlp: string | null;
   nm_poli: string | null;
   nm_dokter: string | null;
+  png_jawab: string | null;
 }
 
 /**
@@ -32,17 +33,24 @@ export interface BookingRow {
  * memindai ulang seluruh jendela tiap siklus dan membiarkan kunci idempoten
  * (yang menyertakan status untuk BOOK_CANCEL) menentukan apakah pesan baru
  * perlu dikirim. Lihat worker/pollerBooking.ts.
+ *
+ * `b.kd_pj` ada di booking_registrasi juga (bukan cuma di reg_periksa), jadi
+ * {cara_bayar} tersedia untuk ketiga pemicu booking tanpa perlu menunggu
+ * pasiennya benar-benar mendaftar. Yang diambil `pj.png_jawab`, bukan
+ * kodenya -- lihat core/penjamin.ts.
  */
 function buildBookingSql() {
   return `
     SELECT b.no_rkm_medis, b.tanggal_periksa, b.tanggal_booking, b.jam_booking, b.kd_poli, b.kd_dokter, b.status,
            p.nm_pasien, p.no_tlp,
            pk.nm_poli,
-           d.nm_dokter
+           d.nm_dokter,
+           pj.png_jawab
     FROM booking_registrasi b
     LEFT JOIN pasien p ON p.no_rkm_medis = b.no_rkm_medis
     LEFT JOIN poliklinik pk ON pk.kd_poli = b.kd_poli
     LEFT JOIN dokter d ON d.kd_dokter = b.kd_dokter
+    LEFT JOIN penjab pj ON pj.kd_pj = b.kd_pj
     WHERE b.tanggal_periksa >= :today
     ORDER BY b.tanggal_periksa
     LIMIT 1000

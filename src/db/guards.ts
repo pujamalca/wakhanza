@@ -54,7 +54,7 @@ export const REQUIRED_SIK_COLUMNS: Record<string, string[]> = {
   poliklinik: ['kd_poli', 'nm_poli'],
   dokter: ['kd_dokter', 'nm_dokter'],
   setting: ['nama_instansi', 'alamat_instansi', 'kontak', 'aktifkan'],
-  booking_registrasi: ['no_rkm_medis', 'tanggal_periksa', 'jam_booking', 'kd_poli', 'kd_dokter', 'status'],
+  booking_registrasi: ['no_rkm_medis', 'tanggal_periksa', 'jam_booking', 'kd_poli', 'kd_dokter', 'status', 'kd_pj'],
   periksa_lab: ['no_rawat', 'kd_jenis_prw', 'tgl_periksa', 'jam'],
   periksa_radiologi: ['no_rawat', 'kd_jenis_prw', 'tgl_periksa', 'jam'],
   resep_obat: ['no_resep', 'no_rawat', 'tgl_penyerahan', 'jam_penyerahan'],

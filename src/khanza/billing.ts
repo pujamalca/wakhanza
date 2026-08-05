@@ -12,6 +12,7 @@ export interface BillingReadyRow {
   kd_poli: string | null;
   nm_pasien: string | null;
   no_tlp: string | null;
+  png_jawab: string | null;
 }
 
 /**
@@ -25,6 +26,11 @@ export interface BillingReadyRow {
  * berisi NAMA, bukan nomor kontak terpisah -- satu-satunya nomor yang
  * tersedia tetap pasien.no_tlp, apa pun jawabannya.
  *
+ * `p_jawab` (penanggung jawab, seorang ORANG) sama sekali berbeda dari
+ * `kd_pj` -> `penjab.png_jawab` (penjamin, sebuah INSTANSI/asuransi) yang
+ * mengisi {cara_bayar}. Namanya nyaris sama dan keduanya ada di tabel yang
+ * sama; yang dibaca di sini hanya yang kedua.
+ *
  * Kedua sumber (rawat jalan & rawat inap) dipakai bersama satu idempotency
  * key berbasis no_nota (§4.2), jadi digabung lewat UNION ALL sebelum di-join
  * ke reg_periksa/pasien.
@@ -33,7 +39,8 @@ function buildBillingReadySql() {
   return `
     SELECT x.no_rawat, x.no_nota, x.tanggal, x.jam, x.sumber,
            r.no_rkm_medis, r.kd_poli,
-           p.nm_pasien, p.no_tlp
+           p.nm_pasien, p.no_tlp,
+           pj.png_jawab
     FROM (
       SELECT no_rawat, no_nota, tanggal, jam, 'rajal' AS sumber
       FROM nota_jalan
@@ -45,6 +52,7 @@ function buildBillingReadySql() {
     ) x
     JOIN reg_periksa r ON r.no_rawat = x.no_rawat
     LEFT JOIN pasien p ON p.no_rkm_medis = r.no_rkm_medis
+    LEFT JOIN penjab pj ON pj.kd_pj = r.kd_pj
     ORDER BY x.tanggal, x.jam
     LIMIT 200
   `;

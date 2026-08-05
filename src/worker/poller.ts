@@ -1,6 +1,7 @@
 import { pollQueueReg, type QueueRegRow } from '@/khanza/antrian';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { runSisipCycle } from './sisipCycle';
+import { varsQueueReg } from './triggerVars';
 
 function parseSikDateTime(date: string, time: string): Date {
   return new Date(`${date}T${time}`);
@@ -16,14 +17,6 @@ export async function runQueueRegCycle(): Promise<void> {
     getNoRkmMedis: (row) => row.no_rkm_medis,
     getRawPhone: (row) => row.no_tlp,
     getKdPoli: (row) => row.kd_poli,
-    getVars: (row) => ({
-      nama_pasien: row.nm_pasien ?? '',
-      no_rm: row.no_rkm_medis,
-      no_antrian: row.no_reg,
-      nama_poli: row.nm_poli ?? '',
-      nama_dokter: row.nm_dokter ?? '',
-      tanggal: row.tgl_registrasi,
-      jam: row.jam_reg,
-    }),
+    getVars: varsQueueReg,
   });
 }

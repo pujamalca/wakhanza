@@ -1,6 +1,8 @@
 import { pollUpcomingBookings, type BookingRow } from '@/khanza/booking';
 import { buildIdempotencyKey } from '@/core/idempotency';
+import type { TemplateVariable } from '@/core/template';
 import { loadPipelineContext, enqueuePemicuPasien, identityVars, type PipelineContext } from './pipeline';
+import { varsBooking } from './triggerVars';
 import { advanceCursor, recordCursorError } from './cursor';
 import { logger, safeError } from '@/lib/logger';
 
@@ -41,14 +43,7 @@ export async function runBookingCycle(): Promise<void> {
   const now = new Date();
 
   for (const row of rows) {
-    const baseVars = {
-      nama_pasien: row.nm_pasien ?? '',
-      no_rm: row.no_rkm_medis,
-      nama_poli: row.nm_poli ?? '',
-      nama_dokter: row.nm_dokter ?? '',
-      tanggal: row.tanggal_periksa,
-      jam: row.jam_booking ?? '',
-    };
+    const baseVars = varsBooking(row);
 
     if (confirmCtx && row.status === 'Belum') {
       await enqueueBooking(confirmCtx, row, baseVars, buildIdempotencyKey('BOOK_CONFIRM', row.no_rkm_medis, row.tanggal_periksa), now);
@@ -72,7 +67,7 @@ export async function runBookingCycle(): Promise<void> {
 async function enqueueBooking(
   ctx: PipelineContext,
   row: BookingRow,
-  baseVars: Record<string, string>,
+  baseVars: Partial<Record<TemplateVariable, string>>,
   idempotencyKey: string,
   eventAt: Date,
 ): Promise<void> {

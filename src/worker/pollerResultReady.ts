@@ -1,11 +1,7 @@
 import { pollResultReady, type ResultReadyRow, type PenunjangJenis } from '@/khanza/penunjang';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { runSisipCycle } from './sisipCycle';
-
-const JENIS_LAYANAN: Record<PenunjangJenis, string> = {
-  lab: 'Laboratorium',
-  radiologi: 'Radiologi',
-};
+import { varsResultReady } from './triggerVars';
 
 function parseSikDateTime(date: string, time: string): Date {
   return new Date(`${date}T${time}`);
@@ -24,16 +20,8 @@ async function runOne(jenis: PenunjangJenis): Promise<void> {
     getNoRkmMedis: (row) => row.no_rkm_medis,
     getRawPhone: (row) => row.no_tlp,
     getKdPoli: (row) => row.kd_poli,
-    // jumlah_item TIDAK PERNAH dikirim ke pasien (§4.3: jumlah pemeriksaan pun petunjuk medis).
     getKdJenisPrw: (row) => row.kd_jenis_prw_list?.split(',') ?? [],
-    getVars: (row) => ({
-      nama_pasien: row.nm_pasien ?? '',
-      no_rm: row.no_rkm_medis,
-      nama_poli: row.nm_poli ?? '',
-      tanggal: row.tgl_periksa,
-      jam: row.jam_terakhir,
-      jenis_layanan: JENIS_LAYANAN[jenis],
-    }),
+    getVars: (row) => varsResultReady(row, jenis),
   });
 }
 

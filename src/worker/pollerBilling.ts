@@ -1,6 +1,7 @@
 import { pollBillingReady, type BillingReadyRow } from '@/khanza/billing';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { runSisipCycle } from './sisipCycle';
+import { varsBillingReady } from './triggerVars';
 
 function parseSikDateTime(date: string, time: string): Date {
   return new Date(`${date}T${time}`);
@@ -18,12 +19,6 @@ export async function runBillingReadyCycle(): Promise<void> {
     getNoRkmMedis: (row) => row.no_rkm_medis,
     getRawPhone: (row) => row.no_tlp,
     getKdPoli: (row) => row.kd_poli,
-    getVars: (row) => ({
-      nama_pasien: row.nm_pasien ?? '',
-      no_rm: row.no_rkm_medis,
-      tanggal: row.tanggal,
-      jam: row.jam,
-      jenis_layanan: 'Kasir',
-    }),
+    getVars: varsBillingReady,
   });
 }

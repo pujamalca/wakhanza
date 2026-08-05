@@ -13,6 +13,11 @@ const VAR_RE = /\{(\w+)\}/g;
 /**
  * Variabel untuk ketujuh template pemicu (`template`, satu baris per
  * trigger_code). Semuanya mengacu ke SATU kunjungan yang sedang terjadi.
+ *
+ * `{cara_bayar}` diisi `penjab.png_jawab` ("BPJS Kesehatan"), TIDAK PERNAH
+ * `reg_periksa.kd_pj` ("A02") -- lihat core/penjamin.ts. Kodenya memang
+ * dibutuhkan untuk join di khanza/*.ts, tapi tidak pernah ikut keluar dari
+ * SQL, jadi ia tidak punya jalan untuk sampai ke sini.
  */
 export const TRIGGER_TEMPLATE_VARIABLES = [
   'nama_pasien',
@@ -26,13 +31,23 @@ export const TRIGGER_TEMPLATE_VARIABLES = [
   'tanggal',
   'jam',
   'jenis_layanan',
+  'cara_bayar',
 ] as const;
 
 /**
  * BROADCAST tidak terikat satu kunjungan -- {no_antrian}/{nama_poli}/
- * {nama_dokter}/{tanggal}/{jam}/{jenis_layanan} mengacu ke SATU kejadian
- * spesifik yang tidak well-defined untuk segmen pasien merentang banyak
- * kunjungan. Subset ini sengaja lebih sempit dari TRIGGER_TEMPLATE_VARIABLES.
+ * {nama_dokter}/{tanggal}/{jam}/{jenis_layanan}/{cara_bayar} mengacu ke SATU
+ * kejadian spesifik yang tidak well-defined untuk segmen pasien merentang
+ * banyak kunjungan. Subset ini sengaja lebih sempit dari
+ * TRIGGER_TEMPLATE_VARIABLES.
+ *
+ * {cara_bayar} termasuk yang dikecualikan walau segmennya PUNYA png_jawab
+ * (khanza/pasienSegment.ts mengambilnya untuk kolom tabel pratinjau): yang
+ * ada di sana adalah penjamin pada SATU kunjungan terpilih lewat
+ * MAX(no_rawat), sementara pasien yang sama bisa datang sebagai BPJS bulan
+ * lalu dan umum minggu ini. Menyebutnya di dalam pengumuman berarti
+ * menegaskan sesuatu yang kebetulan benar untuk satu baris, bukan untuk
+ * orangnya -- persis alasan {nama_poli} juga tidak ada di sini.
  */
 export const BROADCAST_TEMPLATE_VARIABLES = ['nama_pasien', 'no_rm', 'nama_rs', 'alamat_rs', 'kontak_rs'] as const;
 
@@ -76,6 +91,16 @@ export const AUTOREPLY_TEMPLATE_VARIABLES = [
  * {jumlah_resep} hanya terisi pada pesan REKAP (lihat farmasi.max_per_cycle);
  * pada pesan satuan ia dirender jadi string kosong seperti variabel lain yang
  * tidak diisi.
+ *
+ * {cara_bayar} juga TIDAK ada di sini, dan ketiadaannya disengaja meski
+ * penjamin jelas berguna bagi apotek (formularium BPJS berbeda dari pembelian
+ * umum). Alasannya bukan kegunaan melainkan penerimanya: daftar ini dibaca
+ * sekian orang di sebuah grup WhatsApp yang keanggotaannya diatur di luar
+ * sistem ini, dan status penjaminan seseorang -- "DINAS SOSIAL", "JASA
+ * RAHARJA" -- mengatakan hal yang lebih pribadi daripada sekadar bahwa ada
+ * resep masuk. Apotek toh membacanya di SIMRS lewat {no_resep}, tempat
+ * kendali aksesnya memang ada. Menambahkannya di sini akan membalik
+ * pertimbangan yang membuat seluruh daftar ini sempit.
  */
 export const FARMASI_TEMPLATE_VARIABLES = [
   'no_resep',

@@ -2,6 +2,7 @@ import * as cron from 'node-cron';
 import { pollBookingsForDate } from '@/khanza/booking';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadPipelineContext, enqueuePemicuPasien, identityVars } from './pipeline';
+import { varsBooking } from './triggerVars';
 import { getSettingNumber } from '@/models';
 import { logger, safeError } from '@/lib/logger';
 
@@ -35,15 +36,7 @@ export async function runBookRemindJob(): Promise<void> {
         rawPhone: row.no_tlp,
         eventAt: now,
         kdPoli: row.kd_poli,
-        vars: {
-          ...identityVars(ctx.identity),
-          nama_pasien: row.nm_pasien ?? '',
-          no_rm: row.no_rkm_medis,
-          nama_poli: row.nm_poli ?? '',
-          nama_dokter: row.nm_dokter ?? '',
-          tanggal: row.tanggal_periksa,
-          jam: row.jam_booking ?? '',
-        },
+        vars: { ...identityVars(ctx.identity), ...varsBooking(row) },
       },
       ctx,
     );

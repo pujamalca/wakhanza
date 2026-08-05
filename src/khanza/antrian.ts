@@ -13,19 +13,32 @@ export interface QueueRegRow {
   no_tlp: string | null;
   nm_poli: string | null;
   nm_dokter: string | null;
+  png_jawab: string | null;
 }
 
+/**
+ * `pj.png_jawab` diambil, `r.kd_pj` TIDAK -- lihat core/penjamin.ts. Kodenya
+ * cuma dipakai sebagai kondisi join dan tidak pernah ikut keluar dari SQL,
+ * jadi tidak ada jalan bagi "A02" untuk sampai ke pesan pasien.
+ *
+ * LEFT JOIN, bukan JOIN: `kd_pj` bisa berisi penanda '-' dan barisnya tetap
+ * kunjungan sah yang pasiennya harus tetap dikirimi notifikasi antrian.
+ * Penyaring `pj.status` sengaja TIDAK ada -- penjamin sebuah kunjungan yang
+ * sudah terjadi tidak berubah hanya karena asuransinya kini dinonaktifkan.
+ */
 function buildQueueRegSql() {
   return `
     SELECT
       r.no_rawat, r.no_reg, r.tgl_registrasi, r.jam_reg, r.no_rkm_medis, r.kd_poli,
       p.nm_pasien, p.no_tlp,
       pk.nm_poli,
-      d.nm_dokter
+      d.nm_dokter,
+      pj.png_jawab
     FROM reg_periksa r
     LEFT JOIN pasien p ON p.no_rkm_medis = r.no_rkm_medis
     LEFT JOIN poliklinik pk ON pk.kd_poli = r.kd_poli
     LEFT JOIN dokter d ON d.kd_dokter = r.kd_dokter
+    LEFT JOIN penjab pj ON pj.kd_pj = r.kd_pj
     WHERE r.no_rawat >= :lookbackPrefix
       AND TIMESTAMP(r.tgl_registrasi, r.jam_reg) >= :cursorTs
       AND r.no_reg IS NOT NULL AND r.no_reg <> ''
