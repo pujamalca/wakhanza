@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
+import Link from 'next/link';
 import { Button, Input, Select, MessageEditor, Badge, Modal, ConfirmDialog, EmptyState } from '@/components/ui';
 import { tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 import { DARURAT_TEMPLATE_VARIABLES } from '@/core/template';
@@ -117,179 +118,22 @@ export function DaruratForm({
       {!adaTujuan && (
         <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs">
           <span className="font-medium">Belum ada tujuan yang menerima peringatan ini.</span> Centang &ldquo;Terima
-          darurat stok&rdquo; pada salah satu tujuan di tabel &ldquo;Tujuan pengiriman&rdquo; di atas. Selama belum
-          dicentang, jadwal yang jatuh tempo tidak mengirim ke mana pun.
+          darurat stok&rdquo; pada salah satu baris di{' '}
+          <Link href="/farmasi?tab=tujuan" className="font-medium underline">
+            tab Tujuan pengiriman
+          </Link>
+          . Selama belum dicentang, jadwal yang jatuh tempo tidak mengirim ke mana pun.
         </div>
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* Isi pesan                                                          */}
-      {/* ------------------------------------------------------------------ */}
-      <form action={pesanAction} className="space-y-3">
-        <MessageEditor
-          name="template_darurat"
-          defaultValue={nilai.template}
-          variables={DARURAT_TEMPLATE_VARIABLES}
-          rows={7}
-          disabled={pesanPending}
-          hint="Daftar barangnya dirakit sistem dan dipasang ke {daftar_stok} — nama barang, sisa, dan ambang minimalnya."
-        />
-
-        <div>
-          <label className="mb-1 block text-xs font-medium">
-            Pesan saat tidak ada barang di bawah ambang{' '}
-            <span className="font-normal text-muted-foreground">(kosongkan = tidak mengirim apa-apa)</span>
-          </label>
-          <MessageEditor
-            name="template_darurat_kosong"
-            defaultValue={nilai.templateKosong}
-            variables={DARURAT_TEMPLATE_VARIABLES}
-            rows={3}
-            disabled={pesanPending}
-            hint="Dibiarkan kosong secara bawaan. Peringatan harian yang isinya “tidak ada apa-apa” berhenti dibaca dalam seminggu — dan sejak itu yang sungguhan ikut tidak terbaca."
-          />
-        </div>
-
-        <label className="flex items-start gap-2 rounded-md border border-border/60 p-3 text-xs">
-          <input type="checkbox" name="stok_pakai_batch" defaultChecked={nilai.pakaiBatch} disabled={pesanPending} />
-          <span>
-            <span className="font-medium">Apotek ini memakai penomoran batch di Khanza.</span>
-            <span className="block text-muted-foreground">
-              Menentukan cara stok dijumlahkan, dan berlaku juga untuk balasan stok &amp; harga di atas. Salah menyetel
-              tidak menghasilkan pesan galat — yang terjadi, seluruh katalog terbaca berstok nol. Periksa lewat tombol
-              &ldquo;Lihat daftar sekarang&rdquo; di bawah bila ragu.
-            </span>
-          </span>
-        </label>
-
-        <div className="rounded-md border border-border/60 p-3">
-          <label className="flex items-start gap-2 text-xs">
-            <input type="checkbox" name="darurat_tanya" defaultChecked={nilai.bolehTanya} disabled={pesanPending} />
-            <span>
-              <span className="font-medium">Jawab bila ditanya.</span>
-              <span className="block text-muted-foreground">
-                Petugas atau grup yang dicentang &ldquo;Boleh tanya&rdquo; bisa meminta rekap ini kapan saja lewat
-                WhatsApp, di luar jadwal. <span className="font-medium">Wajib terdaftar</span> — berbeda dari balasan
-                stok satu obat, rekap ini tidak pernah dibuka untuk umum sekalipun mode stok disetel
-                &ldquo;semua&rdquo;: isinya daftar kekurangan gudang, bukan daftar harga.
-              </span>
-            </span>
-          </label>
-          <div className="mt-3">
-            <label className="mb-1 block text-xs font-medium">Frasa pertanyaan</label>
-            <Input
-              name="darurat_keywords"
-              defaultValue={nilai.frasa}
-              disabled={pesanPending}
-              placeholder="darurat stok,stok menipis,rekap stok"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Dipisah koma, dicocokkan sebagai frasa utuh. Sengaja bukan kata tunggal seperti &ldquo;stok&rdquo; — itu
-              milik balasan stok satu obat di atas, dan memakainya di sini membuat setiap pertanyaan tentang satu obat
-              dijawab daftar ratusan barang. Pesan yang masih menyebut nama obat (&ldquo;stok habis paracetamol&rdquo;)
-              tetap diteruskan ke sana.
-            </p>
-          </div>
-        </div>
-
-        {pesanState.error && <p className="text-xs text-destructive">{pesanState.error}</p>}
-        {pesanState.sukses && <p className="text-xs text-success">{pesanState.sukses}</p>}
-        <Button type="submit" disabled={pesanPending}>
-          {pesanPending ? 'Menyimpan...' : 'Simpan isi pesan'}
-        </Button>
-      </form>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Uji coba frasa                                                     */}
-      {/* ------------------------------------------------------------------ */}
-      <form action={ujiAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Uji coba frasa</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Memakai pencocokan yang sama persis dipakai worker, atas frasa yang SUDAH tersimpan. Tidak mengirim apa pun.
-        </p>
-        <div className="flex flex-wrap items-end gap-2">
-          <Input name="uji_teks" placeholder="stok apa saja yang menipis?" className="w-72" fieldSize="sm" />
-          <Button type="submit" variant="secondary" disabled={ujiPending}>
-            {ujiPending ? 'Memeriksa...' : 'Periksa'}
-          </Button>
-        </div>
-        {uji.error && <p className="mt-2 text-xs text-destructive">{uji.error}</p>}
-        {uji.cocok === true && (
-          <p className="mt-2 text-xs text-success">
-            Dijawab dengan rekap persediaan (frasa: <span className="font-mono">{uji.frasa}</span>).
-          </p>
-        )}
-        {uji.cocok === false && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            {uji.frasa
-              ? `Frasa "${uji.frasa}" memang cocok, tapi pesannya masih menyebut "${uji.sisa}" — diteruskan ke balasan stok satu obat, bukan dijawab rekap.`
-              : 'Tidak dibaca sebagai permintaan rekap. Pesannya diteruskan ke balasan stok, lalu ke aturan /balasan-otomatis.'}
-          </p>
-        )}
-      </form>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Pratinjau                                                          */}
-      {/* ------------------------------------------------------------------ */}
-      <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Lihat daftar sekarang</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Membaca persediaan saat ini lewat jalur yang sama persis dipakai worker. Tidak mengirim apa pun.
-        </p>
-        <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <label className="mb-1 block text-xs">Jenis barang</label>
-            <Select name="kd_jenis" fieldSize="sm" defaultValue="">
-              <option value="">Semua jenis</option>
-              {jenis.map((j) => (
-                <option key={j.kdjns} value={j.kdjns}>
-                  {j.nama} ({j.jumlah})
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs">Batas baris</label>
-            <Input
-              name="max_baris"
-              type="number"
-              min={0}
-              max={BATAS_KERAS_BARIS}
-              defaultValue={0}
-              fieldSize="sm"
-              className="w-24"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">0 = semua</p>
-          </div>
-          <Button type="submit" variant="secondary" disabled={pratinjauPending}>
-            {pratinjauPending ? 'Membaca...' : 'Lihat daftar sekarang'}
-          </Button>
-        </div>
-
-        {pratinjau.error && <p className="mt-2 text-xs text-destructive">{pratinjau.error}</p>}
-        {pratinjau.teks && (
-          <div className="mt-3">
-            <p className="mb-1 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">{pratinjau.total}</span> barang di bawah ambang —{' '}
-              {pratinjau.habis} habis, {pratinjau.menipis} menipis.
-              {(pratinjau.jumlahPesan ?? 0) > 1 && (
-                <span className="text-warning">
-                  {' '}
-                  Terlalu panjang untuk satu pesan WhatsApp — akan terkirim sebagai {pratinjau.jumlahPesan} pesan
-                  berturut-turut, seluruh barangnya tetap ikut.
-                </span>
-              )}
-              {pratinjau.diam && ' Tidak ada yang akan dikirim (pesan saat aman dibiarkan kosong).'}
-            </p>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-xs">
-              {pratinjau.teks}
-            </pre>
-          </div>
-        )}
-      </form>
-
-      {/* ------------------------------------------------------------------ */}
       {/* Jadwal                                                             */}
+      {/*                                                                    */}
+      {/* PALING ATAS, bukan sesudah isi pesan seperti sebelumnya. Isi pesan  */}
+      {/* disetel sekali lalu nyaris tidak disentuh lagi, sementara tabel ini */}
+      {/* justru yang dilihat tiap kali halaman dibuka ("kapan berikutnya",   */}
+      {/* "apakah yang tadi pagi jadi terkirim") -- urutan lama menaruh yang  */}
+      {/* sekali seumur hidup di depan yang harian.                          */}
       {/* ------------------------------------------------------------------ */}
       <div>
         <div className="mb-2 flex items-center justify-between">
@@ -371,6 +215,176 @@ export function DaruratForm({
           </div>
         )}
       </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Alat periksa -- berdampingan, bukan bertumpuk.                      */}
+      {/*                                                                    */}
+      {/* Keduanya kotak "coba lalu lihat hasilnya" yang isinya pendek selama */}
+      {/* belum ditekan, jadi menumpuknya menghabiskan dua layar untuk dua    */}
+      {/* kotak yang sebagian besar waktunya kosong.                         */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
+          <p className="mb-2 text-xs font-medium">Lihat daftar sekarang</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Membaca persediaan saat ini lewat jalur yang sama persis dipakai worker. Tidak mengirim apa pun.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="mb-1 block text-xs">Jenis barang</label>
+              <Select name="kd_jenis" fieldSize="sm" defaultValue="">
+                <option value="">Semua jenis</option>
+                {jenis.map((j) => (
+                  <option key={j.kdjns} value={j.kdjns}>
+                    {j.nama} ({j.jumlah})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs">Batas baris</label>
+              <Input
+                name="max_baris"
+                type="number"
+                min={0}
+                max={BATAS_KERAS_BARIS}
+                defaultValue={0}
+                fieldSize="sm"
+                className="w-24"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">0 = semua</p>
+            </div>
+            <Button type="submit" variant="secondary" disabled={pratinjauPending}>
+              {pratinjauPending ? 'Membaca...' : 'Lihat daftar sekarang'}
+            </Button>
+          </div>
+
+          {pratinjau.error && <p className="mt-2 text-xs text-destructive">{pratinjau.error}</p>}
+          {pratinjau.teks && (
+            <div className="mt-3">
+              <p className="mb-1 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{pratinjau.total}</span> barang di bawah ambang —{' '}
+                {pratinjau.habis} habis, {pratinjau.menipis} menipis.
+                {(pratinjau.jumlahPesan ?? 0) > 1 && (
+                  <span className="text-warning">
+                    {' '}
+                    Terlalu panjang untuk satu pesan WhatsApp — akan terkirim sebagai {pratinjau.jumlahPesan} pesan
+                    berturut-turut, seluruh barangnya tetap ikut.
+                  </span>
+                )}
+                {pratinjau.diam && ' Tidak ada yang akan dikirim (pesan saat aman dibiarkan kosong).'}
+              </p>
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-xs">
+                {pratinjau.teks}
+              </pre>
+            </div>
+          )}
+        </form>
+
+        <form action={ujiAction} className="rounded-lg border border-border/60 p-3">
+          <p className="mb-2 text-xs font-medium">Uji coba frasa</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Memakai pencocokan yang sama persis dipakai worker, atas frasa yang SUDAH tersimpan. Tidak mengirim apa pun.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <Input name="uji_teks" placeholder="stok apa saja yang menipis?" className="w-72" fieldSize="sm" />
+            <Button type="submit" variant="secondary" disabled={ujiPending}>
+              {ujiPending ? 'Memeriksa...' : 'Periksa'}
+            </Button>
+          </div>
+          {uji.error && <p className="mt-2 text-xs text-destructive">{uji.error}</p>}
+          {uji.cocok === true && (
+            <p className="mt-2 text-xs text-success">
+              Dijawab dengan rekap persediaan (frasa: <span className="font-mono">{uji.frasa}</span>).
+            </p>
+          )}
+          {uji.cocok === false && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {uji.frasa
+                ? `Frasa "${uji.frasa}" memang cocok, tapi pesannya masih menyebut "${uji.sisa}" — diteruskan ke balasan stok satu obat, bukan dijawab rekap.`
+                : 'Tidak dibaca sebagai permintaan rekap. Pesannya diteruskan ke balasan stok, lalu ke aturan /balasan-otomatis.'}
+            </p>
+          )}
+        </form>
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Isi pesan                                                          */}
+      {/* ------------------------------------------------------------------ */}
+      <form action={pesanAction} className="space-y-3">
+        <p className="text-xs font-medium">Isi pesan peringatan</p>
+        <MessageEditor
+          name="template_darurat"
+          defaultValue={nilai.template}
+          variables={DARURAT_TEMPLATE_VARIABLES}
+          rows={7}
+          disabled={pesanPending}
+          hint="Daftar barangnya dirakit sistem dan dipasang ke {daftar_stok} — nama barang, sisa, dan ambang minimalnya."
+        />
+
+        <div>
+          <label className="mb-1 block text-xs font-medium">
+            Pesan saat tidak ada barang di bawah ambang{' '}
+            <span className="font-normal text-muted-foreground">(kosongkan = tidak mengirim apa-apa)</span>
+          </label>
+          <MessageEditor
+            name="template_darurat_kosong"
+            defaultValue={nilai.templateKosong}
+            variables={DARURAT_TEMPLATE_VARIABLES}
+            rows={3}
+            disabled={pesanPending}
+            hint="Dibiarkan kosong secara bawaan. Peringatan harian yang isinya “tidak ada apa-apa” berhenti dibaca dalam seminggu — dan sejak itu yang sungguhan ikut tidak terbaca."
+          />
+        </div>
+
+        <label className="flex items-start gap-2 rounded-md border border-border/60 p-3 text-xs">
+          <input type="checkbox" name="stok_pakai_batch" defaultChecked={nilai.pakaiBatch} disabled={pesanPending} />
+          <span>
+            <span className="font-medium">Apotek ini memakai penomoran batch di Khanza.</span>
+            <span className="block text-muted-foreground">
+              Menentukan cara stok dijumlahkan, dan berlaku juga untuk balasan stok &amp; harga di tab Balasan stok.
+              Salah menyetel tidak menghasilkan pesan galat — yang terjadi, seluruh katalog terbaca berstok nol.
+              Periksa lewat tombol &ldquo;Lihat daftar sekarang&rdquo; di bawah bila ragu.
+            </span>
+          </span>
+        </label>
+
+        <div className="rounded-md border border-border/60 p-3">
+          <label className="flex items-start gap-2 text-xs">
+            <input type="checkbox" name="darurat_tanya" defaultChecked={nilai.bolehTanya} disabled={pesanPending} />
+            <span>
+              <span className="font-medium">Jawab bila ditanya.</span>
+              <span className="block text-muted-foreground">
+                Petugas atau grup yang dicentang &ldquo;Boleh tanya&rdquo; bisa meminta rekap ini kapan saja lewat
+                WhatsApp, di luar jadwal. <span className="font-medium">Wajib terdaftar</span> — berbeda dari balasan
+                stok satu obat, rekap ini tidak pernah dibuka untuk umum sekalipun mode stok disetel
+                &ldquo;semua&rdquo;: isinya daftar kekurangan gudang, bukan daftar harga.
+              </span>
+            </span>
+          </label>
+          <div className="mt-3">
+            <label className="mb-1 block text-xs font-medium">Frasa pertanyaan</label>
+            <Input
+              name="darurat_keywords"
+              defaultValue={nilai.frasa}
+              disabled={pesanPending}
+              placeholder="darurat stok,stok menipis,rekap stok"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Dipisah koma, dicocokkan sebagai frasa utuh. Sengaja bukan kata tunggal seperti &ldquo;stok&rdquo; — itu
+              milik balasan stok satu obat di tab Balasan stok, dan memakainya di sini membuat setiap pertanyaan
+              tentang satu obat dijawab daftar ratusan barang. Pesan yang masih menyebut nama obat (&ldquo;stok habis
+              paracetamol&rdquo;) tetap diteruskan ke sana.
+            </p>
+          </div>
+        </div>
+
+        {pesanState.error && <p className="text-xs text-destructive">{pesanState.error}</p>}
+        {pesanState.sukses && <p className="text-xs text-success">{pesanState.sukses}</p>}
+        <Button type="submit" disabled={pesanPending}>
+          {pesanPending ? 'Menyimpan...' : 'Simpan isi pesan'}
+        </Button>
+      </form>
 
       <JadwalDialog
         open={dialogTerbuka}

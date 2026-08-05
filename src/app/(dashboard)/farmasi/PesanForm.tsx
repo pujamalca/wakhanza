@@ -28,6 +28,11 @@ export function PesanForm({ nilai }: { nilai: NilaiPesan }) {
 
   return (
     <form action={formAction} className="space-y-4">
+      {/* Berdampingan, bukan bertumpuk: keempatnya kotak penyusun pesan yang
+          tingginya hampir sama, dan menumpuknya membuat kotak keempat berada
+          dua layar di bawah yang pertama -- padahal yang perlu dibandingkan
+          justru isinya satu sama lain (pesan biasa vs pesan poli sensitif). */}
+      <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <div className="space-y-1">
           <label className="flex items-center gap-2 text-sm font-medium">
@@ -130,6 +135,7 @@ export function PesanForm({ nilai }: { nilai: NilaiPesan }) {
           />
         </div>
       </Card>
+      </div>
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
       {state.sukses && <p className="text-sm text-success">{state.sukses}</p>}

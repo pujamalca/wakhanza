@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import Link from 'next/link';
 import { Input, Select, Button, MessageEditor, Badge } from '@/components/ui';
 import { STOK_TEMPLATE_VARIABLES } from '@/core/template';
 import { simpanStokAction, ujiStokAction, type HasilForm, type HasilUji } from './actions';
@@ -31,7 +32,7 @@ const MODE: { nilai: NilaiStok['mode']; judul: string; keterangan: string }[] = 
     nilai: 'petugas',
     judul: 'Hanya petugas apotek',
     keterangan:
-      'Dijawab hanya untuk tujuan di atas yang dicentang "Boleh tanya". Jawabannya memuat ANGKA sisa stok berikut tanda (menipis)/(habis).',
+      'Dijawab hanya untuk tujuan yang dicentang "Boleh tanya" di tab Tujuan pengiriman. Jawabannya memuat ANGKA sisa stok berikut tanda (menipis)/(habis).',
   },
   {
     nilai: 'semua',
@@ -83,10 +84,13 @@ export function StokForm({ nilai }: { nilai: NilaiStok }) {
               justru satu-satunya yang TIDAK pernah lolos tanpa didaftarkan. */}
           <p className="rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
             <span className="font-medium">Grup selalu perlu didaftarkan, apa pun modenya.</span> Nomor rumah sakit hanya
-            ikut menjawab di dalam grup yang dicentang <span className="font-medium">&ldquo;Boleh tanya&rdquo;</span> pada
-            tabel Tujuan pengiriman di atas — mode &ldquo;siapa saja&rdquo; berlaku untuk pesan pribadi, bukan untuk grup
-            mana pun yang kebetulan mengundang nomor RS. Di dalam grup, hanya pertanyaan stok yang dijawab; aturan di
-            Balasan otomatis sengaja tidak ikut berlaku, dan ada kuota jawaban per jam per grup.
+            ikut menjawab di dalam grup yang dicentang <span className="font-medium">&ldquo;Boleh tanya&rdquo;</span> di{' '}
+            <Link href="/farmasi?tab=tujuan" className="font-medium underline">
+              tab Tujuan pengiriman
+            </Link>{' '}
+            — mode &ldquo;siapa saja&rdquo; berlaku untuk pesan pribadi, bukan untuk grup mana pun yang kebetulan
+            mengundang nomor RS. Di dalam grup, hanya pertanyaan stok yang dijawab; aturan di Balasan otomatis sengaja
+            tidak ikut berlaku, dan ada kuota jawaban per jam per grup.
           </p>
         </fieldset>
 

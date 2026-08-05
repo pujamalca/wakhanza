@@ -1,6 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
+import Link from 'next/link';
 import { Button, Badge, IconAlertTriangle, IconCheck } from '@/components/ui';
 import { toggleFarmasiAction } from './actions';
 
@@ -49,7 +50,11 @@ export function MasterSwitch({ enabled, adaTargetAktif }: { enabled: boolean; ad
             {enabled && !adaTargetAktif && (
               <p className="mt-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
                 Sakelarnya menyala tapi <span className="font-medium">belum ada tujuan yang aktif</span>, jadi tidak ada
-                pesan yang benar-benar terkirim. Tambahkan tujuan di bawah.
+                pesan yang benar-benar terkirim. Tambahkan satu di{' '}
+                <Link href="/farmasi?tab=tujuan" className="font-medium underline">
+                  tab Tujuan pengiriman
+                </Link>
+                .
               </p>
             )}
           </div>
