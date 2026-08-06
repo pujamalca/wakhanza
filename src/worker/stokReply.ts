@@ -102,7 +102,7 @@ async function bolehBertanya(mode: ModeStok, asal: AsalPertanyaan): Promise<{ bo
  *
  * Dua sebabnya, dan yang pertama akan jadi bug diam bila diabaikan:
  * `auto_reply_log.phone_e164` adalah VARCHAR(20), sementara JID grup
- * (`120363232637249779@g.us`) 24 karakter -- MariaDB non-strict memotongnya
+ * (`120363000000000000@g.us`) 24 karakter -- MariaDB non-strict memotongnya
  * diam-diam, dan yang terpotong justru ekor yang membedakan satu grup dari
  * grup lain. Kedua, yang perlu dihitung memang cuma balasan stok: notifikasi
  * resep ke grup yang sama tidak boleh ikut memakan jatahnya, dan pagi sibuk
