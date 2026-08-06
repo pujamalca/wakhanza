@@ -31,6 +31,19 @@
  * Halaman React tetap TIDAK pernah memakai `dangerouslySetInnerHTML`: HTML ini
  * masuk ke peramban lewat `<iframe src=...>`, dokumennya sendiri, bukan
  * disuntikkan ke dalam pohon DOM dashboard.
+ *
+ * ==========================================================================
+ * GAMBAR: data URI, dan tidak boleh jadi yang lain
+ * ==========================================================================
+ *
+ * Logo rumah sakit dan QR pengesahan keduanya ditanam sebagai `data:` URI, dan
+ * itu bukan kenyamanan. Berkas ini dirender di DUA tempat yang sama-sama tidak
+ * punya asal-usul untuk menyelesaikan lintasan relatif -- `page.setContent()`
+ * milik Chromium, dan `<iframe>` ber-CSP `sandbox` di dashboard. Menggantinya
+ * dengan `<img src="/...">` akan menghasilkan surat tanpa logo tanpa satu pun
+ * galat, DAN membatalkan janji `lib/pdf.ts` bahwa render surat tidak pernah
+ * menyentuh jaringan. CSP pada rute pratinjau karena itu mengizinkan `data:`
+ * saja.
  */
 
 import {
@@ -85,9 +98,22 @@ body {
   font-size: 12pt; line-height: 1.5; color: #000;
   margin: 0; padding: 18mm 20mm;
 }
-.kop { text-align: center; border-bottom: 3px double #000; padding-bottom: 8px; margin-bottom: 18px; }
+.kop { position: relative; text-align: center; border-bottom: 3px double #000; padding-bottom: 8px; margin-bottom: 18px; }
 .kop .nama { font-size: 15pt; font-weight: bold; text-transform: uppercase; letter-spacing: .5px; }
 .kop .sub { font-size: 10pt; line-height: 1.35; }
+/* Logo di kiri, teks TETAP terpusat pada lebar penuh -- itu susunan Khanza
+   (gambar 70x70 di x=0, teks terpusat sepanjang band 552px). Karena logonya
+   keluar dari aliran, teksnya diberi sisipan di KEDUA sisi supaya nama rumah
+   sakit yang panjang tidak menabraknya sambil tetap terpusat. Sisipan itu
+   hanya dipasang saat logonya memang ada. */
+/* 20mm logo + 4mm jarak ke garis ganda. Logonya keluar dari aliran, jadi
+   TIDAK ada margin/padding miliknya sendiri yang bisa mendorong garis itu --
+   hanya min-height kop yang menahannya. Tanpa selisih ini logo menempel di
+   garis sementara teks di sebelahnya punya jarak, dan yang terlihat adalah kop
+   yang miring sebelah. */
+.kop.berlogo { min-height: 24mm; }
+.kop.berlogo .teks { padding: 0 23mm; }
+.kop .logo { position: absolute; left: 0; top: 0; width: 20mm; height: 20mm; object-fit: contain; }
 h1 { font-size: 13.5pt; text-align: center; text-decoration: underline; letter-spacing: 1px; margin: 0 0 2px; }
 .nosurat { text-align: center; font-size: 11pt; margin: 0 0 16px; }
 .pembuka { margin: 0 0 10px; text-align: justify; }
@@ -98,10 +124,30 @@ td.s { width: 5mm; }
 td.v { font-weight: bold; }
 .isi { margin: 0 0 10px; text-align: justify; }
 .penutup { margin: 14px 0 0; text-align: justify; }
+/* QR duduk DI DALAM blok tanda tangan, di ruang tanda tangan antara "Dokter
+   Pemeriksa," dan nama dokter -- itu susunan Khanza, dibaca dari posisi
+   elemennya di rptSuratSakit5.jrxml (tanggal y=306, "Pemeriksa" y=321, QR
+   y=340, nm_dokter y=419) dan rptSuratSehat.jrxml (y=245 / y=258 / y=322).
+   Versi pertama menaruhnya di pojok kiri bawah halaman: QR-nya terbaca sebagai
+   gambar yang berdiri sendiri, bukan sebagai tanda tangan elektronik atas nama
+   dokter yang tercetak tepat di bawahnya -- padahal justru itu yang
+   disahkannya.
+   .blok tetap memegang margin-left:auto supaya blok tanda tangan tetap di
+   kanan APA PUN keadaan QR-nya; surat yang QR-nya gagal dibuat tidak boleh
+   berpindah tata letak.
+   Catatan: blok gaya ini ada di dalam template literal JS -- jangan pakai
+   backtick di komentarnya, ia menutup stringnya dan galatnya muncul sebagai
+   kesalahan sintaks yang menunjuk baris lain. */
 .ttd { margin-top: 26px; width: 100%; }
 .ttd .blok { width: 65mm; margin-left: auto; text-align: center; }
+.ttd .qr { margin: 2mm 0 1mm; }
+.ttd .qr img { width: 24mm; height: 24mm; display: block; margin: 0 auto; }
+/* Ruang tanda tangan basah, dipakai HANYA saat QR tidak ada -- tanpa itu nama
+   dokter naik menempel ke kata "Pemeriksa," dan suratnya kehilangan tempat
+   untuk ditandatangani bila dicetak. */
 .ttd .ruang { height: 20mm; }
 .ttd .nama { font-weight: bold; text-decoration: underline; }
+.ttd .ket { font-size: 7pt; color: #444; line-height: 1.3; margin-top: 3px; font-family: Arial, Helvetica, sans-serif; }
 .catatan {
   margin-top: 16mm; border-top: 1px solid #999; padding-top: 5px;
   font-size: 8pt; color: #444; line-height: 1.4; font-family: Arial, Helvetica, sans-serif;
@@ -116,6 +162,21 @@ export interface OpsiSurat {
    * adanya teks yang akan tercetak.
    */
   catatanKaki: string;
+  /**
+   * QR pengesahan sebagai data URI, atau string kosong.
+   *
+   * KEDUANYA ADA dan itu bukan pengulangan: Khanza menaruh teks `finger` HANYA
+   * di dalam QR dan tidak pernah mencetaknya sebagai tulisan, sementara berkas
+   * ini beredar lepas di WhatsApp -- pembaca yang memegang berkasnya tanpa alat
+   * pemindai tetap harus bisa membaca dari mana surat itu berasal. Jadi
+   * catatan kaki melayani MANUSIA dan QR melayani PEMINDAI; menghapus salah
+   * satunya membutakan salah satu dari keduanya.
+   *
+   * Dibuat di luar berkas ini karena `qrcode` bekerja asinkron, sementara
+   * fungsi di sini wajib tetap murni -- itu yang menjamin pratinjau di layar
+   * dan berkas yang terkirim berangkat dari satu penurunan.
+   */
+  qrDataUri: string;
 }
 
 export function renderSuratHtml(isi: IsiSurat, kop: KopSurat, opsi: OpsiSurat): string {
@@ -130,10 +191,13 @@ export function renderSuratHtml(isi: IsiSurat, kop: KopSurat, opsi: OpsiSurat): 
 <html lang="id"><head><meta charset="utf-8"><title>${lolos(JUDUL_SURAT[isi.jenis])}</title>
 <style>${GAYA}</style></head>
 <body>
-<div class="kop">
-  <div class="nama">${lolos(kop.namaRs)}</div>
-  ${alamatKop ? `<div class="sub">${lolos(alamatKop)}</div>` : ''}
-  ${kontakKop ? `<div class="sub">${lolos(kontakKop)}</div>` : ''}
+<div class="kop${kop.logoDataUri ? ' berlogo' : ''}">
+  ${kop.logoDataUri ? `<img class="logo" src="${lolos(kop.logoDataUri)}" alt="">` : ''}
+  <div class="teks">
+    <div class="nama">${lolos(kop.namaRs)}</div>
+    ${alamatKop ? `<div class="sub">${lolos(alamatKop)}</div>` : ''}
+    ${kontakKop ? `<div class="sub">${lolos(kontakKop)}</div>` : ''}
+  </div>
 </div>
 
 <h1>${lolos(JUDUL_SURAT[isi.jenis])}</h1>
@@ -145,8 +209,17 @@ ${badan}
   <div class="blok">
     <div>${lolos(kop.kotaRs || '')}${kop.kotaRs ? ', ' : ''}${lolos(isi.tanggalSurat)}</div>
     <div>Dokter Pemeriksa,</div>
-    <div class="ruang"></div>
+    ${
+      opsi.qrDataUri
+        ? `<div class="qr"><img src="${lolos(opsi.qrDataUri)}" alt="Kode QR pengesahan"></div>`
+        : '<div class="ruang"></div>'
+    }
     <div class="nama">${lolos(isi.namaDokter)}</div>
+    ${
+      opsi.qrDataUri
+        ? `<div class="ket">Ditandatangani secara elektronik.<br>Pindai QR untuk memeriksa keabsahannya.</div>`
+        : ''
+    }
   </div>
 </div>
 

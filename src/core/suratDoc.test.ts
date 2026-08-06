@@ -6,6 +6,9 @@ import {
   jenisKelaminLengkap,
   barisTerisi,
   namaBerkasSurat,
+  mimeGambar,
+  formatTanggalRingkas,
+  teksAsalUsul,
 } from './suratDoc';
 import { lolos, renderSuratHtml } from './suratHtml';
 import type { IsiSurat, KopSurat } from './suratDoc';
@@ -149,7 +152,11 @@ const KOP: KopSurat = {
   propinsiRs: 'Provinsi Contoh',
   kontakRs: '0800000000',
   emailRs: 'contoh@contoh.id',
+  logoDataUri: '',
 };
+
+/** Bentuk PALING POLOS: tanpa logo, tanpa QR -- yang harus tetap sah. */
+const POLOS = { catatanKaki: '', qrDataUri: '' };
 
 const SAKIT: Extract<IsiSurat, { jenis: 'sakit' }> = {
   jenis: 'sakit',
@@ -166,12 +173,14 @@ const SAKIT: Extract<IsiSurat, { jenis: 'sakit' }> = {
   tanggalAkhir: '8 Agustus 2026',
   diagnosa: '',
   namaDokter: 'dr. Contoh Utama',
+  kdDokter: 'DR001',
   tanggalSurat: '6 Agustus 2026',
+  tanggalRingkas: '06-08-2026',
 };
 
 describe('renderSuratHtml', () => {
   it('memuat judul, nomor surat, dan kop rumah sakit', () => {
-    const html = renderSuratHtml(SAKIT, KOP, { catatanKaki: '' });
+    const html = renderSuratHtml(SAKIT, KOP, POLOS);
     expect(html).toContain('SURAT KETERANGAN SAKIT');
     expect(html).toContain('SKS20260806001');
     expect(html).toContain('RS CONTOH SEJAHTERA &amp; APOTEK CONTOH');
@@ -179,7 +188,7 @@ describe('renderSuratHtml', () => {
   });
 
   it('membuang baris identitas yang kosong', () => {
-    const html = renderSuratHtml(SAKIT, KOP, { catatanKaki: '' });
+    const html = renderSuratHtml(SAKIT, KOP, POLOS);
     expect(html).toContain('Umur');
     expect(html).not.toContain('Pekerjaan');
   });
@@ -189,14 +198,14 @@ describe('renderSuratHtml', () => {
   // yang menyusup ke halaman yang dirender Chromium.
   it('meloloskan nama pasien sehingga HTML di dalamnya tidak pernah jadi elemen', () => {
     const jahat = { ...SAKIT, namaPasien: '<script>x</script>', identitas: [{ label: 'Nama Pasien', nilai: '<script>x</script>' }], diagnosa: 'A00 Kolera' };
-    const html = renderSuratHtml(jahat, KOP, { catatanKaki: '' });
+    const html = renderSuratHtml(jahat, KOP, POLOS);
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;script&gt;');
   });
 
   it('TIDAK mencetak blok diagnosa saat kosong, dan mencetaknya saat ada', () => {
-    expect(renderSuratHtml(SAKIT, KOP, { catatanKaki: '' })).not.toContain('Diagnosa');
-    const dengan = renderSuratHtml({ ...SAKIT, diagnosa: 'J06.9 ISPA' }, KOP, { catatanKaki: '' });
+    expect(renderSuratHtml(SAKIT, KOP, POLOS)).not.toContain('Diagnosa');
+    const dengan = renderSuratHtml({ ...SAKIT, diagnosa: 'J06.9 ISPA' }, KOP, POLOS);
     expect(dengan).toContain('Diagnosa');
     expect(dengan).toContain('J06.9 ISPA');
     expect(dengan).toContain('memberi ijin');
@@ -206,16 +215,18 @@ describe('renderSuratHtml', () => {
     const dasar = {
       jenis: 'sehat' as const,
       noSurat: '',
-      namaPasien: 'DIAN GUSTIANA HARITAMI',
-      noRm: '005084',
-      identitas: [{ label: 'Nama', nilai: 'DIAN GUSTIANA HARITAMI' }],
+      namaPasien: 'SITI CONTOH',
+      noRm: '000002',
+      identitas: [{ label: 'Nama', nilai: 'SITI CONTOH' }],
       kesimpulan: '',
       butaWarna: '',
       keperluan: '',
       namaDokter: 'dr. Contoh Utama',
+      kdDokter: 'DR001',
       tanggalSurat: '6 Agustus 2026',
+      tanggalRingkas: '06-08-2026',
     };
-    const polos = renderSuratHtml(dasar, KOP, { catatanKaki: '' });
+    const polos = renderSuratHtml(dasar, KOP, POLOS);
     expect(polos).toContain('SEHAT');
     expect(polos).not.toContain('buta warna');
     expect(polos).toContain('sesuai keperluan');
@@ -223,14 +234,144 @@ describe('renderSuratHtml', () => {
     const lengkap = renderSuratHtml(
       { ...dasar, kesimpulan: 'Sehat', butaWarna: 'Tidak', keperluan: 'melamar pekerjaan' },
       KOP,
-      { catatanKaki: '' },
+      POLOS,
     );
     expect(lengkap).toContain('TIDAK BUTA WARNA');
     expect(lengkap).toContain('melamar pekerjaan');
   });
 
   it('menulis catatan kaki asal-usul dengan baris baru jadi <br>', () => {
-    const html = renderSuratHtml(SAKIT, KOP, { catatanKaki: 'Baris satu\nBaris dua' });
+    const html = renderSuratHtml(SAKIT, KOP, { catatanKaki: 'Baris satu\nBaris dua', qrDataUri: '' });
     expect(html).toContain('Baris satu<br>Baris dua');
+  });
+
+  // Logo dan QR sama-sama boleh tidak ada, dan surat tetap harus utuh: rumah
+  // sakit yang belum mengunggah logo, atau QR yang gagal dibuat, tidak boleh
+  // berarti surat pasien batal terbit.
+  it('tetap menghasilkan surat utuh tanpa logo dan tanpa QR', () => {
+    const html = renderSuratHtml(SAKIT, KOP, POLOS);
+    expect(html).not.toContain('<img');
+    // Diperiksa pada ATRIBUTNYA, bukan pada seluruh halaman: kata "berlogo"
+    // selalu ada di dalam blok <style> sebagai nama kelas, jadi asersi yang
+    // menyapu seluruh HTML tidak akan pernah gagal walau kelasnya salah pasang.
+    expect(html).toContain('class="kop"');
+    expect(html).toContain('SURAT KETERANGAN SAKIT');
+    expect(html).toContain('Dokter Pemeriksa,');
+  });
+
+  it('memasang logo di kop beserta penanda kelasnya saat ada', () => {
+    const html = renderSuratHtml(SAKIT, { ...KOP, logoDataUri: 'data:image/png;base64,AAAA' }, POLOS);
+    expect(html).toContain('class="kop berlogo"');
+    expect(html).toContain('<img class="logo" src="data:image/png;base64,AAAA"');
+  });
+
+  // Diperiksa sebagai URUTAN, bukan sekadar keberadaan -- versi pertama memuat
+  // QR-nya persis seperti ini tapi menaruhnya di pojok kiri bawah halaman, dan
+  // asersi "ada gambarnya" lolos sepenuhnya. Yang menentukan QR ini terbaca
+  // sebagai tanda tangan elektronik adalah letaknya: di ruang tanda tangan,
+  // antara "Dokter Pemeriksa," dan nama dokter, mengikuti posisi elemen di
+  // rptSuratSakit5.jrxml.
+  it('menaruh QR di ruang tanda tangan, antara "Pemeriksa" dan nama dokter', () => {
+    const html = renderSuratHtml(SAKIT, KOP, { catatanKaki: '', qrDataUri: 'data:image/png;base64,BBBB' });
+    const pemeriksa = html.indexOf('Dokter Pemeriksa,');
+    const qr = html.indexOf('alt="Kode QR pengesahan"');
+    const dokter = html.indexOf('dr. Contoh Utama');
+    expect(pemeriksa).toBeGreaterThan(-1);
+    expect(qr).toBeGreaterThan(pemeriksa);
+    expect(dokter).toBeGreaterThan(qr);
+    expect(html).toContain('Pindai QR untuk memeriksa keabsahannya.');
+    // Ruang tanda tangan basah digantikan QR-nya, tidak ditumpuk.
+    expect(html).not.toContain('class="ruang"');
+  });
+
+  // Kebalikannya, dan ini yang menjaga surat tetap bisa ditandatangani tangan
+  // bila QR-nya gagal dibuat: ruangnya harus kembali.
+  it('mengembalikan ruang tanda tangan saat QR tidak ada', () => {
+    const html = renderSuratHtml(SAKIT, KOP, POLOS);
+    expect(html).toContain('class="ruang"');
+    expect(html).not.toContain('Pindai QR');
+  });
+
+  // Data URI ikut dilolos seperti nilai lain. Alfabet base64 tidak memuat satu
+  // pun karakter yang dilolos, jadi ini TIDAK boleh merusak gambarnya --
+  // pelolosannya murni pagar bila suatu saat nilainya datang dari tempat lain.
+  it('meloloskan data URI tanpa merusaknya', () => {
+    const uri = 'data:image/png;base64,iVBORw0KGgo+/=';
+    const html = renderSuratHtml(SAKIT, { ...KOP, logoDataUri: uri }, POLOS);
+    expect(html).toContain(`src="${uri}"`);
+  });
+});
+
+describe('mimeGambar', () => {
+  const bungkus = (...awal: number[]) => new Uint8Array([...awal, ...new Array(12).fill(0)]);
+
+  it('mengenali jenis gambar dari isinya, bukan dari nama kolom', () => {
+    expect(mimeGambar(bungkus(0x89, 0x50, 0x4e, 0x47))).toBe('image/png');
+    expect(mimeGambar(bungkus(0xff, 0xd8, 0xff))).toBe('image/jpeg');
+    expect(mimeGambar(bungkus(0x47, 0x49, 0x46, 0x38))).toBe('image/gif');
+    expect(mimeGambar(bungkus(0x42, 0x4d))).toBe('image/bmp');
+  });
+
+  it('mengenali WebP yang penandanya terpisah dua bagian', () => {
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+    expect(mimeGambar(webp)).toBe('image/webp');
+    // RIFF tanpa WEBP adalah wadah lain (mis. WAV) -- bukan gambar.
+    const riffLain = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]);
+    expect(mimeGambar(riffLain)).toBeNull();
+  });
+
+  // Menebak "image/png" untuk isi tak dikenal menghasilkan data URI yang
+  // berbohong, dan yang muncul bukan galat melainkan kop tanpa logo.
+  it('mengembalikan null alih-alih menebak', () => {
+    expect(mimeGambar(bungkus(0x00, 0x01, 0x02))).toBeNull();
+    expect(mimeGambar(new Uint8Array([0x89, 0x50]))).toBeNull();
+    expect(mimeGambar(new Uint8Array())).toBeNull();
+  });
+});
+
+describe('formatTanggalRingkas', () => {
+  it('memakai bentuk dd-mm-YYYY milik Khanza, bukan bentuk yang dibaca manusia', () => {
+    expect(formatTanggalRingkas('2026-08-06')).toBe('06-08-2026');
+    expect(formatTanggalRingkas('2026-12-31 08:30:00')).toBe('31-12-2026');
+  });
+
+  it('mengembalikan kosong untuk penanda "belum" milik Khanza', () => {
+    expect(formatTanggalRingkas('0000-00-00')).toBe('');
+    expect(formatTanggalRingkas(null)).toBe('');
+    expect(formatTanggalRingkas('')).toBe('');
+  });
+});
+
+describe('teksAsalUsul', () => {
+  // Susunannya diambil dari SuratSakit.java. Menyimpang satu kata pun membuat
+  // QR di sini dan QR yang dicetak Khanza berisi teks berbeda untuk surat yang
+  // sama, dan membandingkan keduanya berhenti membuktikan apa pun.
+  it('mengikuti susunan parameter finger milik Khanza', () => {
+    expect(teksAsalUsul(KOP, SAKIT)).toBe(
+      'Dikeluarkan di RS CONTOH SEJAHTERA & APOTEK CONTOH, Kabupaten/Kota Kabupaten Contoh\n' +
+        'Ditandatangani secara elektronik oleh dr. Contoh Utama\n' +
+        'ID DR001\n' +
+        '06-08-2026',
+    );
+  });
+
+  it('membuang baris yang datanya tidak ada, bukan mencetak label menggantung', () => {
+    const teks = teksAsalUsul({ ...KOP, kotaRs: '' }, { ...SAKIT, kdDokter: '', tanggalRingkas: '' });
+    expect(teks).toBe(
+      'Dikeluarkan di RS CONTOH SEJAHTERA & APOTEK CONTOH\n' +
+        'Ditandatangani secara elektronik oleh dr. Contoh Utama',
+    );
+    expect(teks).not.toContain('ID ');
+    expect(teks).not.toContain('Kabupaten/Kota');
+  });
+
+  // QR mengesahkan SIAPA YANG MENERBITKAN, bukan siapa yang disebut. Nama
+  // pasien memang tercetak besar di badan surat, tapi bentuk yang terbaca mesin
+  // membuat pemanenan borongan jadi murah -- dan Khanza pun tidak memuatnya.
+  it('tidak pernah memuat data pasien', () => {
+    const teks = teksAsalUsul(KOP, SAKIT);
+    expect(teks).not.toContain(SAKIT.namaPasien);
+    expect(teks).not.toContain(SAKIT.noRm);
+    expect(teks).not.toContain(SAKIT.noSurat);
   });
 });

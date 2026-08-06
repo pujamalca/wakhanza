@@ -69,6 +69,12 @@ export interface BarisSuratSakit {
   pekerjaan: string | null;
   nama_perusahaan: string | null;
   nm_dokter: string | null;
+  /**
+   * Dipakai HANYA sebagai baris "ID" di dalam QR pengesahan, mengikuti
+   * `finger` milik Khanza -- lihat `teksAsalUsul()` di `core/suratDoc.ts`,
+   * termasuk kenapa `sidikjari` sengaja tidak ikut dibaca.
+   */
+  kd_dokter: string | null;
   /** Hanya terisi bila pemanggil meminta diagnosa; NULL/absen bila tidak. */
   diagnosa?: string | null;
 }
@@ -90,6 +96,12 @@ export interface BarisSuratSehat {
   nm_kab: string | null;
   pekerjaan: string | null;
   nm_dokter: string | null;
+  /**
+   * Dipakai HANYA sebagai baris "ID" di dalam QR pengesahan, mengikuti
+   * `finger` milik Khanza -- lihat `teksAsalUsul()` di `core/suratDoc.ts`,
+   * termasuk kenapa `sidikjari` sengaja tidak ikut dibaca.
+   */
+  kd_dokter: string | null;
   /** Dari `surat_keterangan_sehat` bila barisnya ada -- kosong di mesin ini. */
   kesimpulan: string | null;
   butawarna: string | null;
@@ -112,7 +124,7 @@ const IDENTITAS_SELECT = `
       r.tgl_registrasi, r.umurdaftar, r.sttsumur, r.no_rkm_medis, r.kd_poli,
       p.nm_pasien, p.jk, p.no_tlp, p.alamat, p.pekerjaan,
       kel.nm_kel, kec.nm_kec, kab.nm_kab,
-      d.nm_dokter`;
+      d.nm_dokter, d.kd_dokter`;
 
 const IDENTITAS_JOIN = `
     JOIN reg_periksa r ON r.no_rawat = ss.no_rawat

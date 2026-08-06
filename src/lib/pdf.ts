@@ -64,9 +64,16 @@ export async function htmlKePdf(html: string): Promise<Buffer> {
     });
 
     const page = await browser.newPage();
-    // `setContent` tidak pernah menyentuh jaringan: seluruh gaya sudah inline
-    // di dalam HTML-nya (core/suratHtml.ts). Tidak ada berkas eksternal yang
+    // `setContent` tidak pernah menyentuh jaringan: gaya ada sebagai satu blok
+    // <style>, dan kedua gambarnya (logo rumah sakit + QR pengesahan) tertanam
+    // sebagai data URI (core/suratHtml.ts). Tidak ada berkas eksternal yang
     // bisa membuat render menggantung menunggu sesuatu yang tidak akan datang.
+    //
+    // `waitUntil: 'load'` -- bukan 'domcontentloaded' -- justru karena gambar
+    // itu: 'load' baru menyala setelah setiap <img> selesai didekode, sehingga
+    // PDF tidak pernah tercetak dengan kop yang logonya belum muncul. Data URI
+    // tidak menambah waktu tunggu yang berarti karena tidak ada permintaan
+    // jaringan yang perlu diselesaikan.
     await page.setContent(html, { waitUntil: 'load', timeout: BATAS_RENDER_MS });
 
     const pdf = await page.pdf({

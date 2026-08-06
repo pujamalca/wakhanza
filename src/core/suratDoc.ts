@@ -140,6 +140,52 @@ export function jenisKelaminLengkap(jk: string | null | undefined): string {
   return '';
 }
 
+/**
+ * MIME sebuah gambar, DITURUNKAN DARI ISINYA dan bukan diasumsikan.
+ *
+ * `setting.logo` adalah `longblob` yang diunggah sendiri oleh rumah sakit lewat
+ * layar pengaturan Khanza -- tidak ada kolom yang menyebut jenisnya. Di mesin
+ * ini isinya PNG, dan itu persis alasan menuliskan `image/png` mati di kode
+ * berbahaya: instalasi lain yang mengunggah JPEG akan mendapat data URI yang
+ * berbohong tentang isinya. Chromium mungkin memaafkannya lewat penciuman tipe,
+ * tapi `Content-Security-Policy` pada pratinjau tidak, dan yang muncul bukan
+ * galat melainkan kop surat tanpa logo.
+ *
+ * `null` untuk yang tidak dikenali -- pemanggilnya lalu mencetak surat TANPA
+ * logo, bukan menebak jenisnya. Menebak di sini menghasilkan berkas rusak yang
+ * terlihat seperti berkas benar.
+ */
+export function mimeGambar(bytes: Uint8Array): string | null {
+  const b = bytes;
+  if (b.length < 12) return null;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'image/gif';
+  if (b[0] === 0x42 && b[1] === 0x4d) return 'image/bmp';
+  const riff = b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46;
+  const webp = b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50;
+  if (riff && webp) return 'image/webp';
+  return null;
+}
+
+/**
+ * "2026-08-06" -> "06-08-2026", bentuk yang dipakai Khanza di dalam QR
+ * (`DATE_FORMAT(...,'%d-%m-%Y')`).
+ *
+ * Sengaja BERBEDA dari `formatTanggalSurat()` dan keduanya memang perlu ada:
+ * yang itu dibaca manusia di badan surat ("6 Agustus 2026"), yang ini dibaca
+ * pemindai dan harus sama persis dengan yang dicetak Khanza di loket -- kalau
+ * tidak, dua QR untuk satu surat yang sama berisi teks berbeda dan
+ * membandingkan keduanya berhenti membuktikan apa pun.
+ */
+export function formatTanggalRingkas(iso: string | null | undefined): string {
+  const cocok = /^(\d{4})-(\d{2})-(\d{2})/.exec((iso ?? '').trim());
+  if (!cocok) return '';
+  const [, thn, bln, tgl] = cocok;
+  if (thn === '0000' || bln === '00' || tgl === '00') return '';
+  return `${tgl}-${bln}-${thn}`;
+}
+
 /** Identitas rumah sakit untuk kop surat -- dari `sik.setting`, bukan dikarang. */
 export interface KopSurat {
   namaRs: string;
@@ -148,6 +194,16 @@ export interface KopSurat {
   propinsiRs: string;
   kontakRs: string;
   emailRs: string;
+  /**
+   * Logo sebagai data URI (`data:image/png;base64,...`), atau string kosong.
+   *
+   * Data URI dan bukan lintasan berkas: HTML surat diserahkan ke Chromium lewat
+   * `setContent()` dan ke peramban petugas lewat `<iframe>` ber-CSP `sandbox`.
+   * Keduanya tidak punya asal-usul yang bisa dipakai menyelesaikan lintasan
+   * relatif, dan `lib/pdf.ts` sengaja dibangun di atas janji bahwa render surat
+   * TIDAK PERNAH menyentuh jaringan.
+   */
+  logoDataUri: string;
 }
 
 /** Satu baris "Label : Nilai" pada badan surat. */
@@ -168,7 +224,10 @@ export interface IsiSuratSakit {
   /** Kosong kecuali RS menyalakannya sendiri -- lihat `khanza/suratPasien.ts`. */
   diagnosa: string;
   namaDokter: string;
+  kdDokter: string;
   tanggalSurat: string;
+  /** Bentuk dd-mm-YYYY, HANYA untuk isi QR -- lihat `formatTanggalRingkas()`. */
+  tanggalRingkas: string;
 }
 
 export interface IsiSuratSehat {
@@ -183,7 +242,10 @@ export interface IsiSuratSehat {
   butaWarna: string;
   keperluan: string;
   namaDokter: string;
+  kdDokter: string;
   tanggalSurat: string;
+  /** Bentuk dd-mm-YYYY, HANYA untuk isi QR -- lihat `formatTanggalRingkas()`. */
+  tanggalRingkas: string;
 }
 
 export type IsiSurat = IsiSuratSakit | IsiSuratSehat;
@@ -213,6 +275,71 @@ export const JUDUL_SURAT: Record<IsiSurat['jenis'], string> = {
   sakit: 'SURAT KETERANGAN SAKIT',
   sehat: 'SURAT KETERANGAN SEHAT',
 };
+
+/**
+ * Isi QR pengesahan -- padanan parameter `finger` milik Khanza.
+ *
+ * ==========================================================================
+ * BENTUKNYA MENGIKUTI KHANZA PERSIS, dan itu seluruh gunanya
+ * ==========================================================================
+ *
+ * Diambil dari `SuratSakit.java` (dan sama di `DlgReg.java` untuk surat sehat),
+ * bukan dikarang:
+ *
+ *   "Dikeluarkan di "+namars+", Kabupaten/Kota "+kabupatenrs+"\n"
+ *   +"Ditandatangani secara elektronik oleh "+namadokter+"\n"
+ *   +"ID "+(finger.equals("")?kodedokter:finger)+"\n"
+ *   +tgl_registrasi (dd-mm-YYYY)
+ *
+ * Satu-satunya alasan QR ini ada adalah supaya surat yang diterima lewat
+ * WhatsApp bisa DIBANDINGKAN dengan yang dicetak di loket. Begitu susunannya
+ * menyimpang satu kata pun, dua QR untuk surat yang sama menghasilkan teks
+ * berbeda dan perbandingan itu berhenti membuktikan apa pun -- kegagalan yang
+ * bentuknya sama dengan `khanza/stokGudang.ts`: bukan galat, melainkan dua
+ * jawaban berbeda dari satu sistem.
+ *
+ * ==========================================================================
+ * KENAPA "ID" DI SINI KODE DOKTER, dan Khanza kadang menaruh yang lain
+ * ==========================================================================
+ *
+ * Khanza mendahulukan `sha1(sidikjari.sidikjari)` -- SHA1 atas cetakan SIDIK
+ * JARI dokter -- dan baru jatuh ke kode dokter bila pegawainya belum
+ * mendaftarkan sidik jari. Di mesin ini tabel `sidikjari` berisi **0 baris**,
+ * jadi Khanza sendiri pun sedang mencetak kode dokter.
+ *
+ * Yang TIDAK dilakukan di sini: membaca tabel itu. Dua sebabnya, dan keduanya
+ * berdiri sendiri. (1) Ia tidak bisa diuji terhadap satu baris pun di mesin
+ * ini, dan pelajaran `RAD_REQUEST` masih baru -- query yang benar secara
+ * struktur bukan hal yang sama dengan query yang terbukti. (2) Lebih penting:
+ * surat Khanza berpindah tangan sebagai kertas di loket, sementara surat ini
+ * berpindah sebagai berkas yang bisa diteruskan ke siapa pun tanpa batas.
+ * Menaruh turunan biometrik seorang pegawai ke dalam benda yang menyebar
+ * seperti itu adalah keputusan rumah sakit, bukan keputusan kode -- dan
+ * membuatnya secara diam-diam sebagai efek samping "menambahkan QR" adalah
+ * persis cara keputusan semacam itu lolos tanpa pernah diambil.
+ *
+ * Akibat yang harus disadari: pada RS yang SUDAH mendaftarkan sidik jari,
+ * baris ID di QR ini berbeda dari QR Khanza. Lihat CLAUDE.md §"Yang masih
+ * perlu keputusan rumah sakit".
+ *
+ * Tidak ada satu pun data PASIEN di sini, dan itu disengaja: Khanza pun tidak
+ * memuatnya. Nama pasien memang tercetak besar di badan surat, tapi bentuk yang
+ * terbaca mesin membuat pemanenan borongan jadi murah -- dan QR ini mengesahkan
+ * SIAPA YANG MENERBITKAN, bukan siapa yang disebut.
+ */
+export function teksAsalUsul(kop: KopSurat, isi: IsiSurat): string {
+  const tempat = [kop.namaRs.trim(), kop.kotaRs.trim() && `Kabupaten/Kota ${kop.kotaRs.trim()}`]
+    .filter(Boolean)
+    .join(', ');
+  return [
+    tempat && `Dikeluarkan di ${tempat}`,
+    isi.namaDokter && `Ditandatangani secara elektronik oleh ${isi.namaDokter}`,
+    isi.kdDokter && `ID ${isi.kdDokter}`,
+    isi.tanggalRingkas,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 /**
  * Nama berkas yang dilihat pasien di WhatsApp.

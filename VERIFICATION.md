@@ -171,6 +171,13 @@ Diverifikasi lewat HTTP asli dengan cookie sesi admin sungguhan: chip terurut `S
 
 **PDF terbentuk sungguhan**: `%PDF-` magic sah, surat sakit **100.628 byte / 684 ms**, surat sehat **98.984 byte / 600 ms**. Chromium diluncurkan dengan `userDataDir` sementara sendiri (tidak pernah `.wwebjs_auth`), tanpa `--no-sandbox`, ditutup di `finally`. **Tata letaknya diperiksa dengan MELIHATNYA** -- kedua surat dirender ke PNG dan dibaca: kop RS, judul bergaris bawah, nomor surat, tabel identitas, kalimat istirahat/kesimpulan, blok tanda tangan, dan catatan kaki asal-usul semuanya pada tempatnya.
 
+**Dua cacat tata letak yang HANYA terlihat dari gambarnya, dan keduanya lolos dari seluruh uji yang ada.** Dilaporkan pemakai atas surat sungguhan, lalu dibetulkan terhadap koordinat elemen jrxml -- bukan terhadap selera:
+
+1. **QR berada di pojok kiri bawah halaman, jauh dari tanda tangan.** Yang benar dibaca langsung dari `rptSuratSakit5.jrxml`: tanggal `y=306`, "Pemeriksa" `y=321`, **QR `y=340 x=373 w=174 h=73`**, `nm_dokter` `y=419` -- keempatnya pada kolom `x=373` yang sama, jadi QR-nya menempati ruang tanda tangan di antara keduanya. `rptSuratSehat.jrxml` sama persis: `y=245` / **QR `y=258 x=131`** / `y=322` pada `x=130`. Sesudah dipindahkan, kedua surat dirender ulang ke PNG dan dilihat: QR duduk tepat di atas `dr. Intan Rahma Dewi`, berikut keterangan 7pt di bawah namanya.
+2. **Logo menempel di garis ganda kop** sementara teks di sebelahnya berjarak. Sebabnya logo `position: absolute` -- ia tidak punya margin/padding sendiri yang bisa mendorong garis itu, jadi satu-satunya yang menahannya `min-height` kop, yang bernilai `21mm` untuk logo `20mm`. Dinaikkan ke `24mm` (20mm logo + 4mm jarak).
+
+**Ujinya ikut diperkuat, dan itu bagian yang paling layak dicatat**: asersi lama berbunyi "ada `<img alt="Kode QR pengesahan">`" dan **lolos sepenuhnya pada versi yang salah letak** -- keberadaan gambar tidak pernah bisa membuktikan letaknya. Sekarang yang dipatok URUTAN ketiganya di dalam HTML (`Dokter Pemeriksa,` -> QR -> nama dokter), plus kasus kebalikannya: saat QR tidak ada, `div.ruang` 20mm harus kembali supaya suratnya tetap punya tempat tanda tangan basah bila dicetak. `npm test` **470 lolos (27 suite)**.
+
 **Uji unit** (`src/core/suratDoc.test.ts`, **26 kasus**): penanda umum + penanda-nama-kolom-sendiri, dan **kontrol negatif** bahwa nama sungguhan yang memuat kata itu (`KELURAHAN BALAI GADANG`) TIDAK ikut dibuang; `'0000-00-00'` -> string kosong, bukan "Invalid Date"; pelolosan HTML kelima karakter berikut urutan `&` lebih dulu; nama pasien berisi `<script>` tidak pernah jadi elemen; blok diagnosa hanya muncul saat terisi.
 
 **Uji HTTP lewat build PRODUKSI** (`next start -p 3199`, port dipastikan kosong lebih dulu -- satu listener): **35 pemeriksaan lolos, 0 gagal**. Termasuk: pratinjau mengembalikan `application/pdf` sungguhan (`%PDF-`, >20 KB) untuk KEDUA jenis, `inline` bukan `attachment`, `cache-control: no-store`; parameter tak sah -> 400, surat tak ada -> 404; tab Pengaturan **tidak** memuat daftar surat (membuktikan `sik` tidak di-query saat tabnya tidak dibuka); baris surat nyata `SKS20260806001` tampil berikut lencana nomor bermasalah.
@@ -213,3 +220,36 @@ Diverifikasi lewat HTTP asli dengan cookie sesi admin sungguhan: chip terurut `S
 **Pemeriksaan menyeluruh sesudah perubahan**: `npm test` **457 lolos (27 suite)**, `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses. **Kebersihan**: kedua akun uji (`ujiadm`, `ujiops`) dihapus, ketiga skrip `.tmp-*.mjs` dihapus, server uji di 3199 dihentikan dan portnya diperiksa bebas.
 
 **Yang TIDAK terbukti, dan sengaja dicatat sebagai tidak terbukti**: pengiriman surat SEHAT tidak pernah dijalankan sampai WhatsApp -- hanya PDF-nya yang dibuktikan terbentuk dan pratinjaunya lewat HTTP. Jalur enqueue-nya identik dengan surat sakit (satu fungsi `kirimSuratAction` yang sama, dibedakan satu parameter), tapi itu bukan hal yang sama dengan terbukti. Menjalankannya berarti menerbitkan surat keterangan sehat atas kunjungan pasien sungguhan, dan itu justru keputusan yang §"Yang masih perlu keputusan rumah sakit" nyatakan bukan milik kode.
+
+### Logo dan QR pengesahan pada surat
+
+**Bentuknya dibaca dari sumber Khanza, bukan dikarang.** `rptSuratSakit5.jrxml` dan `rptSuratSehat.jrxml` sama-sama punya parameter `logo` (`java.io.InputStream`, dipakai sebagai `imageExpression`, `70x70` di `x=0,y=0`) dan satu `componentElement` berisi `jr:QRCode errorCorrectionLevel="H"` yang `codeExpression`-nya `$P{finger}`. **`finger` TIDAK PERNAH dicetak sebagai teks** -- `grep` atas jrxml-nya menemukannya persis dua kali: deklarasi parameter, dan `codeExpression`. Susunan teksnya diambil dari `SuratSakit.java:923`.
+
+**Dua fakta yang menentukan keputusan, keduanya diukur bukan diasumsikan**: `setting.logo` berisi **75.482 byte** ber-magic `89504E47` (PNG) berukuran **1050x1050**; tabel `sidikjari` berisi **0 baris**, sehingga `finger.equals("")?kodedokter:finger` milik Khanza sedang mencetak kode dokter -- yang berarti QR di sini dan QR Khanza saat ini identik isinya.
+
+**Uji unit**: `npm test` **469 lolos (27 suite)**, naik dari 457 -- 12 tes baru untuk `mimeGambar` (PNG/JPEG/GIF/BMP/WebP dikenali, RIFF-non-WebP dan isi tak dikenal -> `null`), `formatTanggalRingkas` (termasuk `'0000-00-00'` -> kosong), `teksAsalUsul` (susunan Khanza persis, baris kosong dibuang alih-alih mencetak label menggantung, **tidak pernah memuat nama pasien / no. RM / no. surat**), dan `renderSuratHtml` tanpa logo/QR.
+
+**Uji terhadap surat NYATA** (`SKS20260806001` di `alca`, lewat `muatSurat` -> `suratKeHtml` -> `htmlKePdf` yang sama dipakai produksi): **14 pemeriksaan lolos, 0 gagal**.
+
+- Logo dan QR keduanya tertanam sebagai `data:` URI; kop ditandai `class="kop berlogo"`.
+- **QR-nya benar-benar menyandikan teks yang dimaksud**, dibuktikan dengan menyandikan ulang `teksAsalUsul()` memakai opsi yang sama dan membandingkan data URI-nya -- **sama persis**. Isinya: `Dikeluarkan di ... , Kabupaten/Kota ...` / `Ditandatangani secara elektronik oleh ...` / `ID ...` / `06-08-2026`, dan **tidak memuat nama pasien maupun no. RM**.
+- **Chromium benar-benar MENDEKODE keduanya**, bukan sekadar memuat tagnya: `naturalWidth` 1050x1050 (logo) dan 584x584 (QR). Tag `<img>` yang rusak menghasilkan halaman yang mustahil dibedakan lewat pemeriksaan string, jadi ini pemeriksaan yang tidak bisa dilewati.
+- **Teks kop tidak menabrak logo**: tepi kanan logo di 151 px, tulisan mulai di 163 px.
+- **PDF memuat 3 XObject `/Image`** dan diawali `%PDF-`. *(`strings` atas PDF-nya menemukan 0 penanda `/Image` -- objeknya terkompresi; itu sebabnya bukti diambil dari Chromium dan dari jumlah XObject, bukan dari grep.)*
+- **Tanpa logo dan tanpa QR surat tetap utuh**: tidak ada `<img>` sama sekali, judul dan blok tanda tangan tetap ada, dan PDF-nya tetap terbentuk (**72.739 byte**).
+
+**Akibat ukuran, dicatat sebagai konsekuensi yang diterima**: PDF per surat **72.739 -> 190.626 byte**. Logonya 1050x1050 sementara ditampilkan 76 px; mengecilkannya menuntut paket pengolah gambar baru, ditolak dengan alasan yang sama seperti `pdfkit`/`pdf-lib`.
+
+**Uji HTTP lewat build PRODUKSI** (`next start -H 127.0.0.1 -p 3197`, port dipastikan KOSONG lebih dulu): **12 pemeriksaan lolos, 0 gagal**. Ini yang tidak bisa digantikan uji mana pun di atas -- `page.setContent()` tidak mengirim satu pun header, jadi ia sama sekali tidak menyentuh CSP.
+
+- `content-security-policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:` -- **`data:` saja**, diperiksa eksplisit TIDAK memuat `img-src *` maupun `https:`.
+- **Kedua gambar terdekode di peramban sungguhan di bawah header itu** (1050x1050 dan 584x584) dan **nol pelanggaran CSP di konsol**. Kalau `img-src` salah tulis, logonya diblokir HANYA di pratinjau dashboard sementara PDF tetap benar -- kegagalan yang mustahil terlihat tanpa uji ini.
+- `&format=pdf` tetap `application/pdf`; HTML tetap `text/html`.
+
+**Pemeriksaan menyeluruh**: `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses, `verify:plans` lolos (`ADMINISTRASI_SURAT_SAKIT`/`_SEHAT` tidak berubah jalur aksesnya walau `d.kd_dokter` ikut di-SELECT), `verify:db` lolos (`sik` tetap menolak tulisan). **Kebersihan**: akun uji `cekqr` dihapus, kedua skrip `.tmp-*` dan direktori `tmp-dryrun-surat/` dihapus, server 3197 dihentikan dan portnya diperiksa bebas.
+
+**Tiga kegagalan selama verifikasi, ketiganya kegagalan UJI bukan kegagalan produk** -- dicatat karena ketiganya bentuk yang sama dan gampang "diperbaiki" ke arah yang salah:
+
+1. **Backtick di dalam komentar CSS.** Blok gaya di `core/suratHtml.ts` ada di dalam template literal JS, jadi backtick di komentarnya menutup stringnya -- galatnya muncul sebagai `TS1005` yang menunjuk baris lain.
+2. **Asersi `not.toContain('berlogo')` gagal walau kelasnya benar**: kata itu selalu ada di dalam blok `<style>` sebagai nama kelas. Diperbaiki jadi memeriksa `class="kop"`. Persis jebakan yang sudah tercatat di §`/farmasi` dipecah jadi TAB.
+3. **Pagar anti-build-lama dipasang SEBELUM login**, padahal `proxy.ts` menjawab 307 ke `/login` sehingga permintaannya tidak pernah sampai ke route yang memasang headernya. Terbaca sebagai "build lama menjawab" atas build yang justru baru.

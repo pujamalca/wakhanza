@@ -1,5 +1,7 @@
+import QRCode from 'qrcode';
 import { getSetting, getSettingBool } from '@/models';
-import { getHospitalIdentity } from '@/khanza/common';
+import { getHospitalIdentity, getHospitalLogoDataUri } from '@/khanza/common';
+import { logger } from '@/lib/logger';
 import type { BarisSuratSakit, BarisSuratSehat } from '@/khanza/suratPasien';
 import {
   type IsiSurat,
@@ -9,8 +11,10 @@ import {
   isianSurat,
   rakitAlamat,
   formatTanggalSurat,
+  formatTanggalRingkas,
   formatUmurSurat,
   jenisKelaminLengkap,
+  teksAsalUsul,
   type JenisSurat,
 } from '@/core/suratDoc';
 import { renderSuratHtml } from '@/core/suratHtml';
@@ -64,10 +68,16 @@ export async function administrasiAktif(): Promise<boolean> {
  * yang dipakai sepuluh pemicu lain tidak ikut berubah demi satu halaman.
  */
 export async function bacaKopSurat(): Promise<KopSurat> {
-  const identitas = await getHospitalIdentity();
-  const rows = await sikSelect<{ kabupaten: string | null; propinsi: string | null; email: string | null }>(
-    'SELECT kabupaten, propinsi, email FROM setting LIMIT 1',
-  );
+  // Ketiganya bebas dari satu sama lain, dan dua di antaranya hampir selalu
+  // dijawab dari cache -- dijalankan berbarengan supaya membuka pratinjau tidak
+  // menunggu tiga perjalanan berurutan ke database.
+  const [identitas, logoDataUri, rows] = await Promise.all([
+    getHospitalIdentity(),
+    getHospitalLogoDataUri(),
+    sikSelect<{ kabupaten: string | null; propinsi: string | null; email: string | null }>(
+      'SELECT kabupaten, propinsi, email FROM setting LIMIT 1',
+    ),
+  ]);
   const s = rows[0];
   return {
     namaRs: identitas.namaRs,
@@ -76,6 +86,7 @@ export async function bacaKopSurat(): Promise<KopSurat> {
     propinsiRs: isianSurat(s?.propinsi),
     kontakRs: identitas.kontakRs,
     emailRs: isianSurat(s?.email),
+    logoDataUri,
   };
 }
 
@@ -151,8 +162,10 @@ export function susunSuratSakit(row: BarisSuratSakit): IsiSuratSakit {
     // surat di database ini punya diagnosa tercatat.
     diagnosa: isianSurat(row.diagnosa),
     namaDokter: isianSurat(row.nm_dokter),
+    kdDokter: isianSurat(row.kd_dokter),
     // Tanggal SURAT, bukan tanggal mulai istirahat: 5 dari 18 baris berbeda.
     tanggalSurat: formatTanggalSurat(row.tgl_registrasi),
+    tanggalRingkas: formatTanggalRingkas(row.tgl_registrasi),
   };
 }
 
@@ -174,14 +187,49 @@ export function susunSuratSehat(row: BarisSuratSehat): IsiSuratSehat {
     butaWarna: isianSurat(row.butawarna),
     keperluan: isianSurat(row.keperluan),
     namaDokter: isianSurat(row.nm_dokter),
+    kdDokter: isianSurat(row.kd_dokter),
     tanggalSurat: formatTanggalSurat(row.tgl_registrasi),
+    tanggalRingkas: formatTanggalRingkas(row.tgl_registrasi),
   };
+}
+
+/**
+ * QR pengesahan, memakai `qrcode` yang SUDAH jadi dependensi produksi lewat
+ * layar Koneksi (QR penautan WhatsApp) -- nol paket baru, prinsip yang sama
+ * yang membuat PDF-nya dibuat lewat Chromium bawaan whatsapp-web.js.
+ *
+ * `errorCorrectionLevel: 'H'` mengikuti Khanza persis. Tingkat itu memang boros
+ * (30% isi QR dipakai untuk pemulihan), dan justru itu gunanya: berkas ini
+ * dicetak ulang, difoto layar, lalu diteruskan lagi lewat WhatsApp yang
+ * memampatkan gambar -- QR yang masih terbaca setelah semua itu adalah
+ * satu-satunya QR yang berguna.
+ *
+ * **Kegagalan TIDAK menjatuhkan suratnya.** Isi QR bisa melampaui daya tampung
+ * bila nama rumah sakit dan nama dokter luar biasa panjang, dan menolak
+ * menerbitkan surat karena hiasan pengesahannya gagal adalah pertukaran yang
+ * salah arah -- yang dibutuhkan pasien adalah suratnya. Yang hilang pun tidak
+ * kritis: keterangan asal-usul yang sama tetap tercetak sebagai teks di kaki
+ * surat, dan itulah alasan keduanya ada. Dicatat `warn` supaya kegagalannya
+ * tetap punya jejak alih-alih hilang diam-diam.
+ */
+async function buatQrAsalUsul(teks: string): Promise<string> {
+  if (!teks) return '';
+  try {
+    return await QRCode.toDataURL(teks, { errorCorrectionLevel: 'H', scale: 8 });
+  } catch (err) {
+    logger.warn({ err, panjang: teks.length }, 'QR pengesahan surat gagal dibuat, surat tetap diterbitkan');
+    return '';
+  }
 }
 
 /** Satu jalur dari isi surat ke HTML, dipakai pratinjau MAUPUN pengiriman. */
 export async function suratKeHtml(isi: IsiSurat): Promise<string> {
   const kop = await bacaKopSurat();
-  return renderSuratHtml(isi, kop, { catatanKaki: await bacaCatatanKaki(kop) });
+  const [catatanKaki, qrDataUri] = await Promise.all([
+    bacaCatatanKaki(kop),
+    buatQrAsalUsul(teksAsalUsul(kop, isi)),
+  ]);
+  return renderSuratHtml(isi, kop, { catatanKaki, qrDataUri });
 }
 
 /**

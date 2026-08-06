@@ -70,10 +70,18 @@ const JANGAN_SIMPAN = 'no-store, private';
  * pelolosan di masa depan tidak bisa menyentuh sesi dashboard.
  *
  * `style-src 'unsafe-inline'` wajib -- seluruh gaya surat memang satu blok
- * <style> di dalam berkasnya, dan `default-src 'none'` menutup sisanya (surat
- * ini tidak memuat gambar, font, maupun skrip).
+ * <style> di dalam berkasnya.
+ *
+ * `img-src data:` ada sejak surat memuat logo rumah sakit dan QR pengesahan.
+ * Sengaja `data:` SAJA, bukan `'self'` apalagi `*`: kedua gambar itu memang
+ * tertanam di dalam HTML-nya, jadi izin ini tidak membuka satu pun jalan
+ * keluar. Membolehkan alamat jarak jauh akan mengubah surat jadi alat yang bisa
+ * memberi tahu pihak luar kapan dan dari mana sebuah surat pasien dibuka --
+ * dan `lib/pdf.ts` berdiri di atas janji bahwa render surat tidak pernah
+ * menyentuh jaringan. Sisanya (skrip, font, bingkai) tetap ditutup
+ * `default-src 'none'`.
  */
-const CSP_SURAT = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+const CSP_SURAT = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
 /**
  * Galat pun dijawab HTML, bukan JSON.

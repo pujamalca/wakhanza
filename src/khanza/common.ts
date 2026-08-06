@@ -1,4 +1,5 @@
 import { sikSelect } from '@/db/sik';
+import { mimeGambar } from '@/core/suratDoc';
 
 /**
  * Format tanggal sesuai enkode di primary key Khanza (`YYYY/MM/DD/...` pada
@@ -66,5 +67,47 @@ export async function getHospitalIdentity(): Promise<HospitalIdentity> {
     kontakRs: row?.kontak ?? '',
   };
   identityCache = { value, at: Date.now() };
+  return value;
+}
+
+let logoCache: { value: string; at: number } | null = null;
+
+/**
+ * Logo rumah sakit sebagai data URI, atau string kosong bila tidak ada.
+ *
+ * ==========================================================================
+ * KENAPA DI-CACHE, dan kenapa BUKAN ikut menumpang query kop surat
+ * ==========================================================================
+ *
+ * `setting.logo` adalah `longblob` -- 73 KB di mesin ini. `bacaKopSurat()` di
+ * `lib/surat.ts` sudah membaca tabel yang sama, dan menempelkan kolom ini ke
+ * sana tampak lebih hemat karena menghemat satu query. Justru sebaliknya:
+ * kop surat dibaca sekali untuk SETIAP pratinjau yang dibuka staf, sehingga
+ * blob itu akan menyeberang lewat kolam `sik` yang sengaja dibatasi
+ * `pool.max: 2` -- kolam yang sama yang dipakai poller dan dipakai bergantian
+ * dengan SIMRS yang sedang melayani pasien. Dipisah dan di-cache satu jam
+ * (§12.2, pola yang sama dengan `getHospitalIdentity()`), ia dibaca sekali
+ * lalu tidak lagi.
+ *
+ * Yang di-cache DATA URI-nya, bukan buffernya: pengubahan ke base64 atas 73 KB
+ * terjadi sekali per jam alih-alih sekali per surat.
+ *
+ * Blob kosong maupun jenis gambar yang tidak dikenali sama-sama menghasilkan
+ * string kosong, dan surat lalu dicetak TANPA logo. Itu keadaan yang wajar,
+ * bukan kegagalan -- rumah sakit yang belum mengunggah logonya tetap harus bisa
+ * mengirim surat.
+ */
+export async function getHospitalLogoDataUri(): Promise<string> {
+  if (logoCache && Date.now() - logoCache.at < IDENTITY_CACHE_TTL_MS) {
+    return logoCache.value;
+  }
+  const rows = await sikSelect<{ logo: Buffer | null }>('SELECT logo FROM setting LIMIT 1');
+  const blob = rows[0]?.logo;
+  let value = '';
+  if (blob && blob.length > 0) {
+    const mime = mimeGambar(blob);
+    if (mime) value = `data:${mime};base64,${blob.toString('base64')}`;
+  }
+  logoCache = { value, at: Date.now() };
   return value;
 }
