@@ -19,21 +19,36 @@ import { IconX } from './icons';
  * balik -- tanpa itu state React tetap mengira dialognya terbuka dan tombol
  * "Ubah" berikutnya tidak membuka apa-apa.
  */
+/**
+ * `md` konfirmasi pendek, `lg` form berisi textarea panjang, `xl` isi yang
+ * lebarnya sudah ditentukan dari luar dan tidak bisa dikompromikan -- sejauh
+ * ini cuma pratinjau surat, yang harus selebar kertas A4 (794 px pada 96 dpi)
+ * supaya susunan barisnya sama dengan PDF yang benar-benar terkirim.
+ *
+ * Ukurannya prop, bukan `className`: dua utility Tailwind untuk properti yang
+ * sama menang menurut urutan Tailwind menghasilkan CSS-nya, bukan urutan
+ * penulisan -- jadi `max-w-*` dari luar bisa diam-diam KALAH.
+ */
+const LEBAR = {
+  md: 'max-w-md',
+  lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
+} as const;
+
 export function Modal({
   open,
   onClose,
   title,
   description,
   children,
-  wide = false,
+  size = 'md',
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   description?: string;
   children: React.ReactNode;
-  /** Untuk form berisi textarea panjang (isi pesan), bukan konfirmasi pendek. */
-  wide?: boolean;
+  size?: keyof typeof LEBAR;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -62,9 +77,7 @@ export function Modal({
         // punya target === dialog.
         if (e.target === e.currentTarget) onClose();
       }}
-      className={`w-[calc(100vw-2rem)] rounded-lg border bg-card p-0 text-foreground shadow-lg backdrop:bg-black/50 ${
-        wide ? 'max-w-2xl' : 'max-w-md'
-      }`}
+      className={`w-[calc(100vw-2rem)] rounded-lg border bg-card p-0 text-foreground shadow-lg backdrop:bg-black/50 ${LEBAR[size]}`}
     >
       <div className="max-h-[85vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-4 border-b p-4">

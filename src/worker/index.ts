@@ -10,6 +10,8 @@ import { runBillingReadyCycle } from './pollerBilling';
 import { runBookingCycle } from './pollerBooking';
 import { runFarmasiCycles } from './farmasiRunner';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
+import { runBpjsBatalCycles, runBpjsKontrolIfDue } from './bpjsRunner';
+import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
@@ -112,6 +114,12 @@ async function shutdown(alasan: string, exitCode = 0): Promise<void> {
 /** Semua pemicu kelas sisip (ARCHITECTURE §4.1) -- watermark, interval rapat (POLL_INTERVAL_MS). */
 async function runAllSisipCycles(): Promise<void> {
   await runQueueRegCycle();
+  // Permintaan lab/radiologi ditaruh SEBELUM hasilnya, mengikuti urutan
+  // kejadiannya di dunia nyata: pemeriksaan dipesan dulu, hasilnya menyusul.
+  // Urutan di dalam satu siklus tidak menentukan apa pun secara teknis (tiap
+  // pemicu punya watermarknya sendiri), tapi urutan yang mengikuti alur kerja
+  // membuat log satu siklus bisa dibaca sebagai cerita.
+  await runPermintaanCycle();
   await runResultReadyCycle();
   await runPharmacyReadyCycle();
   await runBillingReadyCycle();
@@ -120,6 +128,14 @@ async function runAllSisipCycles(): Promise<void> {
   // bukan pasien. Ia menjaga sakelarnya sendiri (`farmasi.enabled`, default
   // MATI), jadi aman dipanggil tiap siklus tanpa syarat di sini.
   await runFarmasiCycles();
+  // Pembatalan Mobile JKN: kelas pindai (tabelnya tidak punya indeks waktu --
+  // lihat khanza/bpjsBatal.ts), tapi diletakkan di siklus RAPAT dan bukan di
+  // siklus pindai bersama booking. Alasannya bukan besarnya tabel melainkan
+  // gunanya: slot yang batal ada supaya bisa ditawarkan ke pasien lain, dan
+  // kabar itu basi kalau datang lima menit kemudian. Tabelnya sendiri bertambah
+  // ~2,8 baris per hari, jadi biayanya tidak sebanding dengan booking.
+  // Menjaga sakelarnya sendiri (`bpjs.enabled`, default MATI).
+  await runBpjsBatalCycles();
 }
 
 /**
@@ -287,6 +303,12 @@ async function main(): Promise<void> {
   // `next_run_at` dimajukan bahkan ketika pesannya tidak jadi dikirim justru
   // supaya itu tetap sekali sehari alih-alih tiap siklus.
   void loop('stok-darurat', runDueStokDarurat, scanIntervalMs);
+  // Pengingat surat kontrol BPJS -- sekali sehari, tapi kejatuhtempoannya
+  // diperiksa tiap siklus pindai alih-alih dipatok node-cron seperti
+  // BOOK_REMIND. Bedanya menentukan: jam kirimnya dibaca ULANG tiap siklus,
+  // jadi mengubahnya di dashboard berlaku hari itu juga alih-alih menunggu
+  // worker dimulai ulang oleh orang yang tidak tahu ia perlu melakukannya.
+  void loop('bpjs-kontrol', runBpjsKontrolIfDue, scanIntervalMs);
   void dispatcherLoop();
   void loop(
     'heartbeat',

@@ -70,6 +70,24 @@ export const IconFileText = (p: IconProps) => (
   </Icon>
 );
 
+/**
+ * Dokumen berikut panah keluar -- untuk menu Administrasi, satu-satunya yang
+ * MENGIRIM BERKAS alih-alih teks.
+ *
+ * Sengaja tidak memakai `IconFileText` yang sudah ada: tiga menu berturut-turut
+ * (BPJS, Administrasi, Template) akan memakai lambang yang sama persis, dan
+ * sidebar yang tiap barisnya seragam berhenti bisa dipindai sekilas -- ikonnya
+ * lalu cuma jadi hiasan di sebelah teks.
+ */
+export const IconFileSend = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5" />
+    <path d="M14 3v5h5v3" />
+    <path d="M15 18h6" />
+    <path d="m18 15 3 3-3 3" />
+  </Icon>
+);
+
 export const IconPhoneAlert = (p: IconProps) => (
   <Icon {...p}>
     <path d="M5 3h3l2 5-2.2 1.3a12 12 0 0 0 5.9 5.9L15 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2Z" />

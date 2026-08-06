@@ -14,6 +14,7 @@ export { BroadcastSchedule } from './BroadcastSchedule';
 export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule';
 export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
 export { FarmasiTarget } from './FarmasiTarget';
+export { BpjsTarget } from './BpjsTarget';
 export { TemplateTarget } from './TemplateTarget';
 export { WaGroup } from './WaGroup';
 export { StokAlertSchedule } from './StokAlertSchedule';

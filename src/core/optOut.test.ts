@@ -38,16 +38,38 @@ describe('isOptOutRequest', () => {
 });
 
 describe('respectsOptOut', () => {
-  it('ketujuh pemicu otomatis terikat opt-out', () => {
-    for (const code of ['QUEUE_REG', 'BOOK_CONFIRM', 'BOOK_CANCEL', 'BOOK_REMIND', 'RESULT_READY', 'PHARMACY_READY', 'BILLING_READY']) {
+  it('pemicu otomatis ke pasien terikat opt-out', () => {
+    for (const code of [
+      'QUEUE_REG',
+      'BOOK_CONFIRM',
+      'BOOK_CANCEL',
+      'BOOK_REMIND',
+      'RESULT_READY',
+      'PHARMACY_READY',
+      'BILLING_READY',
+      // Pengingat surat kontrol BPJS: otomatis, berangkat dari sik, tanpa ada
+      // manusia yang menekan apa pun -- sekelas dengan ketujuh di atasnya.
+      'BPJS_KONTROL',
+      // Permintaan lab/radiologi -- pasangan RESULT_READY, yang sudah terikat.
+      // Pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
+      // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
+      'LAB_REQUEST',
+      'RAD_REQUEST',
+    ]) {
       expect(respectsOptOut(code)).toBe(true);
     }
-    expect(optOutTriggerCodes()).toHaveLength(7);
+    expect(optOutTriggerCodes()).toHaveLength(10);
   });
 
   it('BROADCAST dan AUTO_REPLY TIDAK terikat -- kanal terpisah, keputusan RS', () => {
     expect(respectsOptOut('BROADCAST')).toBe(false);
     expect(respectsOptOut('AUTO_REPLY')).toBe(false);
+  });
+
+  it('pemicu yang penerimanya STAF tidak terikat -- tidak ada nomor pasien untuk dicocokkan', () => {
+    expect(respectsOptOut('FARMASI_VALIDASI')).toBe(false);
+    expect(respectsOptOut('FARMASI_STOK_DARURAT')).toBe(false);
+    expect(respectsOptOut('BPJS_BATAL')).toBe(false);
   });
 
   it('kode yang tidak dikenal dianggap TIDAK terikat, bukan diam-diam terikat', () => {

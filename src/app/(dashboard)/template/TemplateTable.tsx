@@ -50,7 +50,7 @@ export interface BroadcastTemplateRow {
  * "seperti apa satu template", tabel menjawab "template apa saja yang ada dan
  * mana yang aktif" -- dan yang kedua itulah yang ditanyakan staf saat membuka
  * halaman ini. Penyuntingan jadi tindakan tersendiri dengan awal dan akhir yang
- * jelas, bukan tujuh form yang semuanya tampak siap disimpan.
+ * jelas, bukan sederet form yang semuanya tampak siap disimpan.
  */
 /**
  * Ringkasan penerima untuk kolom tabel. Menampilkan MODE dan jumlah tujuan
@@ -174,7 +174,7 @@ function TriggerTemplateModal({
     <Modal
       open
       onClose={onClose}
-      wide
+      size="lg"
       title={triggerLabel(row.triggerCode)}
       description={`Dipakai otomatis oleh worker saat kejadiannya terdeteksi di Khanza. Kode pemicu: ${row.triggerCode}`}
     >
@@ -340,7 +340,7 @@ function BroadcastTemplateModal({
     <Modal
       open
       onClose={onClose}
-      wide
+      size="lg"
       title={row ? `Ubah template: ${row.name}` : 'Template broadcast baru'}
       description="Dipilih manual saat menyusun Broadcast atau Broadcast terjadwal."
     >

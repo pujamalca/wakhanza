@@ -70,6 +70,11 @@ export const TRIGGER_LABEL: Record<string, string> = {
   BOOK_CANCEL: 'Booking batal',
   QUEUE_REG: 'Nomor antrian',
   RESULT_READY: 'Hasil penunjang',
+  // Pasangan RESULT_READY dari ujung yang lain. Labelnya menyebut "permintaan"
+  // secara eksplisit supaya baris di Antrean tidak tertukar dengan hasilnya --
+  // keduanya menyangkut kunjungan dan pasien yang sama pada hari yang sama.
+  LAB_REQUEST: 'Permintaan lab',
+  RAD_REQUEST: 'Permintaan radiologi',
   PHARMACY_READY: 'Obat siap',
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
@@ -80,6 +85,18 @@ export const TRIGGER_LABEL: Record<string, string> = {
   FARMASI_VALIDASI: 'Apotek: resep divalidasi',
   FARMASI_PENYERAHAN: 'Apotek: obat diserahkan',
   FARMASI_UJI: 'Apotek: pesan uji',
+  FARMASI_STOK_DARURAT: 'Apotek: persediaan menipis',
+  // BPJS_BATAL ke loket, BPJS_KONTROL ke pasien -- dan bedanya ditulis di
+  // labelnya, dengan alasan yang sama seperti ketiga baris apotek di atas:
+  // baris di Antrean/Log tidak boleh terbaca sebagai pemberitahuan yang gagal
+  // sampai ke pasien padahal penerimanya memang staf.
+  BPJS_BATAL: 'BPJS: pembatalan Mobile JKN',
+  BPJS_KONTROL: 'BPJS: pengingat kontrol',
+  // Satu-satunya baris yang membawa BERKAS, bukan kabar. Labelnya menyebut
+  // "dokumen" supaya jelas dari halaman Antrean bahwa yang gagal terkirim
+  // bukan sekadar pemberitahuan yang bisa diulang isinya -- ada surat yang
+  // tidak sampai, dan pasiennya kemungkinan sedang menunggunya.
+  ADMINISTRASI: 'Dokumen surat',
 };
 
 /** Kode yang belum dikenal dikembalikan apa adanya, bukan jadi string kosong. */

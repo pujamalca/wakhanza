@@ -168,6 +168,63 @@ export const DARURAT_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
+ * daftarnya lebih dekat ke FARMASI_TEMPLATE_VARIABLES daripada ke daftar
+ * pemicu pasien.
+ *
+ * `{tanggal}`/`{jam}` di sini adalah jadwal yang DIBATALKAN, bukan waktu
+ * pembatalannya -- itu `{tanggal_batal}`. Dua-duanya perlu: yang pertama
+ * menentukan slot mana yang jadi kosong, yang kedua menjawab "apakah ini kabar
+ * baru atau yang tadi pagi sudah diurus".
+ *
+ * `{keterangan}` adalah alasan batal apa adanya dari Khanza ("Dibatalkan Oleh
+ * Admin"). Teks bebas dari sistem luar, jadi ia satu-baris dan WAJIB lewat
+ * sanitizeValue -- karena itu ia sengaja TIDAK ada di MULTILINE_VARIABLES.
+ */
+export const BPJS_BATAL_TEMPLATE_VARIABLES = [
+  'nama_pasien',
+  'no_rm',
+  'nama_poli',
+  'nama_dokter',
+  'tanggal',
+  'jam',
+  'tanggal_batal',
+  'keterangan',
+  'jumlah_batal',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
+ * PENGINGAT SURAT KONTROL (`/bpjs`) -- satu-satunya daftar BPJS yang dibaca
+ * PASIEN, jadi bentuknya mengikuti pemicu pasien.
+ *
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya: apa pun yang klinis.
+ * `bridging_surat_kontrol_bpjs` menyimpan diagnosis kronis pasien apa adanya di
+ * `status_prb` ('01. Diabetes Melitus', '06. Skizofrenia', ...) berikut HBA1C,
+ * GDP, eGFR, dan tekanan darah. Tidak satu pun punya variabelnya di sini, dan
+ * `khanza/bpjsKontrol.ts` tidak pernah men-SELECT kolomnya -- dua lapis, karena
+ * daftar ini yang dilihat orang saat menyusun template, dan query itu yang
+ * menentukan datanya bahkan sampai ke proses ini atau tidak.
+ *
+ * `{sisa_hari}` sudah berbentuk kalimat ("besok", "7 hari lagi") dari
+ * core/bpjs.ts, bukan angka telanjang -- "0 hari lagi" terbaca sebagai sistem
+ * rusak.
+ */
+export const BPJS_KONTROL_TEMPLATE_VARIABLES = [
+  'nama_pasien',
+  'no_rm',
+  'nama_poli',
+  'nama_dokter',
+  'tanggal_kontrol',
+  'sisa_hari',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * Gabungan seluruh konteks -- INI yang dimengerti `renderTemplate`, bukan
  * daftar yang boleh dipakai di satu tempat tertentu. Pembatasan per konteks
  * terjadi saat template DISIMPAN lewat findUnknownVariables(body, <daftar>),
@@ -181,6 +238,8 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...FARMASI_TEMPLATE_VARIABLES,
     ...STOK_TEMPLATE_VARIABLES,
     ...DARURAT_TEMPLATE_VARIABLES,
+    ...BPJS_BATAL_TEMPLATE_VARIABLES,
+    ...BPJS_KONTROL_TEMPLATE_VARIABLES,
   ]),
 ] as const;
 
@@ -190,7 +249,9 @@ export type TemplateVariable =
   | (typeof AUTOREPLY_TEMPLATE_VARIABLES)[number]
   | (typeof FARMASI_TEMPLATE_VARIABLES)[number]
   | (typeof STOK_TEMPLATE_VARIABLES)[number]
-  | (typeof DARURAT_TEMPLATE_VARIABLES)[number];
+  | (typeof DARURAT_TEMPLATE_VARIABLES)[number]
+  | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
+  | (typeof BPJS_KONTROL_TEMPLATE_VARIABLES)[number];
 
 export function extractVariables(body: string): string[] {
   const names = new Set<string>();

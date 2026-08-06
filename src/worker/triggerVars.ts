@@ -30,6 +30,7 @@ import type { ResultReadyRow, PenunjangJenis } from '@/khanza/penunjang';
 import type { PharmacyReadyRow } from '@/khanza/farmasi';
 import type { BillingReadyRow } from '@/khanza/billing';
 import type { BookingRow } from '@/khanza/booking';
+import type { PermintaanRow, PermintaanJenis } from '@/khanza/permintaanPenunjang';
 
 type Vars = Partial<Record<TemplateVariable, string>>;
 
@@ -62,6 +63,34 @@ export function varsResultReady(row: ResultReadyRow, jenis: PenunjangJenis): Var
     jenis_layanan: JENIS_LAYANAN_PENUNJANG[jenis],
     cara_bayar: namaPenjamin(row.png_jawab),
     // jumlah_item TIDAK PERNAH ikut (§4.3: jumlah pemeriksaan pun petunjuk medis).
+  };
+}
+
+/**
+ * PERMINTAAN penunjang. Bentuknya nyaris sama dengan `varsResultReady` dan
+ * bedanya justru yang perlu diperhatikan:
+ *
+ * - `{nama_dokter}` ADA di sini dan TIDAK ada di RESULT_READY, karena yang
+ *   berarti bagi pasien memang berbeda: pada hasil, dokter pemeriksanya tidak
+ *   menambah apa-apa; pada permintaan, "dokter siapa yang menyuruh" adalah
+ *   yang membuat pesannya masuk akal dan bukan tampak seperti salah kirim.
+ *   Diambil dari `dokter_perujuk`, bukan dokter poli.
+ * - `{tanggal}`/`{jam}` adalah waktu PERMINTAANNYA dibuat, bukan jadwal
+ *   pemeriksaan -- Khanza tidak menyimpan jadwal untuk ini.
+ * - `jumlah_item` TIDAK ADA, sama seperti RESULT_READY (§4.3: banyaknya
+ *   pemeriksaan pun petunjuk medis), dan nama pemeriksaannya pun tidak pernah
+ *   diambil dari sik sejak query-nya.
+ */
+export function varsPermintaan(row: PermintaanRow, jenis: PermintaanJenis): Vars {
+  return {
+    nama_pasien: row.nm_pasien ?? '',
+    no_rm: row.no_rkm_medis,
+    nama_poli: row.nm_poli ?? '',
+    nama_dokter: row.nm_dokter ?? '',
+    tanggal: row.tgl_permintaan,
+    jam: row.jam_permintaan,
+    jenis_layanan: JENIS_LAYANAN_PENUNJANG[jenis],
+    cara_bayar: namaPenjamin(row.png_jawab),
   };
 }
 

@@ -44,6 +44,16 @@ export const OPT_OUT_PHRASE = 'Berhenti Kirim Otomatis';
  *   seperti dua pemicu farmasi di atas, ditambah satu yang lebih telanjang
  *   lagi: isinya tidak menyebut seorang pasien pun. Tidak ada yang bisa
  *   diberhentikan atas nama siapa.
+ * - BPJS_BATAL -- pembatalan Mobile JKN, dikirim ke loket/pendaftaran supaya
+ *   slotnya bisa ditawarkan ke pasien lain. Tidak ada nomor pasien untuk
+ *   dicocokkan, alasan yang sama dengan ketiga pemicu farmasi.
+ *
+ * BPJS_KONTROL ADA di dalam daftar, dan itu bukan pilihan bebas: ia pengingat
+ * otomatis KE PASIEN yang berangkat dari data di sik tanpa ada manusia yang
+ * menekan apa pun -- persis definisi ketujuh pemicu lain. Pasien yang sudah
+ * meminta berhenti lalu tetap menerima pengingat kontrol akan membaca frasa
+ * yang dijanjikan sistem sebagai bohong, dan itu merusak seluruh mekanismenya,
+ * bukan cuma satu pesan.
  *
  * Konsekuensinya HARUS tercermin di teks yang dibaca pasien: janji yang
  * diberikan saat ia berhenti tidak boleh lebih luas dari yang benar-benar
@@ -57,6 +67,13 @@ const OPT_OUT_TRIGGERS = new Set([
   'RESULT_READY',
   'PHARMACY_READY',
   'BILLING_READY',
+  'BPJS_KONTROL',
+  // Permintaan lab/radiologi: pemberitahuan otomatis dari kejadian di sik ke
+  // nomor pasien, sekelas dengan ketujuh di atasnya. Pasangan RESULT_READY --
+  // dan pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
+  // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
+  'LAB_REQUEST',
+  'RAD_REQUEST',
 ]);
 
 /**

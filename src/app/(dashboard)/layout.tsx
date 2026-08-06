@@ -33,6 +33,14 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: N
       // staf apotek. Tetap di sini karena yang dikerjakan staf sama -- menyusun
       // pesan yang keluar -- dan halamannya sendiri yang menegaskan bedanya.
       { href: '/farmasi', label: 'Farmasi', icon: 'pill', adminOnly: true },
+      // Menyusul Farmasi karena bentuknya sama -- satu halaman bertab dengan
+      // tujuan grup/petugasnya sendiri -- tapi ia yang PERTAMA memuat keduanya
+      // sekaligus: pembatalan menuju loket, pengingat kontrol menuju pasien.
+      { href: '/bpjs', label: 'BPJS', icon: 'file', adminOnly: true },
+      // Satu-satunya menu di sini yang mengirim BERKAS, bukan teks. Tetap di
+      // grup ini karena pekerjaan stafnya sama -- memilih penerima lalu
+      // menekan kirim -- dan halamannya sendiri yang menegaskan bedanya.
+      { href: '/administrasi', label: 'Administrasi', icon: 'fileSend', adminOnly: true },
       { href: '/template', label: 'Template', icon: 'file' },
     ],
   },

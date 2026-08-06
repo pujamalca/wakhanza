@@ -10,6 +10,7 @@ import {
   IconPlug,
   IconInbox,
   IconFileText,
+  IconFileSend,
   IconPhoneAlert,
   IconBan,
   IconMegaphone,
@@ -38,6 +39,7 @@ export type NavIcon =
   | 'plug'
   | 'inbox'
   | 'file'
+  | 'fileSend'
   | 'phone'
   | 'ban'
   | 'megaphone'
@@ -56,6 +58,7 @@ const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   plug: IconPlug,
   inbox: IconInbox,
   file: IconFileText,
+  fileSend: IconFileSend,
   phone: IconPhoneAlert,
   ban: IconBan,
   megaphone: IconMegaphone,

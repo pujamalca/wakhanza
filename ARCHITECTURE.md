@@ -822,3 +822,42 @@ Menyebutkan ini agar tidak ada yang membuang waktu di sana:
 | Interval polling di bawah 60 detik | Pasien tidak merasakan bedanya antara 30 dan 60 detik. Beban ke `sik` berlipat |
 | Cache untuk isi outbox | Datanya berubah tiap siklus dan hanya dibaca dashboard. Cache di sini menambah ketidakcocokan, bukan kecepatan |
 | Skema `wakhanza` | Volumenya kecil dan indeksnya sudah tepat. Seluruh risiko kinerja ada di sisi `sik` |
+
+---
+
+## 13. Pengukuran terhadap data nyata (kalibrasi)
+
+Angka-angka yang pernah diukur langsung terhadap `sik`/`alca` di mesin pengembangan. Dipisah dari `CLAUDE.md` karena yang mengikat pekerjaan berikutnya adalah **aturannya**, bukan angkanya — tapi angkanya tetap perlu saat menilai apakah sebuah asumsi masih berlaku di instalasi lain. **Semua angka ini milik satu mesin dan satu titik waktu**; jangan dijadikan konstanta.
+
+### 13.1 Katalog barang apotek (`databarang`, `gudangbarang`)
+
+| Yang diukur | Nilai |
+|---|---|
+| `databarang` seluruhnya | 887 baris |
+| `gudangbarang` seluruhnya | 907 baris, **semuanya** `no_batch = ''` |
+| Aturan mentah Khanza (tanpa `stokminimal > 0`) | 348 baris cocok |
+| … di antaranya ber-`stokminimal = 0` | **141** (≈40% kebisingan) |
+| Sesudah `stokminimal > 0` disaring | **207 barang** (111 habis, 96 menipis) |
+| EXPLAIN `b.stokminimal > 0` | `range` + `Using index`, ~514 dari 887 |
+
+Dua konsekuensi yang jadi aturan di `CLAUDE.md`: `stokminimal > 0` wajib disaring (kalau tidak, 40% isinya barang yang memang tidak pernah punya ambang), dan `farmasi.stok_pakai_batch` default `0` karena tidak satu pun baris di sini memakai batch.
+
+Layar persediaan Khanza sendiri memakai N+1 — satu query jumlah stok per baris di dalam `while(rs.next())`, jadi **888 perjalanan ke MariaDB untuk 887 barang**. Wakhanza memakai satu `GROUP BY ... HAVING` justru karena ia proses latar yang berbagi `pool.max: 2` dengan SIMRS yang sedang melayani pasien.
+
+### 13.2 Urutan langkah resep (`resep_obat`)
+
+| Langkah | Kolom | Jeda rata-rata |
+|---|---|---|
+| Dokter menulis resep | `tgl_peresepan` + `jam_peresepan` | — |
+| Validasi apotek | `tgl_perawatan` + `jam` | +5,3 menit |
+| Penyerahan | `tgl_penyerahan` + `jam_penyerahan` | +12,4 menit |
+
+Yang membuktikan `jam` benar-benar langkah tersendiri dan bukan salinan waktu penyerahan: **3.214 resep yang BELUM diserahkan sudah punya `jam` terisi**, dan dari ~28 ribu baris yang sudah diserahkan hanya **1** yang urutannya terbalik. `tgl_perawatan` berisi `'0000-00-00'` pada 13 baris lama.
+
+### 13.3 Nomor telepon pasien (`pasien.no_tlp`)
+
+8.118 pasien, **4.834 (59,5%) nomornya terpakai** sesudah normalisasi `core/phone.ts` — melampaui baseline 45% di PRD. Dari 3.284 sisanya, **3.166 beralasan `empty`** (tidak punya nomor sama sekali di Khanza); yang benar-benar bisa dikoreksi petugas dari mejanya cuma 118 (`too_short` 55, `not_mobile` 52, `unparseable` 11). Sebaran timpang inilah yang membentuk urutan chip di `/nomor-bermasalah`.
+
+### 13.4 Segmen broadcast (`BROADCAST_SEGMENT_SEMUA`)
+
+Bentuk semua-waktu berangkat dari `pasien`. Dengan pencarian nama saja MariaDB memakai `nm_pasien` sebagai covering index (`type: index`); ia jatuh ke pemindaian penuh begitu wilayah ikut dipilih, karena kesetaraan `kd_kab` dan `LIKE '%..%'` tidak bisa dilayani satu indeks yang sama. Dengan **cara bayar sebagai satu-satunya filter**, optimizer membalik arah join dan membaca separuh `reg_periksa` — itulah alasan cara bayar tidak cukup untuk membuka mode semua-waktu.

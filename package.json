@@ -21,7 +21,9 @@
     "harden:permissions": "powershell -ExecutionPolicy Bypass -File scripts/harden-permissions.ps1",
     "test": "jest",
     "test:int": "jest --config jest.integration.config.js",
-    "audit": "npm audit --omit=dev"
+    "audit": "npm audit --omit=dev",
+    "dryrun:bpjs": "tsx scripts/dryrun-bpjs.ts",
+    "dryrun:surat": "tsx scripts/dryrun-surat.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

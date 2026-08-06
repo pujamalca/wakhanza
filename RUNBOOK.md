@@ -46,6 +46,29 @@ pm2 list
   - `qr_pending` → WhatsApp minta ditautkan ulang. Lihat bagian 4.
   - `authenticating` lebih dari 15 menit → sistem akan menyalakan ulang sendiri. Tunggu. Kalau berulang terus lebih dari satu jam, hubungi pengembang.
   - `ready` tapi antrean tidak jalan → cek jam. Pesan **sengaja ditahan pukul 21:00–07:00** (jam tenang) dan akan terkirim otomatis pagi harinya. Ini bukan kerusakan.
+  - `ready` tapi angka **restart di `pm2 list` naik terus** → bukan "ready" yang sebenarnya. Lihat bagian di bawah.
+
+### "`pm2 list` bilang online, tapi angka restart naik terus"
+
+Ini terjadi kalau worker disalakan ulang **dua kali berdekatan**: sisa proses Chromium dari percobaan sebelumnya masih memegang berkas sesi WhatsApp, sehingga setiap proses baru mati sebelum sempat jalan.
+
+Yang membuatnya menipu: halaman **Koneksi** tetap menampilkan `ready`. Status itu ditulis proses yang sudah mati dan tidak ada yang membatalkannya. Yang jujur adalah **restart yang terus naik** di `pm2 list`.
+
+Pemulihannya, urutannya tidak boleh dibalik — jalankan dari **PowerShell**:
+
+```powershell
+pm2 stop wakhanza-worker
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -like "*wwebjs_auth*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+pm2 start wakhanza-worker
+```
+
+Baris tengah **sengaja menyaring** `wwebjs_auth`: itu hanya menutup Chromium milik sistem notifikasi. Jangan diganti `Stop-Process -Name chrome` — itu menutup peramban semua orang yang sedang bekerja di mesin ini.
+
+Tunggu sekitar satu menit, lalu pastikan halaman **Koneksi** menunjukkan `ready` **dan** angka restart berhenti naik. Pesan yang sedang mengantre tidak hilang selama gangguan ini.
+
+**Pencegahannya**: kalau ada beberapa perubahan yang perlu diterapkan, minta pengembang mengumpulkannya lalu menyalakan ulang **sekali**, bukan berkali-kali berdekatan.
 
 ### "Dashboard tidak bisa dibuka"
 
@@ -223,7 +246,7 @@ npm run users -- delete <username>               # PERMANEN — tidak bisa dibat
 
 ## 9. Keputusan yang menunggu rumah sakit (bukan urusan teknis)
 
-Empat hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang berhak memutuskannya.
+Enam hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang berhak memutuskannya.
 
 1. **Daftar layanan sensitif** (`/pengaturan`). Saat ini kosong. Poli yang bisa dipilih di RS ini:
 
@@ -251,6 +274,16 @@ Empat hal ini **sengaja dibiarkan kosong/mati** karena bukan pengembang yang ber
    - Kalau yang dibutuhkan hanya penanda "ada pekerjaan masuk", **kosongkan nama pasien dari isi pesan** dan sisakan nomor resepnya saja — itu sudah cukup untuk membukanya di SIMRS, dan tidak ada identitas pasien yang berpindah ke WhatsApp pribadi tiap anggota grup.
 
    Nama obat, jumlah, aturan pakai, dan diagnosis **tidak pernah** ikut terkirim — sistemnya memang tidak pernah membacanya dari Khanza. Resep dari poli yang ditandai sensitif (poin 1) otomatis diganti pesan tanpa nama pasien dan tanpa nama poli.
+
+6. **Mengirim SURAT ke pasien** (halaman **Administrasi**, sekarang **mati**). Ini satu-satunya fitur yang mengirim **berkas**, bukan pesan — surat keterangan sakit dan sehat sebagai PDF. Bedanya nyata: sebuah pesan yang salah kirim membocorkan beberapa kalimat, sedangkan sebuah surat yang salah kirim adalah dokumen resmi rumah sakit yang bisa diteruskan siapa pun ke mana pun. Tiga hal yang perlu diputuskan sebelum menyalakannya:
+
+   - **Apakah surat sakit lewat WhatsApp diterima sebagai sah** oleh tempat kerja pasien, atau lembar bertanda tangan tetap wajib. Sistem tidak bisa menjawab ini.
+   - **Apakah diagnosa ikut dicetak** (sakelar terpisah, sekarang mati). Selama mati, diagnosanya tidak dibaca sama sekali dari Khanza — bukan sekadar tidak dicetak.
+   - **Siapa yang berwenang menerbitkan surat SEHAT.** Ini yang paling gampang terlewat karena kedua tab tampak setara. Surat *sakit* sudah dibuat dokter di Khanza dan halaman ini hanya mengantarkannya. Surat *sehat* **tidak punya catatan apa pun di Khanza** — menekan Kirim di tab itu berarti **menerbitkan** surat keterangan sehat atas sebuah kunjungan, bukan mengirim ulang surat yang sudah ada. Kirim hanya untuk pasien yang memang sudah diperiksa dan dinyatakan sehat oleh dokter.
+
+   Yang sudah dijaga sistem tanpa perlu diatur: nomor pasien diperiksa lebih dulu (surat tidak dirender bila nomornya belum terpakai), kunjungan di poli yang ditandai sensitif (poin 1) **ditolak sama sekali** dan harus diserahkan di loket, tiap pengiriman tercatat di menu Audit, dan tiap surat memuat catatan kaki yang menyebut asalnya beserta keberadaan lembar asli di rumah sakit.
+
+   **Selalu tekan "Lihat" dulu sebelum "Kirim".** Tombol itu membuka PDF-nya di tab baru, persis berkas yang akan diterima pasien. Ini satu-satunya cara memastikan isinya benar sebelum ia lepas dari rumah sakit.
 
 ---
 

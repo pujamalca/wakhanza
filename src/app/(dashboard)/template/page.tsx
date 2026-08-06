@@ -11,15 +11,18 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
 
   const { page: pageParam } = await searchParams;
   // Hanya tabel template BROADCAST yang dipaginasi. Tabel di atasnya berisi
-  // tepat tujuh baris selamanya -- PK-nya `trigger_code`, satu per pemicu --
-  // jadi kendali halaman di sana tidak akan pernah bisa berpindah ke mana pun.
+  // satu baris per PEMICU (PK-nya `trigger_code`), dan bertambah hanya saat
+  // ada pemicu baru -- bukan seiring pemakaian. Sembilan hari ini; dulu tujuh,
+  // lalu LAB_REQUEST dan RAD_REQUEST menambahkannya (migrations/025). Jadi
+  // kendali halaman di sana tidak akan pernah bisa berpindah ke mana pun.
   const p = hitungPaginasi(bacaHalaman(pageParam), await BroadcastTemplate.count(), UKURAN_HALAMAN.konfigurasi);
 
   const [templates, broadcastTemplates, semuaTarget, grup, sesi] = await Promise.all([
     Template.findAll({ order: [['triggerCode', 'ASC']] }),
     BroadcastTemplate.findAll({ order: [['name', 'ASC']], limit: p.limit, offset: p.offset }),
-    // Seluruh tujuan dibaca sekali lalu dikelompokkan di memori -- tujuh query
-    // terpisah untuk tabel yang isinya belasan baris tidak sepadan. SENGAJA
+    // Seluruh tujuan dibaca sekali lalu dikelompokkan di memori -- satu query
+    // per pemicu untuk tabel yang isinya belasan baris tidak sepadan, dan
+    // jumlah query itu akan ikut bertambah tiap ada pemicu baru. SENGAJA
     // tidak dipaginasi: ia mengisi modal Tujuan per pemicu, bukan tabel.
     TemplateTarget.findAll({ order: [['id', 'ASC']] }),
     // Pengisi dropdown pemilih grup, bukan tabel -- alasan yang sama.
@@ -55,9 +58,9 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
 
       <h2 className="mb-1 font-medium">Template pemicu otomatis</h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        Tujuh template ini dipakai <span className="font-medium">otomatis oleh worker</span> saat kejadiannya terdeteksi di
-        Khanza (pasien dapat antrian, hasil lab siap, obat siap, dan seterusnya). Staf tidak pernah memilihnya — jumlahnya tetap
-        tujuh, satu per pemicu.
+        Template di bawah dipakai <span className="font-medium">otomatis oleh worker</span> saat kejadiannya terdeteksi di
+        Khanza (pasien dapat antrian, pemeriksaan lab diminta, hasilnya siap, obat siap, dan seterusnya). Staf tidak pernah
+        memilihnya — satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru.
       </p>
       <p className="mb-3 text-xs text-muted-foreground">
         Tombol <span className="font-medium">Tujuan</span> mengatur ke mana pesannya dikirim. Bawaannya hanya ke nomor pasien

@@ -183,6 +183,37 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
 }
 
 /**
+ * Konteks untuk ADMINISTRASI: pengiriman DOKUMEN (surat keterangan sakit/sehat)
+ * yang dipicu staf untuk satu pasien.
+ *
+ * Bentuknya mengikuti BROADCAST -- isi pesannya dari pengaturan, bukan dari
+ * baris `template` -- tapi dengan satu perbedaan yang menentukan pada
+ * `genericTemplate`: di sini ia TIDAK jatuh kembali ke `body`.
+ *
+ * Sebabnya: yang membuat sebuah pesan diganti template generik adalah poli
+ * sensitif, dan pada pemicu lain penggantian itu cukup karena yang hilang cuma
+ * beberapa kata. Di sini yang menyertai pesan adalah LAMPIRAN berisi identitas
+ * lengkap pasien -- mengganti kalimat pengantarnya tidak menyembunyikan apa
+ * pun selama berkasnya tetap ikut. Karena itu pemanggil (`administrasi/actions`)
+ * memeriksa poli sensitif LEBIH DULU dan menolak mengirim, alih-alih
+ * mengandalkan penggantian teks yang di sini tidak berarti apa-apa.
+ */
+export async function loadAdministrasiContext(body: string): Promise<PipelineContext> {
+  const shared = await loadSharedSettings();
+  return {
+    triggerCode: 'ADMINISTRASI',
+    template: { body },
+    genericTemplate: shared.genericTemplate ?? body,
+    identity: shared.identity,
+    quietStart: shared.quietStart,
+    quietEnd: shared.quietEnd,
+    sensitivePoli: shared.sensitivePoli,
+    sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
+  };
+}
+
+/**
  * Konteks untuk BALASAN OTOMATIS: isi pesannya berasal dari baris
  * `auto_reply_rule` yang cocok, bukan dari `template` maupun ketikan staf saat
  * itu juga. Sesudah ini tetap lewat enqueueMessage() yang sama seperti sembilan
@@ -281,9 +312,16 @@ export interface EnqueueInput {
    */
   chatId?: string | null;
   /**
-   * Lampiran gambar/dokumen. HANYA diisi BROADCAST manual -- di sana selalu ada
-   * staf yang melihat lampirannya sebelum menekan Kirim. Pemicu lain mengirim
-   * tanpa peninjauan tiap kali, jadi sengaja tidak punya jalur ini.
+   * Lampiran gambar/dokumen. Diisi HANYA oleh dua jalur, dan syaratnya sama
+   * untuk keduanya: ADA STAF YANG MELIHATNYA sebelum menekan Kirim.
+   *
+   *   BROADCAST manual  berkas yang diunggah staf
+   *   ADMINISTRASI      surat keterangan sakit/sehat yang dirender dari `sik`
+   *
+   * Pemicu otomatis, broadcast terjadwal, dan balasan otomatis sengaja TIDAK
+   * punya jalur ini -- ketiganya mengirim tanpa peninjauan tiap kali, dan
+   * berkas yang keliru jauh lebih sulit ditarik kembali daripada kalimat yang
+   * keliru.
    */
   media?: { path: string; mime: string; name: string } | null;
 }

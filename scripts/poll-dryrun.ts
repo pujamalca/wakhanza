@@ -5,7 +5,7 @@
  * keliru. TIDAK menulis ke outbox, TIDAK memajukan poll_cursor, TIDAK
  * mengirim apa pun -- hanya query sik (read-only) + pratinjau render.
  */
-import { PatientContact, Template, getSettingNumber, getSettingJson } from '../src/models';
+import { PatientContact, Template, getSetting, getSettingNumber, getSettingJson } from '../src/models';
 import { normalizePhone, type PhoneResult } from '../src/core/phone';
 import { checkPrivacy } from '../src/core/privacy';
 import { renderTemplate, type TemplateVariable } from '../src/core/template';
@@ -23,6 +23,7 @@ import {
   varsPharmacyReady,
   varsBillingReady,
   varsBooking,
+  varsPermintaan,
 } from '../src/worker/triggerVars';
 import { sik } from '../src/db/sik';
 import { db } from '../src/db/wakhanza';
@@ -31,6 +32,11 @@ import { pollResultReady, type PenunjangJenis } from '../src/khanza/penunjang';
 import { pollPharmacyReady } from '../src/khanza/farmasi';
 import { pollBillingReady } from '../src/khanza/billing';
 import { pollUpcomingBookings } from '../src/khanza/booking';
+import { pollPermintaan, type PermintaanJenis } from '../src/khanza/permintaanPenunjang';
+import { pollBpjsBatal } from '../src/khanza/bpjsBatal';
+import { pollBpjsKontrol } from '../src/khanza/bpjsKontrol';
+import { varsBatal, varsKontrol } from '../src/worker/bpjsRunner';
+import { bacaHariSebelum, sasaranKontrol } from '../src/core/bpjs';
 
 const SAMPLE_SIZE = 5;
 const DISTANT_PAST = new Date('2000-01-01');
@@ -116,6 +122,93 @@ async function reportSection(
   }
 }
 
+/**
+ * BPJS berdiri terpisah dari reportSection() di atas karena isi pesannya
+ * TIDAK berasal dari tabel `template` melainkan dari `app_setting` -- persis
+ * seperti notifikasi farmasi. `Template.findByPk('BPJS_BATAL')` akan selalu
+ * mengembalikan null dan seluruh bagiannya dilaporkan "belum ada template".
+ *
+ * Yang penerimanya STAF (BPJS_BATAL) tidak diperiksa nomornya sama sekali:
+ * tujuannya `chat_id`, dan menampilkan kolom "tanpa nomor valid" untuknya akan
+ * membuat pembacanya menyimpulkan pesan-pesan itu gagal terkirim.
+ */
+async function reportBpjs(
+  sensitivePoli: string[],
+  sensitiveExam: string[],
+  idVars: Partial<Record<TemplateVariable, string>>,
+): Promise<void> {
+  const rawHari = (await getSetting('bpjs.kontrol_hari_sebelum', '1')) ?? '1';
+  const hariSebelum = bacaHariSebelum(rawHari);
+  const sasaran = sasaranKontrol(hariSebelum, new Date());
+
+  // --- Pembatalan Mobile JKN -> loket ---
+  const batalRows = await pollBpjsBatal(DISTANT_PAST);
+  console.log(`\n=== BPJS_BATAL: ${batalRows.length} baris kandidat (tujuan: GRUP/PETUGAS, bukan pasien) ===`);
+  if (batalRows.length > 0) {
+    const body = (await getSetting('bpjs.template_batal', '')) ?? '';
+    const generik = (await getSetting('bpjs.template_batal_generic', '')) ?? '';
+    let sensitif = 0;
+    for (const r of batalRows) {
+      if (!checkPrivacy({ kdPoli: r.kd_poli }, sensitivePoli, sensitiveExam).safe) sensitif++;
+    }
+    console.log(`  poli sensitif     : ${sensitif} / ${batalRows.length}`);
+    console.log(`  contoh (maks ${SAMPLE_SIZE}):`);
+    for (const [i, r] of batalRows.slice(0, SAMPLE_SIZE).entries()) {
+      const privacy = checkPrivacy({ kdPoli: r.kd_poli }, sensitivePoli, sensitiveExam);
+      const teks = appendUniqueCode(
+        renderTemplate(privacy.safe ? body : generik, { ...idVars, ...varsBatal(r) }),
+        buildIdempotencyKey('BPJS_BATAL', r.nobooking, i),
+        uniqueCodeTemplate,
+        new Date(),
+      );
+      console.log(`  - booking ${r.nobooking} (poli ${r.kd_poli ?? '-'})${privacy.safe ? '' : ' [PRIVASI: diganti generik]'}`);
+      console.log(`      "${teks}"`);
+    }
+  }
+
+  // --- Pengingat surat kontrol -> pasien ---
+  const kontrolRows = await pollBpjsKontrol(sasaran.map((s) => s.tanggal));
+  console.log(
+    `\n=== BPJS_KONTROL: ${kontrolRows.length} baris kandidat (H-${rawHari} -> tanggal ${sasaran.map((s) => s.tanggal).join(', ')}) ===`,
+  );
+  if (kontrolRows.length === 0) {
+    console.log('  (tidak ada surat kontrol yang tanggal rencananya jatuh persis di situ hari ini)');
+    return;
+  }
+
+  const body = (await getSetting('bpjs.template_kontrol', '')) ?? '';
+  const selisih = new Map(sasaran.map((s) => [s.tanggal, s.hariSebelum]));
+  let noContact = 0;
+  let diselamatkanSep = 0;
+  for (const r of kontrolRows) {
+    const utama = await previewPhone(r.no_rkm_medis ?? '', r.no_tlp);
+    if (!utama.phoneE164) {
+      // Cadangan SEP -- lihat nomorUntukKontrol() di worker/bpjsRunner.ts.
+      if (normalizePhone(r.notelep).ok) diselamatkanSep++;
+      else noContact++;
+    }
+  }
+  console.log(`  tanpa nomor valid : ${noContact} / ${kontrolRows.length}`);
+  console.log(`  diselamatkan SEP  : ${diselamatkanSep} / ${kontrolRows.length}`);
+  console.log(`  contoh (maks ${SAMPLE_SIZE}):`);
+  for (const r of kontrolRows.slice(0, SAMPLE_SIZE)) {
+    const hari = selisih.get(r.tgl_rencana) ?? 0;
+    const utama = await previewPhone(r.no_rkm_medis ?? '', r.no_tlp);
+    const sep = normalizePhone(r.notelep);
+    const nomor = utama.phoneE164 ?? (sep.ok ? sep.value : null);
+    const asal = utama.phoneE164 ? utama.note : sep.ok ? 'cadangan dari SEP' : 'tidak ada';
+    const privacy = checkPrivacy({ kdPoli: r.kd_poli }, sensitivePoli, sensitiveExam);
+    const teks = appendUniqueCode(
+      renderTemplate(privacy.safe ? body : '(pesan generik privasi)', { ...idVars, ...varsKontrol(r, hari) }),
+      buildIdempotencyKey('BPJS_KONTROL', r.no_surat, r.tgl_rencana, String(hari)),
+      uniqueCodeTemplate,
+      new Date(),
+    );
+    console.log(`  - RM ${r.no_rkm_medis ?? '-'} -> ${nomor ?? 'TIDAK ADA NOMOR'} [${asal}]${privacy.safe ? '' : ' [PRIVASI: diganti generik]'}`);
+    console.log(`      "${teks}"`);
+  }
+}
+
 async function main() {
   console.log('=== poll:dryrun -- TIDAK menulis ke outbox, TIDAK memajukan cursor, TIDAK mengirim apa pun ===');
 
@@ -143,6 +236,26 @@ async function main() {
     sensitivePoli,
     sensitiveExam,
   );
+
+  // PERMINTAAN sebelum HASIL, mengikuti urutan kejadiannya di dunia nyata.
+  // Kode pemicunya per jenis (LAB_REQUEST/RAD_REQUEST), berbeda dari
+  // RESULT_READY yang satu kode untuk keduanya -- jadi label dan trigger_code
+  // di sini kebetulan sama, dan tidak perlu argumen keempat reportSection().
+  for (const jenis of ['lab', 'radiologi'] as PermintaanJenis[]) {
+    const rows = await pollPermintaan(jenis, DISTANT_PAST, lookbackDays);
+    await reportSection(
+      jenis === 'lab' ? 'LAB_REQUEST' : 'RAD_REQUEST',
+      rows.map((r) => ({
+        noRkmMedis: r.no_rkm_medis,
+        rawPhone: r.no_tlp,
+        kdPoli: r.kd_poli,
+        kdJenisPrw: r.kd_jenis_prw_list?.split(',') ?? [],
+        vars: { ...idVars, ...varsPermintaan(r, jenis) },
+      })),
+      sensitivePoli,
+      sensitiveExam,
+    );
+  }
 
   for (const jenis of ['lab', 'radiologi'] as PenunjangJenis[]) {
     const rows = await pollResultReady(jenis, DISTANT_PAST, lookbackDays);
@@ -203,6 +316,8 @@ async function main() {
     sensitivePoli,
     sensitiveExam,
   );
+
+  await reportBpjs(sensitivePoli, sensitiveExam, idVars);
 
   console.log('\n=== selesai -- tidak ada perubahan di outbox, poll_cursor, atau sik ===');
 

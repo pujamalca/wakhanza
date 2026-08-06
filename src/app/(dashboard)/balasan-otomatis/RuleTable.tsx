@@ -198,7 +198,7 @@ function RuleModal({ rule, onClose }: { rule: RuleRow | null; onClose: () => voi
     <Modal
       open
       onClose={onClose}
-      wide
+      size="lg"
       title={rule ? `Ubah aturan: ${rule.label}` : 'Aturan baru'}
       description="Balasan dikirim saat pesan pasien memuat salah satu kata kunci."
     >

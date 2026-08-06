@@ -100,7 +100,7 @@ export function TargetPemicuModal({
       <Modal
         open
         onClose={onClose}
-        wide
+        size="lg"
         title={`Tujuan: ${triggerLabel(triggerCode)}`}
         description={`Ke mana notifikasi pemicu ini dikirim. Kode pemicu: ${triggerCode}`}
       >

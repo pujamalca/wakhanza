@@ -59,6 +59,31 @@ export function nextWindowStart(date: Date, endHour: number): Date {
  *   setel -- apotek shift malam yang sengaja memilih 05:00 akan menerimanya
  *   07:00 tanpa satu pun keterangan kenapa. Pagar terhadap pesan larut malam di
  *   sini adalah form jadwalnya, bukan jam tenang.
+ * - BPJS_BATAL: penerimanya loket/pendaftaran, bukan pasien -- alasan yang sama
+ *   dengan kedua pemicu farmasi. Ditambah satu yang khas kanal ini: gunanya
+ *   adalah supaya slot yang batal bisa ditawarkan ke pasien lain, dan slot itu
+ *   sering untuk BESOK PAGI. Pembatalan pukul 21.30 yang baru diberitahukan
+ *   pukul 07.00 tiba bersamaan dengan pasiennya sendiri datang.
+ *
+ * - ADMINISTRASI: penerimanya PASIEN, jadi ia satu-satunya di daftar ini yang
+ *   tidak bisa berlindung di balik "penerimanya staf". Yang membenarkannya
+ *   adalah bahwa ia sepenuhnya SINKRON dengan tindakan seseorang: staf menekan
+ *   kirim untuk satu pasien, biasanya karena orangnya sedang berdiri di loket
+ *   atau baru saja menelepon memintanya. Alasan yang sama persis dengan
+ *   AUTO_REPLY -- jam tenang melindungi dari pesan yang TIDAK diminta, dan
+ *   dokumen yang baru saja diminta bukan itu.
+ *
+ *   Yang membuatnya bukan sekadar kenyamanan: kegagalannya TIDAK TERLIHAT.
+ *   Staf menekan kirim, halaman menjawab berhasil, dan berkasnya diam di
+ *   antrean sampai pagi tanpa satu pun tanda di layar -- lalu pasien yang masih
+ *   di depan loket dikirimi lagi oleh staf yang mengira kiriman pertama gagal.
+ *
+ * Yang SENGAJA tidak ada di sini: BPJS_KONTROL. Ia pengingat KE PASIEN, dan
+ * jam kirimnya (`bpjs.kontrol_jam`) memang dipilih staf -- tapi berbeda dari
+ * FARMASI_STOK_DARURAT, yang menerimanya orang yang sedang tidur di rumah.
+ * Jam tenang justru ada untuk itu, jadi jam kirim yang tidak sengaja disetel
+ * 23.00 harus tetap tertahan sampai pagi. Bedanya dari ADMINISTRASI: pengingat
+ * kontrol berangkat dari JADWAL, bukan dari seseorang yang sedang menunggu.
  */
 const BYPASS_QUIET_HOURS = new Set([
   'BOOK_CANCEL',
@@ -67,6 +92,8 @@ const BYPASS_QUIET_HOURS = new Set([
   'FARMASI_PENYERAHAN',
   'FARMASI_UJI',
   'FARMASI_STOK_DARURAT',
+  'BPJS_BATAL',
+  'ADMINISTRASI',
 ]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */

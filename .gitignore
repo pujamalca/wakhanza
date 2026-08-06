@@ -45,3 +45,7 @@ uploads/
 # OS
 Thumbs.db
 .DS_Store
+
+# Keluaran `npm run dryrun:surat` -- berisi PDF surat pasien SUNGGUHAN, jadi
+# tidak boleh ikut ter-commit (alasan yang sama dengan uploads/).
+tmp-dryrun-surat/

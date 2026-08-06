@@ -14,14 +14,25 @@ const VARIANT_CLASSES: Record<BadgeVariant, string> = {
 export function Badge({
   variant = 'neutral',
   className = '',
+  title,
   children,
 }: {
   variant?: BadgeVariant;
   className?: string;
+  /**
+   * Keterangan lengkap saat kursor berhenti di atasnya.
+   *
+   * Lencana harus pendek supaya muat di sel tabel, dan yang dipangkas demi
+   * pendek itu justru SEBABNYA -- "Kosong" tidak memberi tahu bahwa pesannya
+   * tidak akan sampai. Pola yang sama dipakai `labels.ts`, yang menyimpan kode
+   * mesin di `title` berdampingan dengan label manusianya.
+   */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <span
+      title={title}
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${VARIANT_CLASSES[variant]} ${className}`}
     >
       {children}
