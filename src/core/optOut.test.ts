@@ -55,15 +55,30 @@ describe('respectsOptOut', () => {
       // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
       'LAB_REQUEST',
       'RAD_REQUEST',
+      // Surat sakit yang dikirim OTOMATIS begitu dokternya menyimpan. Pasangan
+      // manualnya (ADMINISTRASI) sengaja TIDAK terikat -- lihat uji berikutnya.
+      'SURAT_SAKIT',
     ]) {
       expect(respectsOptOut(code)).toBe(true);
     }
-    expect(optOutTriggerCodes()).toHaveLength(10);
+    expect(optOutTriggerCodes()).toHaveLength(11);
   });
 
   it('BROADCAST dan AUTO_REPLY TIDAK terikat -- kanal terpisah, keputusan RS', () => {
     expect(respectsOptOut('BROADCAST')).toBe(false);
     expect(respectsOptOut('AUTO_REPLY')).toBe(false);
+  });
+
+  /**
+   * Surat yang SAMA lewat dua jalur, dan hanya yang otomatis yang terikat.
+   * Dipatok berpasangan dalam satu uji, bukan dua: yang perlu dijaga bukan
+   * nilai masing-masing melainkan bahwa keduanya BERBEDA. Menyamakannya salah
+   * ke arah mana pun -- mendiamkan orang yang baru saja meminta suratnya di
+   * loket, atau tetap mengirimi berkas orang yang sudah bilang berhenti.
+   */
+  it('surat otomatis terikat, surat yang dikirim petugas atas permintaan TIDAK', () => {
+    expect(respectsOptOut('SURAT_SAKIT')).toBe(true);
+    expect(respectsOptOut('ADMINISTRASI')).toBe(false);
   });
 
   it('pemicu yang penerimanya STAF tidak terikat -- tidak ada nomor pasien untuk dicocokkan', () => {

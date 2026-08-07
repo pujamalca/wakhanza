@@ -1,10 +1,12 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
-import { Button, Card, cardClassName, Callout, MessageEditor, Textarea } from '@/components/ui';
+import { Button, Card, cardClassName, Callout, Input, MessageEditor, Textarea } from '@/components/ui';
 import {
   toggleAdministrasiAction,
   toggleDiagnosaAction,
+  toggleAutoAction,
+  simpanAutoAction,
   simpanTeksAction,
   type HasilForm,
 } from './actions';
@@ -113,6 +115,138 @@ export function DiagnosaSwitch({ aktif }: { aktif: boolean }) {
           sebagai berkas WhatsApp, dan itu keputusan rumah sakit, bukan bawaan sistem.
         </p>
       </Callout>
+    </Card>
+  );
+}
+
+/**
+ * Sakelar KIRIM OTOMATIS.
+ *
+ * Ditaruh langsung di bawah sakelar utama dan bergantung padanya, karena
+ * urutan membacanya memang begitu: "boleh mengirim surat?" lalu "boleh
+ * mengirimnya tanpa saya menekan apa pun?". Tombolnya dimatikan selama sakelar
+ * utama mati DAN aksinya menolak di server -- yang pertama supaya staf tidak
+ * menekan sesuatu yang pasti gagal, yang kedua karena tombol yang dimatikan di
+ * peramban bukan pagar (pola dua lapis yang sama seperti otorisasi route).
+ *
+ * Peringatannya TIDAK dilipat, alasan yang sama dengan sakelar utama: ia harus
+ * dibaca sebelum sakelarnya dinyalakan.
+ */
+export function AutoSwitch({
+  aktif,
+  induk,
+  sejak,
+  lookback,
+  kuota,
+}: {
+  aktif: boolean;
+  induk: boolean;
+  sejak: string;
+  lookback: number;
+  kuota: number;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [pesan, setPesan] = useState<HasilForm | null>(null);
+  const [state, action, simpanPending] = useActionState(simpanAutoAction, {} as HasilForm);
+
+  return (
+    <Card className="mt-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <h2 className="font-medium">Kirim otomatis saat surat disimpan di Khanza</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Saat menyala, setiap surat keterangan sakit yang disimpan dokter di SIMRS Khanza dikirimkan sendiri ke
+            nomor WhatsApp pasiennya — tanpa ada yang menekan tombol. Diperiksa setiap 5 menit.
+          </p>
+          {aktif && sejak && (
+            <p className="mt-2 text-sm">
+              Menyala. Yang dikirimkan hanya surat bernomor <strong>mulai {sejak}</strong>.
+            </p>
+          )}
+          {!induk && (
+            <p className="mt-2 text-sm text-warning">
+              Tidak bisa dinyalakan selama &quot;Pengiriman dokumen ke pasien&quot; di atas masih mati.
+            </p>
+          )}
+        </div>
+        <Button
+          variant={aktif ? 'secondary' : 'primary'}
+          disabled={pending || (!aktif && !induk)}
+          onClick={() => startTransition(async () => setPesan(await toggleAutoAction(!aktif)))}
+        >
+          {pending ? 'Menyimpan...' : aktif ? 'Matikan' : 'Nyalakan'}
+        </Button>
+      </div>
+
+      {pesan?.sukses && <p className="mt-3 text-sm text-success">{pesan.sukses}</p>}
+      {pesan?.error && <p className="mt-3 text-sm text-destructive">{pesan.error}</p>}
+
+      <Callout variant="warning" className="mt-4" title="Tidak ada yang memeriksa berkasnya sebelum berangkat">
+        <p>
+          Pengiriman manual selalu melewati satu orang yang membuka pratinjau, melihat isinya, lalu menekan kirim. Di
+          sini tidak ada langkah itu. Yang tetap dijaga sistem: pasien yang sudah meminta{' '}
+          <em>Berhenti Kirim Otomatis</em> tidak dikirimi, surat dari poli yang ditandai sensitif{' '}
+          <strong>tidak dikirim sama sekali</strong>, dan surat di luar jam tenang ditahan sampai pagi.
+        </p>
+        <p className="mt-2">
+          Yang <strong>tidak</strong> bisa dijaga sistem: apakah nomor di Khanza benar-benar milik pasien yang
+          bersangkutan. Di rumah sakit ini sekitar 40% nomor pasien belum terpakai, dan yang salah ketik tetap
+          terkirim ke pemilik nomor itu — bersama nama, umur, dan alamat pasien di dalam berkasnya.
+        </p>
+        <p className="mt-2">
+          Hanya berlaku untuk surat <strong>sakit</strong>. Surat sehat tidak punya baris tersimpan di Khanza sehingga
+          tidak ada kejadian &quot;disimpan&quot; untuk dipicu — mengotomatiskannya berarti menerbitkan surat sehat
+          untuk setiap orang yang mendaftar.
+        </p>
+      </Callout>
+
+      <form action={action} className="mt-4 border-t border-muted pt-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label htmlFor="auto_lookback" className="mb-1 block text-sm font-medium">
+              Lebar jendela (hari)
+            </label>
+            <Input
+              id="auto_lookback"
+              name="auto_lookback"
+              type="number"
+              min={0}
+              max={30}
+              defaultValue={lookback}
+              fieldSize="sm"
+              className="w-28"
+            />
+          </div>
+          <div>
+            <label htmlFor="auto_kuota" className="mb-1 block text-sm font-medium">
+              Maksimal per pemeriksaan
+            </label>
+            <Input
+              id="auto_kuota"
+              name="auto_kuota"
+              type="number"
+              min={1}
+              max={100}
+              defaultValue={kuota}
+              fieldSize="sm"
+              className="w-28"
+            />
+          </div>
+          <Button type="submit" variant="secondary" disabled={simpanPending}>
+            {simpanPending ? 'Menyimpan...' : 'Simpan'}
+          </Button>
+        </div>
+
+        <p className="mt-2 text-xs text-muted-foreground">
+          Jendela dihitung ke <strong>dua arah</strong> dari hari ini: nomor surat Khanza mengikuti tanggal mulai
+          istirahat, jadi surat yang ditulis hari ini untuk istirahat pekan depan bernomor lebih besar daripada hari
+          ini. Batasnya tidak pernah turun di bawah tanggal sakelar ini dinyalakan. Kelebihan kuota tidak dibuang —
+          dikirim pada pemeriksaan berikutnya.
+        </p>
+
+        {state.error && <p className="mt-3 text-sm text-destructive">{state.error}</p>}
+        {state.sukses && <p className="mt-3 text-sm text-success">{state.sukses}</p>}
+      </form>
     </Card>
   );
 }

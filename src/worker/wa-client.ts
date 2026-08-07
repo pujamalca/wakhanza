@@ -44,9 +44,9 @@ import { resolveMediaPath } from '@/lib/mediaStorage';
  */
 const OPT_OUT_CONFIRMATION = [
   'Baik, kami hentikan pemberitahuan otomatis untuk nomor ini:',
-  'nomor antrian, konfirmasi & pengingat jadwal, pengingat kontrol BPJS, permintaan & hasil pemeriksaan, obat siap, dan tagihan.',
+  'nomor antrian, konfirmasi & pengingat jadwal, pengingat kontrol BPJS, permintaan & hasil pemeriksaan, obat siap, tagihan, dan surat keterangan sakit.',
   '',
-  'Yang MASIH akan Anda terima: pengumuman dari rumah sakit, dan jawaban atas pesan yang Anda kirim sendiri.',
+  'Yang MASIH akan Anda terima: pengumuman dari rumah sakit, jawaban atas pesan yang Anda kirim sendiri, dan dokumen yang Anda minta sendiri kepada petugas.',
   '',
   'Ingin berlangganan lagi? Sampaikan ke petugas pendaftaran.',
 ].join('\n');

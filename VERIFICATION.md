@@ -163,7 +163,7 @@ Diverifikasi lewat HTTP asli dengan cookie sesi admin sungguhan: chip terurut `S
 
 **Penanda kosong Khanza, diukur bukan diperkirakan**, atas 4.873 pasien / 18 surat di `alca`: `kelurahan.nm_kel = 'KELURAHAN'` pada **4.332 pasien (89%)**, `kecamatan` 4.328, `kabupaten` 4.362; `pasien.pekerjaan = '-'` pada **14 dari 18 surat (78%)**; `perusahaan_pasien.nama_perusahaan = '-'` pada **18 dari 18 (100%)**. Terbukti berakibat pada surat: `npm run dryrun:surat` mencetak `baris DIBUANG karena kosong/penanda: Pekerjaan, Instansi` dan alamat `KOTO ALAM` -- bukan `KOTO ALAM, KELURAHAN, KECAMATAN, KABUPATEN` yang dihasilkan query cetak Khanza.
 
-**Pemangkas `no_surat` diukur terhadap `tanggalawal`**: `SUBSTR(no_surat,4,8) = DATE_FORMAT(tanggalawal,'%Y%m%d')` cocok pada **13 dari 18 baris** -- 5 berbeda, membuktikan tanggal di nomor surat adalah tanggal DIBUAT dan bukan tanggal mulai istirahat. Diagnosa tercatat hanya pada **4 dari 18 surat**, jadi barisnya memang sering kosong bahkan saat sakelarnya nyala.
+**Pemangkas `no_surat` diukur terhadap `tanggalawal`**: `SUBSTR(no_surat,4,8) = DATE_FORMAT(tanggalawal,'%Y%m%d')` cocok pada **13 dari 18 baris**. *(**Kesimpulan yang dulu ditarik dari angka ini KELIRU dan sudah dicabut** -- baris ini sempat berbunyi "membuktikan tanggal di nomor surat adalah tanggal DIBUAT". 13 dari 18 tidak membuktikan itu; ia hanya membuktikan bahwa nomornya bukan salinan `tanggalawal`. Pengukuran tandingannya menunjukkan cocok dengan `tgl_registrasi` pada **15 dari 18** -- juga bukan aturan. Lihat §"Kelas kesepuluh" untuk apa yang sebenarnya disandikan, dibaca dari kode Khanza.)* Diagnosa tercatat hanya pada **4 dari 18 surat**, jadi barisnya memang sering kosong bahkan saat sakelarnya nyala.
 
 **Rencana query** (`npm run verify:plans`, lolos): `ADMINISTRASI_SURAT_SAKIT` -> `ss range PRIMARY`, seluruh tujuh join `eq_ref`. `ADMINISTRASI_SURAT_SEHAT` -> `ss range idx_reg_periksa_rawat_rkm rows~677 (Using index)`, join `eq_ref`. Izin pindai penuh untuk `sks` **dibuktikan sebagai keputusan optimizer atas tabel KOSONG**, bukan jalur akses yang salah: salinan berstruktur identik diisi 3.000 baris lalu di-EXPLAIN dengan bentuk join yang sama -> `type=ref, key=no_rawat, rows~1` (kosong: `type=ALL, key=NULL`). Salinan ujinya dihapus setelah diukur.
 
@@ -253,3 +253,64 @@ Diverifikasi lewat HTTP asli dengan cookie sesi admin sungguhan: chip terurut `S
 1. **Backtick di dalam komentar CSS.** Blok gaya di `core/suratHtml.ts` ada di dalam template literal JS, jadi backtick di komentarnya menutup stringnya -- galatnya muncul sebagai `TS1005` yang menunjuk baris lain.
 2. **Asersi `not.toContain('berlogo')` gagal walau kelasnya benar**: kata itu selalu ada di dalam blok `<style>` sebagai nama kelas. Diperbaiki jadi memeriksa `class="kop"`. Persis jebakan yang sudah tercatat di §`/farmasi` dipecah jadi TAB.
 3. **Pagar anti-build-lama dipasang SEBELUM login**, padahal `proxy.ts` menjawab 307 ke `/login` sehingga permintaannya tidak pernah sampai ke route yang memasang headernya. Terbaca sebagai "build lama menjawab" atas build yang justru baru.
+
+## Kelas kesepuluh: SURAT SAKIT OTOMATIS (`migrations/027`) -- berkas yang berangkat tanpa dilihat siapa pun
+
+**Bentuk tabelnya dibuktikan, dan itu yang memaksa kelas pemicunya.** `SHOW CREATE TABLE alca.suratsakit` -> tepat lima kolom (`no_surat`, `no_rawat`, `tanggalawal`, `tanggalakhir`, `lamasakit`), PK `no_surat`, KEY `no_rawat`, **tidak satu pun kolom tanggal/waktu penyimpanan**. Jadi watermark tidak punya apa pun untuk dipegang -- bukan penilaian desain, melainkan keadaan tabelnya.
+
+**Tanggal di `no_surat` BUKAN penanda kejadian yang andal -- diukur, dan sumbernya dibaca.** `src/surat/SuratSakit.java` baris 1209-1210 merakit prefiksnya lewat `Valid.autoNomer3(...)` dari isi kotak **`TanggalAwal`** pada saat nomor dibuatkan. Diukur atas 18 baris di `alca`:
+
+| dibandingkan dengan | cocok |
+|---|---|
+| `tanggalawal` | 13 / 18 |
+| `reg_periksa.tgl_registrasi` | 15 / 18 |
+
+Tidak andal keduanya -- ada baris yang cocok dengan NEITHER (`SKS20240819001`: kunjungan 2024-08-16, `tanggalawal` 2024-08-16, nomor bertanggal 0819). Selisih `tanggalawal` terhadap tanggal kunjungan terentang **0 sampai 6 hari** (`MIN`/`MAX(DATEDIFF)`). Itu yang membuat batas ATAS jendela harus melewati hari ini, dan yang membuat watermark akan melewatkan surat secara permanen.
+
+**Rencana query** (`npm run verify:plans`, lolos): `ADMINISTRASI_SURAT_SAKIT_OTOMATIS` didaftarkan dengan diagnosa MENYALA (bentuk termahal) -> `ss range PRIMARY rows~1`, ketujuh join identitas `eq_ref PRIMARY`, sub-query diagnosa `dp ref PRIMARY` + `pny eq_ref PRIMARY`. **Tanpa satu pun izin pindai penuh**, dan memang tidak dibutuhkan.
+
+**Pipeline dijalankan SUNGGUHAN, bukan ditiru.** Fungsi produksi `runSuratOtomatisCycle()` dipanggil terhadap `alca` + `wakhanza` nyata atas fixture sekali pakai (`TESTWA00099` / `2026/08/07/099099` / `SKS20260807099`, bernomor telepon uji milik pengembang). Sebelum fixture dibuat, `SELECT no_surat FROM alca.suratsakit WHERE no_surat >= 'SKS20260807000'` dipastikan **nol baris** -- jadi tidak ada surat pasien sungguhan yang bisa ikut terbaca oleh jendela uji.
+
+```
+sejak = "2026-08-07"
+surat dirender jadi PDF   bytes=191726 durasiMs=630
+siklus surat sakit otomatis selesai  dari=2026-08-07 sampai=2026-08-14 terbaca=1 baru=1 terkirim=1
+outbox 29316  status=sent  attempts=1  phone=628****2916
+              media=5330d38b7bd89442.pdf  mediaName=Surat-Keterangan-Sakit-PASIEN-UJI-OTOMATIS.pdf
+```
+
+Jendelanya terbukti merentang **ke dua arah** (`dari=2026-08-07 sampai=2026-08-14`) dengan batas bawah dijepit lantai aktivasi.
+
+**Dedup dibuktikan pada siklus KEDUA tanpa perubahan apa pun**: `baris SURAT_SAKIT sebelum=1 sesudah=1`. Tidak ada watermark yang terlibat -- yang menahannya kunci idempoten.
+
+**Lantai aktivasi dibuktikan dengan menggesernya**: `administrasi.auto_sejak` diubah ke `2026-08-08` (besok) atas surat bertanggal hari ini -> `sebelum=0 sesudah=0`. Surat di bawah lantai tidak terbaca sama sekali, bukan terbaca lalu ditolak.
+
+**WORKER-nya sendiri yang mengerjakannya, bukan hanya fungsinya dipanggil dari skrip.** Sesudah `pm2 restart wakhanza-worker` (satu kali; sesi kembali `ready`, heartbeat 9 detik), baris outbox lahir dari siklus worker sendiri -- pid **7824**, bukan pid skrip:
+
+```
+{"pid":7824,"bytes":191726,"durasiMs":1259,"msg":"surat dirender jadi PDF"}
+{"pid":7824,"dari":"2026-08-07","sampai":"2026-08-14","terbaca":1,"baru":1,"terkirim":1,
+ "msg":"siklus surat sakit otomatis selesai"}
+{"pid":7824,"triggerCode":"SURAT_SAKIT","tujuan":"628****2916@c.us","berlampiran":true,"msg":"pesan terkirim"}
+```
+
+outbox 29320: dibuat **06:49:24**, terkirim **06:49:28**, `attempts=1`. Nomor tujuan **tersamarkan** di log (§9.7).
+
+**Jejak audit** (`audit_log`, insert-only): `system:surat_otomatis | administrasi_kirim_otomatis | sakit:SKS20260807099 | rm=TESTWA00099 diagnosa=tidak pdf=191726B`. Aktornya sengaja berbeda dari username staf, dan aksinya berbeda dari `administrasi_kirim` manual -- dua kanal harus bisa dipisahkan di `/audit`.
+
+**Pemisahan kebijakan dipatok unit test BERPASANGAN**, karena yang perlu dijaga bukan nilai masing-masing melainkan bahwa keduanya berbeda:
+
+- `optOut.test.ts`: `respectsOptOut('SURAT_SAKIT') === true` DAN `respectsOptOut('ADMINISTRASI') === false`; `optOutTriggerCodes()` panjangnya **11**.
+- `quietHours.test.ts`: pada 22:30 dengan jam tenang 21-7, `ADMINISTRASI` -> `event_at` apa adanya, `SURAT_SAKIT` -> **ditunda ke 07:00 hari berikutnya**.
+
+*(Jam tenang di mesin ini disetel `dispatch.quiet_hours_start=23` / `end=0`, jadi pengiriman uji pukul 06:47 memang di luar jam tenang -- perilaku itu tidak bisa dibuktikan dari kiriman nyata, dan karena itu dibuktikan pada fungsi murninya.)*
+
+**Keputusan murninya diuji terpisah** (`suratOtomatis.test.ts`, 15 kasus): urutan pemeriksaan, `masuk = kirim + lewat` selalu genap, surat yang ditolak **tidak memakan jatah kuota**, kuota 0 tidak melempar, jendela menyeberangi pergantian bulan dan tahun, dan lantai aktivasi yang sudah lampau tidak mempersempit apa pun.
+
+**Satu jebakan ditemukan saat menulis, sebelum sempat jadi bug**: bentuk pertama fungsi keputusannya membaca `pasien.no_tlp` lewat `normalizePhone()`. `resolvePhone()` mendahulukan koreksi manual dari `/nomor-bermasalah` (F2.1-F2.3), jadi bentuk itu akan menolak persis pasien yang nomornya sudah dibetulkan petugas -- dengan 40% nomor tak terpakai di rumah sakit ini, itu bukan kasus pinggiran. Diperbaiki dengan memindahkan penyelesaian nomor ke pemanggil dan memaksanya lewat TIPE (`KandidatSurat.phoneE164`), sehingga fungsi keputusannya tidak punya jalan membaca `no_tlp` sendiri.
+
+**Satu uji lama GAGAL dan itu benar**: `optOut.test.ts` mematok `optOutTriggerCodes()` sepanjang 10, jadi menambahkan pemicu memaksa keputusannya diambil sadar-sadar alih-alih lolos diam-diam. Diperbarui berikut asersi pasangannya.
+
+**Pemeriksaan menyeluruh**: `npm test` **486 lolos / 28 suite**, `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses (exit 0), `verify:plans` lolos, `verify:db` lolos (`sik` tetap menolak tulisan, `audit_log` tetap append-only).
+
+**Kebersihan**: fixture `TESTWA00099` + `reg_periksa` + `suratsakit` dihapus dari `alca` (diperiksa: 0 sisa), baris `outbox` SURAT_SAKIT dan `patient_contact` uji dihapus, kedua berkas PDF dihapus dari `uploads/broadcast/`, skrip sementara dihapus, dan **`administrasi.auto_enabled` dikembalikan ke `0`** -- menyalakannya adalah keputusan rumah sakit, bukan efek samping verifikasi.

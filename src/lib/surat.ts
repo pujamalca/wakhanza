@@ -42,6 +42,48 @@ export const SETTING_PESAN_SEHAT = 'administrasi.pesan_sehat';
 export const SETTING_CATATAN_KAKI = 'administrasi.catatan_kaki';
 
 /**
+ * PENGIRIMAN OTOMATIS -- hanya surat SAKIT, dan itu bukan pembatasan yang bisa
+ * dilonggarkan belakangan.
+ *
+ * Surat sehat tidak punya baris tersimpan di Khanza sama sekali (lihat
+ * `khanza/suratPasien.ts`): yang ada cuma KUNJUNGAN, dan Khanza mencetak
+ * suratnya langsung dari layar registrasi. Jadi tidak ada satu pun kejadian
+ * "surat sehat disimpan" yang bisa dipicu. Mengotomatiskannya berarti
+ * menerbitkan surat keterangan sehat untuk setiap orang yang mendaftar -- bukan
+ * versi otomatis dari fitur yang ada, melainkan mesin yang menyatakan orang
+ * sehat tanpa satu pun dokter memutuskannya.
+ */
+export const SETTING_AUTO = 'administrasi.auto_enabled';
+/**
+ * Tanggal (YYYY-MM-DD) saat sakelar otomatis terakhir DINYALAKAN.
+ *
+ * Lantai jendela pindai. Tanpa ini, menyalakan sakelarnya berarti setiap surat
+ * di dalam jendela -- termasuk milik pasien yang sudah pulang seminggu lalu --
+ * langsung jadi berkas WhatsApp pada siklus berikutnya. Ditulis ulang tiap kali
+ * dinyalakan, jadi mematikan lalu menyalakan lagi tidak pernah membuka kembali
+ * arsip yang sudah lewat.
+ */
+export const SETTING_AUTO_SEJAK = 'administrasi.auto_sejak';
+export const SETTING_AUTO_LOOKBACK = 'administrasi.auto_lookback_hari';
+export const SETTING_AUTO_KUOTA = 'administrasi.auto_max_per_siklus';
+
+export const AUTO_LOOKBACK_BAWAAN = 7;
+export const AUTO_KUOTA_BAWAAN = 10;
+
+/**
+ * Bertingkat, dan sengaja bukan satu sakelar.
+ *
+ * `administrasi.enabled` menjawab "boleh mengirim surat lewat WhatsApp?" --
+ * pertanyaan kebijakan yang harus dijawab rumah sakit lebih dulu. Yang ini
+ * menjawab "boleh mengirimnya TANPA staf menekan tombol?", pertanyaan yang baru
+ * masuk akal sesudahnya. Pola yang sama dengan `bpjs.batal_enabled` di bawah
+ * `bpjs.enabled`.
+ */
+export async function otomatisAktif(): Promise<boolean> {
+  return (await administrasiAktif()) && (await getSettingBool(SETTING_AUTO, false));
+}
+
+/**
  * Apakah diagnosa ikut dicetak.
  *
  * Dibaca DI SINI lalu diserahkan sebagai parameter ke `ambilSuratSakit()`,

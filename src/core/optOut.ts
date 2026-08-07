@@ -74,6 +74,21 @@ const OPT_OUT_TRIGGERS = new Set([
   // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
   'LAB_REQUEST',
   'RAD_REQUEST',
+  /**
+   * SURAT_SAKIT (pengiriman surat OTOMATIS) ADA di sini, sementara ADMINISTRASI
+   * (kirim manual atas surat yang sama) TIDAK -- dan itu justru inti dari
+   * kenapa keduanya diberi kode pemicu berbeda alih-alih satu kode dipakai dua
+   * jalur.
+   *
+   * Yang dihentikan pasien lewat frasa "Berhenti Kirim Otomatis" adalah
+   * kiriman yang datang tanpa ia minta. Surat yang dikirimkan petugas karena
+   * pasiennya sendiri yang meminta di loket bukan itu; surat yang dikirim
+   * mesin begitu dokternya menyimpan, tanpa ada yang meminta, persis itu.
+   * Menumpang satu kode akan memaksa keduanya sama, dan ke arah mana pun
+   * salahnya: mendiamkan orang yang baru saja meminta suratnya, atau tetap
+   * mengirimi berkas orang yang sudah bilang berhenti.
+   */
+  'SURAT_SAKIT',
 ]);
 
 /**

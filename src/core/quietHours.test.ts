@@ -70,6 +70,25 @@ describe('computeScheduledAt', () => {
     expect(computeScheduledAt(eventAt, 'AUTO_REPLY', 21, 7)).toEqual(eventAt);
   });
 
+  /**
+   * Surat yang SAMA lewat dua jalur, dan hanya yang manual melewati jam tenang.
+   * Dipatok berpasangan dalam satu uji karena yang perlu dijaga bukan nilai
+   * masing-masing melainkan bahwa keduanya BERBEDA: yang membenarkan
+   * ADMINISTRASI bukan isi pesannya melainkan adanya orang yang menunggunya di
+   * loket. Begitu pengirimnya jadwal, alasannya gugur -- surat yang tersimpan
+   * pukul 22.30 lalu dikirim seketika membangunkan orang untuk berkas yang sama
+   * gunanya bila tiba pukul 07.00.
+   */
+  it('surat manual melewati jam tenang, surat OTOMATIS tidak', () => {
+    const eventAt = at(22, 30);
+    expect(computeScheduledAt(eventAt, 'ADMINISTRASI', 21, 7)).toEqual(eventAt);
+
+    const otomatis = computeScheduledAt(eventAt, 'SURAT_SAKIT', 21, 7);
+    expect(otomatis).not.toEqual(eventAt);
+    expect(otomatis.getHours()).toBe(7);
+    expect(otomatis.getDate()).toBe(1);
+  });
+
   it('pengecualian jam tenang tidak bocor ke pemicu lain', () => {
     const eventAt = at(23);
     expect(computeScheduledAt(eventAt, 'BROADCAST', 21, 7)).not.toEqual(eventAt);

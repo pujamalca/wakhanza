@@ -13,6 +13,7 @@ import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
 import { runBpjsBatalCycles, runBpjsKontrolIfDue } from './bpjsRunner';
 import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
+import { runSuratOtomatisCycle } from './suratRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
@@ -309,6 +310,17 @@ async function main(): Promise<void> {
   // jadi mengubahnya di dashboard berlaku hari itu juga alih-alih menunggu
   // worker dimulai ulang oleh orang yang tidak tahu ia perlu melakukannya.
   void loop('bpjs-kontrol', runBpjsKontrolIfDue, scanIntervalMs);
+  /**
+   * Surat sakit otomatis -- siklus PINDAI, dan di sini pilihan intervalnya
+   * punya alasan yang tidak dipunyai keempat siklus di atas: satu surat berarti
+   * satu peluncuran Chromium (~480 ms) DI DALAM proses yang juga memegang sesi
+   * WhatsApp. Chromium yatim di proses inilah yang pernah menjatuhkan worker ke
+   * crash loop 29 kali beruntun, jadi menjalankannya tiap 60 detik berarti
+   * memperbesar peluang itu untuk keuntungan empat menit yang tidak terasa
+   * pasien yang baru meninggalkan loket. Ia menjaga sakelarnya sendiri
+   * (bertingkat, keduanya default MATI), jadi aman dipanggil tanpa syarat.
+   */
+  void loop('surat-otomatis', runSuratOtomatisCycle, scanIntervalMs);
   void dispatcherLoop();
   void loop(
     'heartbeat',

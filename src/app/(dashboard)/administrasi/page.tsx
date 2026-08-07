@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { getSetting, getSettingBool, getSettingJson } from '@/models';
+import { getSetting, getSettingBool, getSettingJson, getSettingNumber } from '@/models';
 import { cariSuratSakit, cariKunjunganSehat } from '@/khanza/suratPasien';
 import { normalizePhone, type PhoneRejectReason } from '@/core/phone';
 import { formatTanggalSurat, isianSurat } from '@/core/suratDoc';
@@ -11,11 +11,17 @@ import {
   SETTING_CATATAN_KAKI,
   SETTING_DIAGNOSA,
   SETTING_AKTIF,
+  SETTING_AUTO,
+  SETTING_AUTO_SEJAK,
+  SETTING_AUTO_LOOKBACK,
+  SETTING_AUTO_KUOTA,
+  AUTO_LOOKBACK_BAWAAN,
+  AUTO_KUOTA_BAWAAN,
   PESAN_BAWAAN,
 } from '@/lib/surat';
 import { Callout, PageHeader, Tabs, type TabStatus } from '@/components/ui';
 import { SuratTable, type BarisSurat } from './SuratTable';
-import { MasterSwitch, DiagnosaSwitch, TeksForm } from './PengaturanForm';
+import { MasterSwitch, AutoSwitch, DiagnosaSwitch, TeksForm } from './PengaturanForm';
 import { RentangTanggal } from './RentangTanggal';
 
 /**
@@ -78,9 +84,10 @@ export default async function AdministrasiPage({
   const { tab: tabParam, dari: dariParam, sampai: sampaiParam } = await searchParams;
   const tab = bacaTab(tabParam);
 
-  const [aktif, diagnosaAktif, poliSensitif] = await Promise.all([
+  const [aktif, diagnosaAktif, autoAktif, poliSensitif] = await Promise.all([
     getSettingBool(SETTING_AKTIF, false),
     getSettingBool(SETTING_DIAGNOSA, false),
+    getSettingBool(SETTING_AUTO, false),
     getSettingJson<string[]>('privacy.sensitive_poli_codes', []),
   ]);
   const sensitif = new Set(poliSensitif);
@@ -172,7 +179,15 @@ export default async function AdministrasiPage({
             href: href('pengaturan'),
             label: 'Pengaturan',
             status: aktif ? 'success' : 'neutral',
-            statusLabel: aktif ? 'pengiriman menyala' : 'pengiriman dimatikan',
+            // Kirim otomatis disebut di titik statusnya, bukan cuma di dalam
+            // tabnya: ia mengirim berkas tanpa ada yang menekan apa pun, jadi
+            // "sedang menyala" tidak boleh menuntut seseorang membuka tab dulu
+            // untuk mengetahuinya.
+            statusLabel: !aktif
+              ? 'pengiriman dimatikan'
+              : autoAktif
+                ? 'pengiriman + kirim otomatis menyala'
+                : 'pengiriman menyala (manual saja)',
           },
         ]}
       />
@@ -180,6 +195,13 @@ export default async function AdministrasiPage({
       {tab === 'pengaturan' ? (
         <>
           <MasterSwitch aktif={aktif} />
+          <AutoSwitch
+            aktif={autoAktif}
+            induk={aktif}
+            sejak={(await getSetting(SETTING_AUTO_SEJAK)) ?? ''}
+            lookback={await getSettingNumber(SETTING_AUTO_LOOKBACK, AUTO_LOOKBACK_BAWAAN)}
+            kuota={await getSettingNumber(SETTING_AUTO_KUOTA, AUTO_KUOTA_BAWAAN)}
+          />
           <DiagnosaSwitch aktif={diagnosaAktif} />
           <TeksForm
             pesanSakit={(await getSetting(SETTING_PESAN_SAKIT)) ?? PESAN_BAWAAN.sakit}

@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import {
   Outbox,
   OptOut,
@@ -198,10 +199,22 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
  * memeriksa poli sensitif LEBIH DULU dan menolak mengirim, alih-alih
  * mengandalkan penggantian teks yang di sini tidak berarti apa-apa.
  */
-export async function loadAdministrasiContext(body: string): Promise<PipelineContext> {
+export async function loadAdministrasiContext(
+  body: string,
+  /**
+   * `SURAT_SAKIT` untuk pengiriman OTOMATIS, yang bedanya bukan kosmetik: kode
+   * pemicu itulah yang menentukan apakah pesannya tunduk pada daftar tolak
+   * (`core/optOut.ts`) dan apakah jam tenangnya dilewati (`core/quietHours.ts`).
+   * Jalur manual boleh melewati keduanya karena ada staf yang menekan tombol
+   * untuk satu pasien yang sedang menunggu; jalur otomatis tidak boleh, karena
+   * di sana tidak ada siapa-siapa. Menumpang satu kode untuk dua perilaku
+   * berarti kedua keputusan itu tidak bisa dipisahkan sama sekali.
+   */
+  triggerCode = 'ADMINISTRASI',
+): Promise<PipelineContext> {
   const shared = await loadSharedSettings();
   return {
-    triggerCode: 'ADMINISTRASI',
+    triggerCode,
     template: { body },
     genericTemplate: shared.genericTemplate ?? body,
     identity: shared.identity,
@@ -517,4 +530,33 @@ export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineCont
 /** Variabel identitas RS yang sama untuk semua template (F3.2). */
 export function identityVars(identity: HospitalIdentity): Partial<Record<TemplateVariable, string>> {
   return { nama_rs: identity.namaRs, alamat_rs: identity.alamatRs, kontak_rs: identity.kontakRs };
+}
+
+/**
+ * Membuang baris yang kunci idempotennya SUDAH ada di `outbox`.
+ *
+ * `uq_idem` di mesin database tetap penjaga terakhirnya -- ini bukan
+ * penggantinya. Yang dibeli penyaringan di depan adalah hal-hal yang telanjur
+ * terjadi SEBELUM insert ditolak, dan tiap pemakainya membeli sesuatu yang beda:
+ *
+ *   BROADCAST_FOLLOWUP  baris `broadcast_campaign` yang mengaku punya penerima
+ *                       padahal nol pesan baru masuk `outbox`.
+ *   SURAT_SAKIT         satu peluncuran Chromium plus satu berkas PDF berisi
+ *                       identitas pasien, untuk pesan yang toh ditolak. Jendela
+ *                       pindainya membaca ulang surat yang sama tiap siklus
+ *                       selama berhari-hari, jadi tanpa ini biayanya bukan
+ *                       sekali melainkan ribuan kali.
+ *
+ * Dipakai bersama alih-alih disalin: bentuknya sepele, dan justru yang sepele
+ * itulah yang paling gampang menyimpang tanpa ada yang memperhatikan.
+ */
+export async function saringKunciBaru<T>(rows: T[], kunci: (row: T) => string): Promise<T[]> {
+  if (rows.length === 0) return rows;
+
+  const existing = await Outbox.findAll({
+    where: { idempotencyKey: { [Op.in]: rows.map(kunci) } },
+    attributes: ['idempotencyKey'],
+  });
+  const sudah = new Set(existing.map((o) => o.idempotencyKey));
+  return rows.filter((row) => !sudah.has(kunci(row)));
 }

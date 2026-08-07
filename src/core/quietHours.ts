@@ -78,7 +78,16 @@ export function nextWindowStart(date: Date, endHour: number): Date {
  *   antrean sampai pagi tanpa satu pun tanda di layar -- lalu pasien yang masih
  *   di depan loket dikirimi lagi oleh staf yang mengira kiriman pertama gagal.
  *
- * Yang SENGAJA tidak ada di sini: BPJS_KONTROL. Ia pengingat KE PASIEN, dan
+ * Yang SENGAJA tidak ada di sini: SURAT_SAKIT -- pengiriman OTOMATIS surat yang
+ * sama, dan pasangannya ADMINISTRASI ada di daftar ini. Bacalah keduanya
+ * berdampingan sebelum menyamakan mereka: yang membenarkan ADMINISTRASI bukan
+ * ISI pesannya melainkan ADANYA orang yang menunggunya. Begitu pengirimnya
+ * jadwal, seluruh alasannya gugur -- surat yang tersimpan pukul 22.30 lalu
+ * dikirim seketika membangunkan orang untuk berkas yang sama gunanya bila tiba
+ * pukul 07.00. Kalimat "kegagalannya TIDAK TERLIHAT" di atas pun tidak berlaku:
+ * tidak ada staf yang menekan tombol lalu salah menyimpulkan kirimannya gagal.
+ *
+ * Juga tidak ada di sini: BPJS_KONTROL. Ia pengingat KE PASIEN, dan
  * jam kirimnya (`bpjs.kontrol_jam`) memang dipilih staf -- tapi berbeda dari
  * FARMASI_STOK_DARURAT, yang menerimanya orang yang sedang tidur di rumah.
  * Jam tenang justru ada untuk itu, jadi jam kirim yang tidak sengaja disetel

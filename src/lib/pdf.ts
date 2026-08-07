@@ -38,11 +38,24 @@ import { logger } from '@/lib/logger';
  * sementara peramban yang menganggur berjam-jam adalah persis bentuk yang
  * berakhir jadi proses yatim.
  *
- * Dijalankan di proses WEB, bukan worker. Staf harus bisa MELIHAT suratnya
- * sebelum mengirim, dan pratinjau yang harus menunggu satu siklus worker bukan
- * pratinjau. Worker tetap tidak berubah: ia mengirim berkas dari `outbox`
- * seperti lampiran broadcast mana pun -- kontrak "kedua proses tidak pernah
- * berkomunikasi lewat HTTP" utuh.
+ * Dijalankan di KEDUA proses, dan itu bukan pelonggaran topologi.
+ *
+ * Di proses WEB karena staf harus bisa MELIHAT suratnya sebelum mengirim, dan
+ * pratinjau yang harus menunggu satu siklus worker bukan pratinjau. Di WORKER
+ * sejak pengiriman otomatis ada (`worker/suratRunner.ts`), karena di sana tidak
+ * ada permintaan HTTP yang bisa merendernya -- pemicunya jadwal, bukan orang.
+ * Kontrak "kedua proses tidak pernah berkomunikasi lewat HTTP" tetap utuh:
+ * masing-masing merender sendiri lalu menaruh berkasnya di `outbox`, tidak ada
+ * yang memanggil yang lain.
+ *
+ * Yang harus disadari siapa pun yang menyentuh pemanggil di worker: Chromium
+ * kedua di dalam proses yang MEMEGANG SESI WHATSAPP. Kedua syarat di atas
+ * (`userDataDir` sendiri, selalu ditutup di `finally`) berhenti jadi kerapian
+ * dan menjadi syarat hidup -- justru proses inilah yang pernah jatuh ke crash
+ * loop 29 kali karena Chromium yatim memegang direktori sesi. Karena itu
+ * pemanggil di worker berjalan di siklus 5 menit, berkuota per siklus, dan
+ * MENGHENTIKAN siklusnya pada kegagalan pertama alih-alih meluncurkan yang
+ * berikutnya.
  */
 
 /** Anggaran keras. Surat satu halaman terukur ~700 ms; 30 detik berarti ada yang salah. */

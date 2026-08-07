@@ -97,6 +97,11 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // bukan sekadar pemberitahuan yang bisa diulang isinya -- ada surat yang
   // tidak sampai, dan pasiennya kemungkinan sedang menunggunya.
   ADMINISTRASI: 'Dokumen surat',
+  // Surat yang SAMA, jalur yang berbeda -- dan labelnya wajib membedakannya
+  // karena keduanya berdampingan di halaman Antrean untuk pasien yang sama.
+  // Tanpa itu, "kenapa pasien ini dapat suratnya dua kali" tidak bisa dijawab
+  // dari layar: yang satu dikirim petugas, yang satu dikirim mesin.
+  SURAT_SAKIT: 'Surat sakit (otomatis)',
 };
 
 /** Kode yang belum dikenal dikembalikan apa adanya, bukan jadi string kosong. */

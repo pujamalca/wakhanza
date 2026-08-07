@@ -1,9 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { randomBytes } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { logAudit, setSetting } from '@/models';
 import { requireRole } from '@/lib/authz';
 import { buildIdempotencyKey } from '@/core/idempotency';
@@ -11,7 +8,7 @@ import { loadAdministrasiContext, enqueueMessage, previewUniqueCodeFooter } from
 import { checkPrivacy } from '@/core/privacy';
 import { normalizePhone } from '@/core/phone';
 import { periksaPanjangKeterangan } from '@/core/media';
-import { mediaDir } from '@/lib/mediaStorage';
+import { simpanPdfSurat } from '@/lib/mediaStorage';
 import { namaBerkasSurat, type JenisSurat } from '@/core/suratDoc';
 import {
   muatSurat,
@@ -24,6 +21,10 @@ import {
   SETTING_PESAN_SAKIT,
   SETTING_PESAN_SEHAT,
   SETTING_CATATAN_KAKI,
+  SETTING_AUTO,
+  SETTING_AUTO_SEJAK,
+  SETTING_AUTO_LOOKBACK,
+  SETTING_AUTO_KUOTA,
 } from '@/lib/surat';
 import { htmlKePdf } from '@/lib/pdf';
 import { renderTemplate, findUnknownVariables } from '@/core/template';
@@ -83,6 +84,85 @@ export async function toggleDiagnosaAction(aktif: boolean): Promise<HasilForm> {
   };
 }
 
+/** Tanggal lokal sebagai YYYY-MM-DD -- lantai jendela pindai, bukan stempel waktu. */
+function hariIniIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Sakelar KIRIM OTOMATIS. Dua hal yang menempel padanya, dan keduanya bukan
+ * kerapian:
+ *
+ * 1. **Menolak menyala selama sakelar utama mati.** Bukan sekadar validasi:
+ *    tanpa ini halaman menampilkan sakelar otomatis bercentang sementara
+ *    `otomatisAktif()` di worker tetap `false`, dan yang terlihat staf adalah
+ *    fitur yang menyala tapi tidak pernah mengirim apa pun -- keadaan
+ *    "menyala tapi setengah jadi" yang sudah dibayar di /farmasi.
+ *
+ * 2. **Menulis lantai aktivasi pada saat yang sama.** Kalau tidak, siklus
+ *    berikutnya membaca jendela penuh dan mengirimkan surat-surat lama
+ *    sekaligus. Ditulis SEBELUM sakelarnya, supaya urutan yang salah tidak
+ *    pernah menyisakan celah beberapa milidetik dengan sakelar menyala tanpa
+ *    lantai -- worker berjalan di proses lain dan tidak menunggu siapa pun.
+ */
+export async function toggleAutoAction(aktif: boolean): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  if (aktif && !(await administrasiAktif())) {
+    return { error: 'Nyalakan dulu "Pengiriman dokumen ke pasien" di atas — tanpa itu pengiriman otomatis tidak akan mengirim apa pun.' };
+  }
+
+  const sejak = hariIniIso();
+  if (aktif) await setSetting(SETTING_AUTO_SEJAK, sejak);
+  await setSetting(SETTING_AUTO, aktif ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'administrasi_auto_toggle',
+    SETTING_AUTO,
+    aktif ? `nyala sejak=${sejak}` : 'mati',
+  );
+  segarkan();
+  return {
+    sukses: aktif
+      ? `Kirim otomatis dinyalakan. Yang dikirimkan hanya surat bernomor mulai ${sejak}; surat yang lebih lama tetap harus dikirim manual dari tab Surat sakit.`
+      : 'Kirim otomatis dimatikan. Pengiriman manual tetap bisa dipakai.',
+  };
+}
+
+/**
+ * Lebar jendela dan kuota per siklus.
+ *
+ * Sengaja TIDAK didaftarkan ke `EDITABLE_KEYS` di `/api/settings`, alasan yang
+ * sama seperti kunci `farmasi.*`: form Pengaturan mengirim ULANG semua kunci
+ * tiap kali Simpan ditekan, jadi membiarkannya di sana membuka jalan agar
+ * nilainya tertimpa oleh halaman yang bahkan tidak menampilkannya.
+ */
+export async function simpanAutoAction(_prev: HasilForm, form: FormData): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  const lookback = Number(form.get('auto_lookback'));
+  const kuota = Number(form.get('auto_kuota'));
+
+  // Dijepit, bukan sekadar ditolak saat kosong. Nol pada lookback berarti "hari
+  // ini saja" dan itu sah; nol pada kuota berarti fitur yang menyala tapi tidak
+  // pernah mengirim -- persis keadaan yang paling sulit dikenali dari layar.
+  if (!Number.isInteger(lookback) || lookback < 0 || lookback > 30) {
+    return { error: 'Lebar jendela harus bilangan bulat 0–30 hari.' };
+  }
+  if (!Number.isInteger(kuota) || kuota < 1 || kuota > 100) {
+    return { error: 'Kuota per siklus harus bilangan bulat 1–100.' };
+  }
+
+  await setSetting(SETTING_AUTO_LOOKBACK, String(lookback));
+  await setSetting(SETTING_AUTO_KUOTA, String(kuota));
+  await logAudit(session!.user.username, 'administrasi_auto_update', 'administrasi.auto', `lookback=${lookback} kuota=${kuota}`);
+  segarkan();
+  return { sukses: 'Pengaturan kirim otomatis disimpan.' };
+}
+
 export async function simpanTeksAction(_prev: HasilForm, form: FormData): Promise<HasilForm> {
   const { session, response } = await requireRole('admin');
   if (response) return { error: 'Tidak berwenang.' };
@@ -124,26 +204,6 @@ export async function simpanTeksAction(_prev: HasilForm, form: FormData): Promis
 // ---------------------------------------------------------------------------
 // Kirim
 // ---------------------------------------------------------------------------
-
-/**
- * Menyimpan PDF ke direktori lampiran yang sudah ada.
- *
- * Memakai `uploads/broadcast/` yang sama, BUKAN direktori baru, dan itu bukan
- * kemalasan: `cleanupOrphanMedia()` di worker memangkas berkas yang tidak lagi
- * ditunjuk baris `outbox` mana pun dengan memindai direktori itu. Direktori
- * kedua berarti berkas surat tidak pernah ikut terpangkas -- setiap surat yang
- * pernah dikirim menetap di disk selamanya, memuat nama dan alamat pasien.
- *
- * Nama berkas di disk tetap ACAK (`namaBerkasSimpanan` tidak dipakai di sini
- * hanya karena sumbernya bukan unggahan, tapi aturannya sama): nama yang
- * dilihat pasien disimpan terpisah di `outbox.media_name`.
- */
-async function simpanPdf(pdf: Buffer): Promise<string> {
-  const nama = `${randomBytes(8).toString('hex')}.pdf`;
-  await mkdir(mediaDir(), { recursive: true });
-  await writeFile(path.join(mediaDir(), nama), pdf);
-  return nama;
-}
 
 /**
  * Kirim satu surat ke satu pasien.
@@ -244,7 +304,7 @@ export async function kirimSuratAction(jenis: JenisSurat, kunci: string): Promis
   if (!panjang.ok) return { error: panjang.error };
 
   const pdf = await htmlKePdf(await suratKeHtml(isi));
-  const mediaPath = await simpanPdf(pdf);
+  const mediaPath = await simpanPdfSurat(pdf);
 
   /**
    * Kunci idempoten memuat STEMPEL WAKTU, jadi surat yang sama boleh dikirim

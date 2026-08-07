@@ -1,9 +1,9 @@
 import { Op } from 'sequelize';
-import { BroadcastSchedule, BroadcastCampaign, Outbox, getSettingNumber, logAudit } from '@/models';
+import { BroadcastSchedule, BroadcastCampaign, getSettingNumber, logAudit } from '@/models';
 import { fetchPatientSegment, type PatientSegmentRow } from '@/khanza/pasienSegment';
 import { scheduleFiltersToSegment, isFollowupSchedule, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
-import { loadBroadcastContext, enqueueMessage, identityVars } from './pipeline';
+import { loadBroadcastContext, enqueueMessage, identityVars, saringKunciBaru } from './pipeline';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { computeNextRunAt } from '@/core/schedule';
 import { logger, safeError } from '@/lib/logger';
@@ -40,15 +40,7 @@ export async function runDueBroadcastSchedules(): Promise<void> {
  * perbedaan itu justru melewatkan pesan yang seharusnya terkirim.
  */
 async function filterAlreadySent(scheduleId: number, rows: PatientSegmentRow[]): Promise<PatientSegmentRow[]> {
-  if (rows.length === 0) return rows;
-
-  const keyOf = (row: PatientSegmentRow) => buildIdempotencyKey('BROADCAST_FOLLOWUP', scheduleId, row.no_rawat);
-  const existing = await Outbox.findAll({
-    where: { idempotencyKey: { [Op.in]: rows.map(keyOf) } },
-    attributes: ['idempotencyKey'],
-  });
-  const sent = new Set(existing.map((o) => o.idempotencyKey));
-  return rows.filter((row) => !sent.has(keyOf(row)));
+  return saringKunciBaru(rows, (row) => buildIdempotencyKey('BROADCAST_FOLLOWUP', scheduleId, row.no_rawat));
 }
 
 async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<void> {

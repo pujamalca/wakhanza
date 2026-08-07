@@ -68,6 +68,30 @@ export async function simpanBerkasLampiran(berkas: File): Promise<BerkasTersimpa
   };
 }
 
+/**
+ * Menulis PDF surat yang DIRENDER SENDIRI (bukan unggahan) ke direktori yang
+ * sama.
+ *
+ * Direktori yang sama, bukan direktori baru: `cleanupOrphanMedia()` memangkas
+ * berkas yang tidak lagi ditunjuk baris `outbox` mana pun dengan MEMINDAI
+ * direktori itu, jadi direktori kedua berarti setiap surat yang pernah dikirim
+ * menetap di disk selamanya berikut nama dan alamat pasien di dalamnya.
+ *
+ * Dipakai DUA jalur -- kirim manual dari dashboard dan pengiriman otomatis di
+ * worker. Dulu hanya ada di berkas `'use server'` milik dashboard, dan worker
+ * tidak boleh mengimpor berkas itu; menyalinnya ke worker berarti dua tempat
+ * memutuskan sendiri di mana surat pasien disimpan, dan yang menyimpang di
+ * antaranya tidak akan pernah ikut terpangkas.
+ */
+export async function simpanPdfSurat(pdf: Buffer): Promise<string> {
+  // Nama di disk selalu acak, tidak pernah diturunkan dari nama pasien -- nama
+  // yang dilihat pasien disimpan terpisah di `outbox.media_name`.
+  const nama = `${randomBytes(8).toString('hex')}.pdf`;
+  await mkdir(DIR_MEDIA, { recursive: true });
+  await writeFile(path.join(DIR_MEDIA, nama), pdf);
+  return nama;
+}
+
 export async function hapusBerkasLampiran(relatif: string): Promise<void> {
   const absolut = resolveMediaPath(relatif);
   if (!absolut) return;

@@ -156,7 +156,33 @@ const DIAGNOSA_SELECT = `,
         LIMIT 1
       ) AS diagnosa`;
 
-function buildSuratSakitSql(sertakanDiagnosa: boolean, satuSurat: boolean): string {
+/**
+ * Tiga bentuk, satu penurunan.
+ *
+ *   `satu`      satu surat lewat PK -- pratinjau dan kirim manual
+ *   `rentang`   daftar di layar, TERBARU dulu (yang dicari staf ada di atas)
+ *   `otomatis`  jendela pindai milik worker, TERTUA dulu
+ *
+ * Urutan `otomatis` sengaja terbalik dari `rentang`, dan itu bukan selera: bila
+ * jendelanya berisi lebih banyak surat daripada yang boleh dikirim satu siklus,
+ * yang dikerjakan lebih dulu harus yang paling lama menunggu. Terbaru-dulu akan
+ * membuat surat tertua di jendela didorong keluar oleh yang lebih baru setiap
+ * siklus, dan ia tidak pernah terkirim tanpa satu pun galat.
+ */
+type BentukSuratSakit = 'satu' | 'rentang' | 'otomatis';
+
+/**
+ * Batas baris jendela pindai otomatis.
+ *
+ * Lebih longgar daripada 200 milik daftar layar karena keduanya menjawab hal
+ * berbeda: 200 di layar adalah sebanyak yang masuk akal DIBACA orang, sementara
+ * yang ini sebanyak yang perlu DIPERIKSA mesin -- dan yang sudah pernah dikirim
+ * disaring sesudahnya, jadi jumlah baris di sini bukan jumlah pesan.
+ */
+const BATAS_JENDELA_OTOMATIS = 500;
+
+function buildSuratSakitSql(sertakanDiagnosa: boolean, bentuk: BentukSuratSakit): string {
+  const satuSurat = bentuk === 'satu';
   return `
     SELECT
       ss.no_surat, ss.no_rawat, ss.tanggalawal, ss.tanggalakhir, ss.lamasakit,
@@ -166,24 +192,54 @@ function buildSuratSakitSql(sertakanDiagnosa: boolean, satuSurat: boolean): stri
     ${IDENTITAS_JOIN}
     LEFT JOIN perusahaan_pasien pr ON pr.kode_perusahaan = p.perusahaan_pasien
     WHERE ${satuSurat ? 'ss.no_surat = :noSurat' : 'ss.no_surat >= :awalPrefix AND ss.no_surat <= :akhirPrefix'}
-    ORDER BY ss.no_surat DESC
-    LIMIT ${satuSurat ? 1 : 200}
+    ORDER BY ss.no_surat ${bentuk === 'otomatis' ? 'ASC' : 'DESC'}
+    LIMIT ${satuSurat ? 1 : bentuk === 'otomatis' ? BATAS_JENDELA_OTOMATIS : 200}
   `;
 }
 
 /**
- * Pemangkas `no_surat`, dan ia satu-satunya di proyek ini yang EKSAK.
+ * Pemangkas `no_surat` -- berindeks sempurna, tapi TANGGALNYA TIDAK EKSAK.
+ * Bacalah bagian kedua sebelum memakainya sebagai penanda kejadian.
  *
- * Formatnya `SKS` + `YYYYMMDD` + urutan 3 digit -- terurut leksikal lintas
- * tahun, dan ia PRIMARY KEY, jadi rentang tanggal jatuh langsung jadi `range`
- * pada PRIMARY tanpa kolom bantu apa pun.
+ * Bentuknya `SKS` + `YYYYMMDD` + urutan 3 digit: terurut leksikal lintas tahun,
+ * dan ia PRIMARY KEY, jadi rentang tanggal jatuh langsung jadi `range` pada
+ * PRIMARY tanpa kolom bantu apa pun. Sebagai PEMANGKAS ia sempurna.
  *
- * Yang disandikannya tanggal surat DIBUAT, dan itu memang yang dicari staf.
- * `tanggalawal` (mulai istirahat) SENGAJA tidak dipakai sebagai penyaring:
- * diukur atas 18 baris, 5 di antaranya berbeda dari tanggal pembuatan -- surat
- * yang dibuat hari Jumat untuk istirahat mulai Senin. Menyaring dengan
- * `tanggalawal` juga akan mengembalikannya ke pemindaian penuh, karena kolom
- * itu tidak terindeks (§4.4).
+ * ==========================================================================
+ * Tanggal apa yang sebenarnya tersandi di sana -- diukur, bukan disimpulkan
+ * ==========================================================================
+ *
+ * Berkas ini sempat menyatakan "yang disandikannya tanggal surat DIBUAT". Itu
+ * keliru, dan sumber Khanza sendiri yang membantahnya: `SuratSakit.java` (`Valid
+ * .autoNomer3`) merakit prefiksnya dari isi kotak **Tanggal Awal** pada saat
+ * nomornya dibuatkan -- bukan dari tanggal hari ini, dan bukan pula dari nilai
+ * `tanggalawal` yang akhirnya tersimpan (staf masih bisa menggeser tanggalnya
+ * sesudah nomornya keluar).
+ *
+ * Diukur atas 18 baris di database ini, tanggal di nomor surat cocok dengan:
+ *
+ *   `tanggalawal`              13 dari 18
+ *   `reg_periksa.tgl_registrasi` 15 dari 18
+ *
+ * -- jadi ia bukan salah satunya secara andal, melainkan "isi kotak tanggal
+ * awal saat nomor dibuatkan", yang biasanya (tidak selalu) jatuh pada hari
+ * suratnya ditulis. Selisih `tanggalawal` terhadap tanggal kunjungan terentang
+ * 0 sampai 6 hari.
+ *
+ * DUA akibat yang mengikat siapa pun yang menyentuh ini:
+ *
+ * 1. Untuk DAFTAR di layar ia tetap pemangkas yang benar dan cukup baik -- staf
+ *    mencari surat "sekitar tanggal sekian", dan meleset sehari tertutup oleh
+ *    rentang yang memang mereka atur sendiri. `tanggalawal` tidak dipakai
+ *    sebagai penyaring karena kolom itu tidak terindeks (§4.4).
+ *
+ * 2. Untuk PEMICU ia TIDAK boleh dipakai sebagai watermark. Nomor yang tidak
+ *    monoton terhadap urutan penyimpanan berarti satu surat yang tersimpan hari
+ *    ini bisa bernomor lebih kecil daripada watermark, lalu dilewati selamanya
+ *    tanpa satu pun galat -- kelas kegagalan yang sama persis dengan prefiks
+ *    `nobooking` pada pembatalan BPJS. Karena itu pengiriman otomatis memakai
+ *    JENDELA yang dipindai ulang tiap siklus dengan dedup murni lewat kunci
+ *    idempoten, bukan watermark yang maju sekali jalan.
  */
 function prefixSurat(tanggal: string, akhir: boolean): string {
   const angka = tanggal.replace(/-/g, '');
@@ -191,16 +247,45 @@ function prefixSurat(tanggal: string, akhir: boolean): string {
 }
 
 export async function cariSuratSakit(dariTanggal: string, sampaiTanggal: string): Promise<BarisSuratSakit[]> {
-  return sikSelect<BarisSuratSakit>(buildSuratSakitSql(false, false), {
+  return sikSelect<BarisSuratSakit>(buildSuratSakitSql(false, 'rentang'), {
     awalPrefix: prefixSurat(dariTanggal, false),
     akhirPrefix: prefixSurat(sampaiTanggal, true),
   });
 }
 
 export async function ambilSuratSakit(noSurat: string, sertakanDiagnosa: boolean): Promise<BarisSuratSakit | null> {
-  const rows = await sikSelect<BarisSuratSakit>(buildSuratSakitSql(sertakanDiagnosa, true), { noSurat });
+  const rows = await sikSelect<BarisSuratSakit>(buildSuratSakitSql(sertakanDiagnosa, 'satu'), { noSurat });
   return rows[0] ?? null;
 }
+
+/**
+ * Jendela pindai untuk PENGIRIMAN OTOMATIS.
+ *
+ * Query-nya sama persis dengan daftar layar -- hanya urutan dan batasnya yang
+ * beda -- dan itu disengaja: yang dikirim otomatis wajib surat yang sama dengan
+ * yang dilihat staf di tab Surat sakit, termasuk identitas dan alamat yang
+ * dirakit LEFT JOIN. Dua penurunan untuk satu hal adalah bentuk kegagalan yang
+ * sudah dibayar berkali-kali di proyek ini.
+ *
+ * Jendelanya merentang KE DUA ARAH dari hari ini, dan arah majunya bukan
+ * kehati-hatian melainkan konsekuensi dari § di atas: sebuah surat yang ditulis
+ * hari ini untuk istirahat mulai pekan depan bernomor lebih BESAR daripada
+ * prefiks hari ini. Batas atas yang berhenti di hari ini akan membuang persis
+ * surat-surat itu.
+ */
+export async function pollSuratSakitJendela(
+  dariTanggal: string,
+  sampaiTanggal: string,
+  sertakanDiagnosa: boolean,
+): Promise<BarisSuratSakit[]> {
+  return sikSelect<BarisSuratSakit>(buildSuratSakitSql(sertakanDiagnosa, 'otomatis'), {
+    awalPrefix: prefixSurat(dariTanggal, false),
+    akhirPrefix: prefixSurat(sampaiTanggal, true),
+  });
+}
+
+/** Jendela penuh terbaca = tanda ada yang mungkin luput; dipakai runner untuk memperingatkan. */
+export const JENDELA_OTOMATIS_PENUH = BATAS_JENDELA_OTOMATIS;
 
 /**
  * Kunjungan yang bisa diterbitkan surat sehat.
@@ -273,7 +358,26 @@ const CONTOH_TGL_AKHIR = formatRawatPrefix(lookbackDate(-1));
  */
 registerPlanCheck({
   name: 'ADMINISTRASI_SURAT_SAKIT',
-  sql: buildSuratSakitSql(false, false),
+  sql: buildSuratSakitSql(false, 'rentang'),
+  replacements: { awalPrefix: 'SKS20260101000', akhirPrefix: 'SKS20261231999' },
+  maxRows: 3000,
+});
+
+/**
+ * Jendela otomatis, didaftarkan BERIKUT diagnosanya menyala -- dan itu yang
+ * membuatnya bukan pemeriksaan kembar yang mubazir.
+ *
+ * Bentuk berdiagnosa sengaja tidak didaftarkan untuk `ambilSuratSakit` karena di
+ * sana sub-query berkorelasinya jalan sekali untuk SATU baris lewat PK. Di sini
+ * tidak: ia jalan untuk SETIAP baris di dalam jendela, di dalam proses worker
+ * yang berbagi kolam `sik` ber-`pool.max: 2` dengan SIMRS yang sedang melayani
+ * pasien. Yang murah pada satu baris belum tentu murah pada lima ratus, dan
+ * justru bentuk yang lebih mahal itulah yang perlu dijaga -- bentuk tanpa
+ * diagnosa adalah himpunan bagiannya.
+ */
+registerPlanCheck({
+  name: 'ADMINISTRASI_SURAT_SAKIT_OTOMATIS',
+  sql: buildSuratSakitSql(true, 'otomatis'),
   replacements: { awalPrefix: 'SKS20260101000', akhirPrefix: 'SKS20261231999' },
   maxRows: 3000,
 });
