@@ -39,6 +39,8 @@
  * nomor ada. Karena itu bentuknya dipaksa lewat tipe: fungsi ini tidak punya
  * jalan untuk membaca `no_tlp` sendiri walau ia mau.
  */
+import { hitungJendelaPindai, type JendelaPindai } from './jendelaPindai';
+
 export interface KandidatSurat<T> {
   baris: T;
   kdPoli: string | null;
@@ -136,14 +138,7 @@ export function putuskanSuratOtomatis<T>(
   return { kirim, lewat };
 }
 
-function iso(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-export interface JendelaSurat {
-  dari: string;
-  sampai: string;
-}
+export type JendelaSurat = JendelaPindai;
 
 /**
  * Jendela tanggal yang dipindai, dan ia merentang KE DUA ARAH dari hari ini.
@@ -170,16 +165,12 @@ export interface JendelaSurat {
  * yang diinginkan untuk arsip, tapi ia juga menjaring surat yang ditulis hari
  * ini untuk istirahat yang sudah dimulai kemarin. Jalur manual di tab Surat
  * sakit adalah pemulihnya, dan halaman Pengaturan mengatakan ini di depan staf.
+ *
+ * Perhitungannya sendiri tinggal di `core/jendelaPindai.ts` dan dipakai BERSAMA
+ * dengan PENGADAAN -- keduanya sampai ke aturan yang sama lewat sebab yang sama,
+ * dan dua salinan yang bisa menyimpang adalah bentuk kegagalan yang sudah
+ * berulang kali dibayar di proyek ini.
  */
 export function jendelaSuratOtomatis(hariIni: Date, lookbackHari: number, sejak: string | null): JendelaSurat {
-  const mundur = new Date(hariIni);
-  mundur.setDate(mundur.getDate() - Math.max(0, lookbackHari));
-  const maju = new Date(hariIni);
-  maju.setDate(maju.getDate() + Math.max(0, lookbackHari));
-
-  const bawah = iso(mundur);
-  // Lantai aktivasi menang bila ia lebih baru. Perbandingan string aman karena
-  // keduanya `YYYY-MM-DD` berlebar tetap.
-  const dari = sejak && sejak > bawah ? sejak : bawah;
-  return { dari, sampai: iso(maju) };
+  return hitungJendelaPindai(hariIni, lookbackHari, sejak);
 }

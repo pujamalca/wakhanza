@@ -27,6 +27,7 @@ import {
   type HasilForm,
 } from './actions';
 import { toggleTerimaDaruratAction } from './daruratActions';
+import { toggleTerimaPengadaanAction } from './pengadaanActions';
 
 export interface TargetRow {
   id: number;
@@ -37,6 +38,8 @@ export interface TargetRow {
   /** Boleh MENGAJUKAN pertanyaan stok/harga dari alamat ini (migrations/020). */
   bolehTanya: boolean;
   terimaDaruratStok: boolean;
+  /** Menerima nota PENGADAAN, termasuk harga beli pemasok (migrations/028). */
+  terimaPengadaan: boolean;
 }
 
 export interface GrupRow {
@@ -116,8 +119,7 @@ export function TargetTable({
                 <th className={`${cellClass} hidden sm:table-cell`}>Jenis</th>
                 <th className={`${cellClass} hidden md:table-cell`}>Alamat</th>
                 <th className={cellClass}>Status</th>
-                <th className={`${cellClass} hidden lg:table-cell`}>Boleh tanya</th>
-                <th className={`${cellClass} hidden xl:table-cell`}>Terima darurat stok</th>
+                <th className={`${cellClass} hidden md:table-cell`}>Boleh / menerima</th>
                 <th className={`${cellClass} w-px`}></th>
               </tr>
             </thead>
@@ -137,40 +139,50 @@ export function TargetTable({
                   <td className={cellClass}>
                     <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
                   </td>
-                  {/* Kolom TERSENDIRI, bukan digabung ke Status. Keduanya
-                      menjawab pertanyaan berbeda: Status = ke mana notifikasi
-                      resep dikirim, ini = siapa yang boleh membuat nomor RS
-                      menjawab. Sebuah grup sangat wajar cuma menerima
-                      pemberitahuan tanpa nomor RS ikut bicara di dalamnya. */}
-                  <td className={`${cellClass} hidden lg:table-cell`}>
-                    <label className="flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={t.bolehTanya}
-                        disabled={pending}
-                        onChange={() => jalankan(() => toggleBolehTanyaAction(t.id, !t.bolehTanya))}
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {t.bolehTanya ? (t.jenis === 'grup' ? 'ya, dijawab di grup' : 'ya') : 'tidak'}
-                      </span>
-                    </label>
-                  </td>
-                  {/* Kolom KETIGA, dan sekali lagi terpisah. Status = ke mana
-                      notifikasi resep dikirim, Boleh tanya = siapa yang boleh
-                      membuat nomor RS menjawab, ini = siapa yang menerima rekap
-                      persediaan. Grup shift apotek sangat wajar perlu tahu tiap
-                      resep tanpa perlu rekap tiap pagi, dan nomor kepala
-                      instalasi sangat wajar justru kebalikannya. */}
-                  <td className={`${cellClass} hidden xl:table-cell`}>
-                    <label className="flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={t.terimaDaruratStok}
-                        disabled={pending}
-                        onChange={() => jalankan(() => toggleTerimaDaruratAction(t.id, !t.terimaDaruratStok))}
-                      />
-                      <span className="text-xs text-muted-foreground">{t.terimaDaruratStok ? 'ya' : 'tidak'}</span>
-                    </label>
+                  {/* SATU kolom untuk ketiga centang, bukan satu kolom
+                      masing-masing.
+
+                      Keempat kolom `farmasi_target` menjawab empat pertanyaan
+                      berbeda dan tetap terpisah DI DATABASE (lihat migrations
+                      020/021/028) -- yang digabung di sini cuma tempatnya di
+                      layar. Sebabnya terukur: satu kolom per centang membuat
+                      yang ketiga tersembunyi di bawah `xl` dan yang keempat
+                      praktis tidak pernah terlihat sama sekali, sehingga
+                      pilihan yang sengaja dipisah di database berakhir sebagai
+                      pilihan yang tidak bisa dijangkau siapa pun -- persis
+                      "pilihan yang hilang" yang jadi alasan pemisahannya. */}
+                  <td className={`${cellClass} hidden md:table-cell`}>
+                    <div className="flex flex-col gap-1">
+                      <label className="flex cursor-pointer items-center gap-2" title="Boleh membuat nomor rumah sakit menjawab pertanyaan stok/harga">
+                        <input
+                          type="checkbox"
+                          checked={t.bolehTanya}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleBolehTanyaAction(t.id, !t.bolehTanya))}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          Boleh tanya{t.bolehTanya && t.jenis === 'grup' ? ' (dijawab di grup)' : ''}
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2" title="Menerima rekap barang yang stoknya di bawah ambang minimal">
+                        <input
+                          type="checkbox"
+                          checked={t.terimaDaruratStok}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleTerimaDaruratAction(t.id, !t.terimaDaruratStok))}
+                        />
+                        <span className="text-xs text-muted-foreground">Darurat stok</span>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2" title="Menerima nota pembelian langsung dari pemasok, termasuk harga beli">
+                        <input
+                          type="checkbox"
+                          checked={t.terimaPengadaan}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleTerimaPengadaanAction(t.id, !t.terimaPengadaan))}
+                        />
+                        <span className="text-xs text-muted-foreground">Pengadaan</span>
+                      </label>
+                    </div>
                   </td>
                   <td className={cellClass}>
                     <div className="flex justify-end gap-1">

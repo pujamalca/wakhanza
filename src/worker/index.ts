@@ -14,6 +14,7 @@ import { runBpjsBatalCycles, runBpjsKontrolIfDue } from './bpjsRunner';
 import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
+import { runPengadaanCycle } from './pengadaanRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
@@ -321,6 +322,17 @@ async function main(): Promise<void> {
    * (bertingkat, keduanya default MATI), jadi aman dipanggil tanpa syarat.
    */
   void loop('surat-otomatis', runSuratOtomatisCycle, scanIntervalMs);
+  /**
+   * Pengadaan -- siklus PINDAI, dan alasannya sama dengan booking: jendelanya
+   * dibaca ULANG seluruhnya tiap kali jalan, jadi interval rapat berarti
+   * mengulang pekerjaan yang sama 1.440x sehari untuk keuntungan yang tidak
+   * terasa siapa pun. Diukur 2,21 faktur per hari aktif di RS ini; selisih empat
+   * menit pada nota pembelian tidak berarti apa-apa bagi gudang.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('pengadaan', runPengadaanCycle, scanIntervalMs);
   void dispatcherLoop();
   void loop(
     'heartbeat',

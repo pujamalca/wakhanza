@@ -314,3 +314,108 @@ outbox 29320: dibuat **06:49:24**, terkirim **06:49:28**, `attempts=1`. Nomor tu
 **Pemeriksaan menyeluruh**: `npm test` **486 lolos / 28 suite**, `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses (exit 0), `verify:plans` lolos, `verify:db` lolos (`sik` tetap menolak tulisan, `audit_log` tetap append-only).
 
 **Kebersihan**: fixture `TESTWA00099` + `reg_periksa` + `suratsakit` dihapus dari `alca` (diperiksa: 0 sisa), baris `outbox` SURAT_SAKIT dan `patient_contact` uji dihapus, kedua berkas PDF dihapus dari `uploads/broadcast/`, skrip sementara dihapus, dan **`administrasi.auto_enabled` dikembalikan ke `0`** -- menyalakannya adalah keputusan rumah sakit, bukan efek samping verifikasi.
+
+## Kelas kesebelas: PENGADAAN (`/farmasi`, migrations/028) -- nota pembelian, dan tabelnya tanpa jam
+
+**Kelas pemicunya dipaksa bentuk tabel, dan itu dibuktikan dari skema plus sumber Khanza -- bukan disimpulkan dari nama kolom.** `SHOW CREATE TABLE pembelian` menunjukkan sebelas kolom dan **tidak satu pun bertipe waktu**; yang ada `tgl_beli` bertipe `date`. `DlgPembelian.java:1759` menunjukkan tanggal itu berasal dari kotak yang dipilih staf, bukan dari jam server. Watermark karena itu mustahil benar -> kelas PINDAI.
+
+**Arah prefiks `no_faktur` DIUKUR atas seluruh 910 baris**, dan nol pada salah satu arah itulah yang menentukan artinya:
+
+```
+prefix_lebih_maju  prefix_lebih_mundur  maks_maju_hari
+9                  0                    31
+```
+
+Nol pada arah mundur = alurnya selalu "nomor dibuatkan hari ini, lalu `tgl_beli` digeser mundur ke tanggal nota pemasok". Jadi prefiksnya penanda **kapan dimasukkan** -- yang memang dibutuhkan pemicu -- sementara `tgl_beli` adalah tanggal notanya. Pola `PG`+YYYYMMDD+3 digit cocok pada **910/910**, dan tanggal di dalamnya cocok dengan `tgl_beli` pada **901/910**.
+
+**`riwayat_barang_medis` ditolak lewat dua pengukuran, bukan lewat selera.** Ia punya `tanggal` DATE + `jam` TIME dan `posisi='Pengadaan'` -- waktu kejadian yang tidak dipunyai `pembelian`. Tapi: `SHOW CREATE TABLE` menunjukkan satu-satunya kunci adalah `kode_brng` dan `kd_bangsal` (jadi penyaringan waktu = pemindaian penuh atas **114.092** baris, 58.664 di antaranya dari pemberian obat), dan `SUM(no_faktur='')` atas 5.374 baris `Pengadaan` menjawab **5.374** -- kolom penautnya kosong seluruhnya, karena cabang non-batch `DlgPembelian.java:998` meneruskan `no_faktur=""`.
+
+**Rencana query lolos tanpa satu pun izin pindai penuh:**
+
+```
+[ok] FARMASI_PENGADAAN    b range PRIMARY  rows~9
+[ok] FARMASI_PENGADAAN    s eq_ref PRIMARY  rows~1
+[ok] FARMASI_PENGADAAN    pt eq_ref PRIMARY  rows~1
+[ok] FARMASI_PENGADAAN    g eq_ref PRIMARY  rows~1
+[ok] FARMASI_PENGADAAN_DETAIL d ref no_faktur  rows~3  (Using index)
+[ok] FARMASI_PENGADAAN_DETAIL_HARGA d ref no_faktur  rows~3  (Using index)
+```
+
+**Sakelar harga ditegakkan di QUERY, dan dibuktikan pada objek barisnya** -- bukan dengan membaca SQL:
+
+```
+harga=IKUT   kunci baris detail: no_faktur, kode_brng, nama_brng, satuan, jumlah, h_beli, total
+harga=TIDAK  kunci baris detail: no_faktur, kode_brng, nama_brng, satuan, jumlah
+```
+
+**`kadaluarsa` tidak diambil, dan alasannya terukur**: dari 1.257 baris detail sepanjang 2026, **251 sudah lewat pada hari barangnya dibeli** (1.006 wajar, 0 kosong).
+
+**Jam tenang nyaris tidak relevan di sini, dan itu juga diukur**: sebaran jam simpan dari `riwayat_barang_medis` berhenti di jam **20**, tidak satu pun faktur tersimpan sesudahnya (puncaknya 11-15).
+
+**Pengiriman SUNGGUHAN, ke nomor uji pengembang -- grup apotek nyata sengaja TIDAK dicentang:**
+
+```
+tujuan uji siap: id=20
+sakelar dinyalakan, lantai aktivasi = 2026-08-07
+baris outbox FARMASI_PENGADAAN: 0 -> 1
+sesudah siklus KEDUA: 1 (idempoten OK)
+siklus pengadaan selesai  dari:2026-08-07 sampai:2026-08-14 terbaca:1 baru:1 terkirim:1 tujuan:1
+```
+
+`terbaca: 1` membuktikan **lantai aktivasi bekerja** -- jendelanya berisi 9 faktur, tapi lantai hari ini memangkasnya ke satu. Siklus kedua tidak menambah baris = idempotensinya tegak tanpa mengandalkan `uq_idem`.
+
+```
+          id: 30091
+      status: sent
+     chat_id: 6282283082916@c.us
+    attempts: 1
+  dibuat_wib: 2026-08-07 18:41:29
+terkirim_wib: 2026-08-07 18:41:33
+```
+
+Isi yang benar-benar terkirim (dibaca lewat Sequelize; konsol `mysql` merusak UTF-8):
+
+```
+*Pengadaan Barang Medis*
+DPP INTAN RAHMA DEWI & APOTEK ALCA
+
+No. Faktur : PG20260807001
+Tanggal : 07-08-2026
+Pemasok : CV DURGA JAYA MEDIKA
+Gudang : Apotek
+Petugas : Apt. Amelia Eriska, S.Farm
+
+*Barang (3):*
+• Easy Touch Strip Gula — 75 Botol @ Rp3.600 = Rp270.000
+• Easy Touch Strip Kolesterol — 30 Botol @ Rp16.000 = Rp480.000
+• Spuit 3 cc onemade — 100 Box/Dus/Kotak @ Rp2.000 = Rp200.000
+
+Total : Rp950.000
+Potongan : Rp0
+PPN : Rp0
+*Tagihan : Rp950.000*
+
+Kode Pengiriman : 2026-08-07 18:41:29 Y1PW2C
+```
+
+Baris **Kode Pengiriman** membuktikan ia benar-benar lewat `enqueueMessage()` bersama, bukan jalur kedua.
+
+**Satu bug ditemukan unit test, bukan diperkirakan**: `formatRupiah(null)` mengembalikan `"Rp0"`. `Number(null)` dan `Number('')` sama-sama `0` dan lolos `Number.isFinite`, jadi `h_beli` yang NULL akan tercetak sebagai harga **nol** -- bukan "tidak diketahui" melainkan "gratis", pada angka yang dipakai apotek mencocokkan nota pemasok. Diperbaiki lewat `keAngka()` yang menolak `null`/`undefined`/`''` sebelum `Number()` menyentuhnya.
+
+**Grant kolom baru dibuktikan, bukan diasumsikan** -- `farmasi_target` sudah ber-grant dan kolom bukan tabel, jadi tidak ada `ERROR 1142` seperti pada lima tabel sebelumnya:
+
+```
+UPDATE farmasi_target SET terima_pengadaan = terima_pengadaan WHERE 1=0;
+-> UPDATE kolom baru OK
+```
+
+**Verifikasi HTTP lewat build produksi di port sendiri (3199), 26 pemeriksaan SEMUA LOLOS** -- termasuk bahwa tab Pengadaan **tidak menawarkan** `{nama_pasien}` maupun `{no_rm}`, bahwa keempat centang tampil di satu kolom "Boleh / menerima", dan bahwa ketiga tab lama masih HTTP 200.
+
+**Dua jebakan verifikasi, keduanya kegagalan UJI bukan kegagalan produk**, dan keduanya bentuk baru dari yang sudah tercatat:
+
+1. **Server uji basi.** Pembacaan pertama menunjukkan `</span>Centang` tanpa spasi, dan bundel `.next` yang sama justru berisi anak `" "` -- yang menjawab adalah proses `next start` lama yang belum benar-benar mati. Sesudah dipastikan port 3199 kosong lalu dinyalakan ulang, HTML-nya benar. Pelajaran yang sama dengan dua listener pada §"Darurat stok", hanya sebabnya proses yang tidak jadi terbunuh alih-alih dua binding.
+2. **Asersi menuntut dua text node bersebelahan.** React memisahkan dua anak teks dengan penanda `<!-- -->`, jadi `includes('</span> Centang')` GAGAL atas HTML yang benar (`</span> <!-- -->Centang`). Asersi yang mematok spasi wajib meloloskan penanda itu.
+
+**Pemeriksaan menyeluruh**: `npm test` **507 lolos / 29 suite**, `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses, `verify:plans` exit 0, `verify:db` lolos (`sik` tetap menolak tulisan, `audit_log` tetap append-only).
+
+**Kebersihan**: tujuan uji dihapus (`farmasi_target` kembali 1 baris, `terima_pengadaan=0`), akun `verifikasi.pengadaan` dihapus, server uji port 3199 dihentikan, dan **`farmasi.pengadaan_enabled` dikembalikan ke `0`** -- menyalakannya adalah keputusan rumah sakit, bukan efek samping verifikasi. `farmasi.pengadaan_sejak` sengaja DIBIARKAN terisi: mengosongkannya saat mematikan berarti menyalakan kembali akan membongkar arsip, dan itu justru urutan tindakan yang paling wajar dilakukan orang yang sedang mencoba-coba.

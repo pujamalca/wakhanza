@@ -12,6 +12,7 @@ export * from './broadcastSchedule';
 export * from './jadwalDokter';
 export * from './stokObat';
 export * from './stokDarurat';
+export * from './pengadaan';
 export * from './bpjsBatal';
 export * from './bpjsKontrol';
 export * from './permintaanPenunjang';

@@ -36,6 +36,16 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
    * nomor kepala instalasi sangat wajar justru kebalikannya.
    */
   declare terimaDaruratStok: CreationOptional<boolean>;
+  /**
+   * Menerima nota PENGADAAN dari alamat ini (migrations/028).
+   *
+   * Kolom KEEMPAT, dan pemisahannya di sini yang paling tajam dari keempatnya:
+   * nota pembelian memuat HARGA BELI dari pemasok, yang punya nilai dagang
+   * tersendiri. Grup shift apotek sangat wajar perlu tahu tiap resep masuk tanpa
+   * ikut membaca harga yang dibayar RS ke pemasoknya; bagian pengadaan justru
+   * kebalikannya.
+   */
+  declare terimaPengadaan: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -55,6 +65,12 @@ FarmasiTarget.init(
       allowNull: false,
       defaultValue: false,
       field: 'terima_darurat_stok',
+    },
+    terimaPengadaan: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_pengadaan',
     },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },

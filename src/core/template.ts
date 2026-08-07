@@ -168,6 +168,48 @@ export const DARURAT_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * PENGADAAN OBAT, ALKES & BHP MEDIS (`/farmasi`) -- nota pembelian langsung dari
+ * pemasok, dikirim ke gudang/apotek begitu transaksinya disimpan di Khanza.
+ *
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya: `{nama_pasien}`, `{no_rm}`,
+ * `{no_resep}`, `{nama_poli}`. Sebuah pembelian tidak berurusan dengan seorang
+ * pasien pun -- dan tidak BISA, karena `pembelian`/`detailbeli` tidak punya satu
+ * kolom pun yang menautkannya. Menyediakan variabelnya di sini akan jadi alasan
+ * pertama untuk mulai menggabungkannya dengan `resep_obat`, dan penggabungan
+ * itulah yang mengubah nota pembelian menjadi rekam medis (lihat komentar
+ * pembuka `khanza/pengadaan.ts`).
+ *
+ * `{daftar_barang}` berbentuk banyak baris dan karena itu masuk
+ * MULTILINE_VARIABLES di bawah -- aman HANYA karena `core/pengadaan.ts`
+ * memanggil sanitizeValue() sendiri untuk tiap nama barang dan satuan.
+ *
+ * `{harga_*}` sengaja TIDAK ada sebagai variabel tersendiri: harga per barang
+ * hanya muncul di dalam `{daftar_barang}`, dan hanya bila
+ * `farmasi.pengadaan_harga` menyala -- saat mati, kolomnya tidak di-SELECT sama
+ * sekali sehingga merendernya mustahil, bukan sekadar terlarang (§5.2).
+ * `{total}`/`{potongan}`/`{ppn}`/`{tagihan}` adalah angka HEADER, yang selalu
+ * dibaca karena ia yang dicocokkan gudang dengan nota pemasok.
+ */
+export const PENGADAAN_TEMPLATE_VARIABLES = [
+  'no_faktur',
+  'tgl_beli',
+  'nama_suplier',
+  'nama_petugas',
+  'nama_gudang',
+  'daftar_barang',
+  'jumlah_item',
+  'total',
+  'potongan',
+  'ppn',
+  'tagihan',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
  * daftarnya lebih dekat ke FARMASI_TEMPLATE_VARIABLES daripada ke daftar
  * pemicu pasien.
@@ -238,6 +280,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...FARMASI_TEMPLATE_VARIABLES,
     ...STOK_TEMPLATE_VARIABLES,
     ...DARURAT_TEMPLATE_VARIABLES,
+    ...PENGADAAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
     ...BPJS_KONTROL_TEMPLATE_VARIABLES,
   ]),
@@ -250,6 +293,7 @@ export type TemplateVariable =
   | (typeof FARMASI_TEMPLATE_VARIABLES)[number]
   | (typeof STOK_TEMPLATE_VARIABLES)[number]
   | (typeof DARURAT_TEMPLATE_VARIABLES)[number]
+  | (typeof PENGADAAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_KONTROL_TEMPLATE_VARIABLES)[number];
 
@@ -301,6 +345,9 @@ const MULTILINE_VARIABLES = new Set<string>([
   'daftar_poli',
   'stok_obat',
   'daftar_stok',
+  // Dirakit core/pengadaan.ts, yang memanggil sanitizeValue() sendiri untuk tiap
+  // nama barang dan satuan -- dipatok unit test tersendiri di pengadaan.test.ts.
+  'daftar_barang',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

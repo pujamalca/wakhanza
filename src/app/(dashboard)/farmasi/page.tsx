@@ -10,6 +10,8 @@ import { PesanForm, type NilaiPesan } from './PesanForm';
 import { StokForm, type NilaiStok } from './StokForm';
 import { DaruratForm, type JadwalRow, type JenisOption, type NilaiDarurat } from './DaruratForm';
 import { DaruratSwitch } from './DaruratSwitch';
+import { PengadaanForm, type NilaiPengadaan } from './PengadaanForm';
+import { PengadaanSwitch } from './PengadaanSwitch';
 
 /**
  * Halaman ini memuat EMPAT bagian yang berdiri sendiri: satu daftar tujuan yang
@@ -31,7 +33,7 @@ import { DaruratSwitch } from './DaruratSwitch';
  * yang sebelumnya hanya terbaca sesudah menggulir ke bagiannya.
  */
 
-const TAB = ['tujuan', 'resep', 'stok', 'darurat'] as const;
+const TAB = ['tujuan', 'resep', 'stok', 'darurat', 'pengadaan'] as const;
 type TabKey = (typeof TAB)[number];
 
 function bacaTab(param: string | undefined): TabKey {
@@ -64,18 +66,21 @@ export default async function FarmasiPage({
    * dibaca dari `barisTarget.some(...)` satu halaman, dan itu bug yang sama
    * persis yang komentar di sebelahnya sudah menjelaskan.
    */
-  const [jumlahTujuan, jumlahTujuanAktif, jumlahBolehTanya, jumlahTujuanDarurat, jumlahJadwal] = await Promise.all([
-    FarmasiTarget.count(),
-    FarmasiTarget.count({ where: { isActive: true } }),
-    FarmasiTarget.count({ where: { bolehTanya: true } }),
-    FarmasiTarget.count({ where: { terimaDaruratStok: true } }),
-    StokAlertSchedule.count(),
-  ]);
+  const [jumlahTujuan, jumlahTujuanAktif, jumlahBolehTanya, jumlahTujuanDarurat, jumlahTujuanPengadaan, jumlahJadwal] =
+    await Promise.all([
+      FarmasiTarget.count(),
+      FarmasiTarget.count({ where: { isActive: true } }),
+      FarmasiTarget.count({ where: { bolehTanya: true } }),
+      FarmasiTarget.count({ where: { terimaDaruratStok: true } }),
+      FarmasiTarget.count({ where: { terimaPengadaan: true } }),
+      StokAlertSchedule.count(),
+    ]);
 
-  const [enabled, stokModeMentah, daruratEnabled] = await Promise.all([
+  const [enabled, stokModeMentah, daruratEnabled, pengadaanEnabled] = await Promise.all([
     getSettingBool('farmasi.enabled', false),
     getSetting('farmasi.stok_mode', 'mati'),
     getSettingBool('farmasi.darurat_enabled', false),
+    getSettingBool('farmasi.pengadaan_enabled', false),
   ]);
 
   // Dinormalkan SEKALI di sini, bukan sekali untuk titik status lalu sekali
@@ -119,6 +124,17 @@ export default async function FarmasiPage({
         ? 'Menyala, tapi belum ada satu pun jadwal'
         : 'Menyala';
 
+  const statusPengadaan: TabStatus = !pengadaanEnabled
+    ? 'neutral'
+    : jumlahTujuanPengadaan === 0
+      ? 'warning'
+      : 'success';
+  const labelPengadaan = !pengadaanEnabled
+    ? 'Mati'
+    : jumlahTujuanPengadaan === 0
+      ? 'Menyala, tapi belum ada tujuan yang menerimanya'
+      : 'Menyala';
+
   return (
     <div>
       <PageHeader
@@ -147,6 +163,13 @@ export default async function FarmasiPage({
             status: statusDarurat,
             statusLabel: labelDarurat,
           },
+          {
+            key: 'pengadaan',
+            href: '/farmasi?tab=pengadaan',
+            label: 'Pengadaan',
+            status: statusPengadaan,
+            statusLabel: labelPengadaan,
+          },
         ]}
       />
 
@@ -155,6 +178,9 @@ export default async function FarmasiPage({
       {tab === 'stok' && <TabStok mode={stokMode} />}
       {tab === 'darurat' && (
         <TabDarurat enabled={daruratEnabled} adaTujuan={jumlahTujuanDarurat > 0} adaJadwal={jumlahJadwal > 0} />
+      )}
+      {tab === 'pengadaan' && (
+        <TabPengadaan enabled={pengadaanEnabled} adaTujuan={jumlahTujuanPengadaan > 0} />
       )}
 
       {/* Berlaku untuk SEMUA pesan farmasi, jadi ditaruh di luar tab mana pun --
@@ -206,6 +232,7 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
     isActive: t.isActive,
     bolehTanya: t.bolehTanya,
     terimaDaruratStok: t.terimaDaruratStok,
+    terimaPengadaan: t.terimaPengadaan,
   }));
 
   const barisGrup: GrupRow[] = grup.map((g) => ({
@@ -221,10 +248,12 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
   return (
     <section>
       <p className="mb-3 text-sm text-muted-foreground">
-        Satu daftar, dipakai ketiga fitur di tab sebelah. Tiga centang di tiap baris menjawab tiga pertanyaan yang
+        Satu daftar, dipakai keempat fitur di tab sebelah. Empat centang di tiap baris menjawab empat pertanyaan yang
         berbeda: <span className="font-medium text-foreground">Aktif</span> menerima notifikasi resep,{' '}
-        <span className="font-medium text-foreground">Boleh tanya</span> boleh membuat nomor rumah sakit menjawab, dan{' '}
-        <span className="font-medium text-foreground">Terima darurat stok</span> menerima rekap persediaan.
+        <span className="font-medium text-foreground">Boleh tanya</span> boleh membuat nomor rumah sakit menjawab,{' '}
+        <span className="font-medium text-foreground">Darurat stok</span> menerima rekap persediaan, dan{' '}
+        <span className="font-medium text-foreground">Pengadaan</span> menerima nota pembelian. Sengaja terpisah —
+        sebuah grup sangat wajar perlu tahu tiap resep tanpa ikut membaca harga beli dari pemasok.
       </p>
 
       <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
@@ -443,6 +472,51 @@ async function TabDarurat({
       <DaruratSwitch enabled={enabled} adaTujuan={adaTujuan} adaJadwal={adaJadwal} />
 
       <DaruratForm nilai={nilaiDarurat} jadwal={barisJadwal} jenis={jenisBarang} adaTujuan={adaTujuan} />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tab: Pengadaan                                                            */
+/* ------------------------------------------------------------------------- */
+
+async function TabPengadaan({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: boolean }) {
+  const [template, harga, lookback, kuota, sejak] = await Promise.all([
+    getSetting('farmasi.template_pengadaan', ''),
+    getSettingBool('farmasi.pengadaan_harga', true),
+    getSettingNumber('farmasi.pengadaan_lookback_hari', 7),
+    getSettingNumber('farmasi.pengadaan_max_per_siklus', 5),
+    getSetting('farmasi.pengadaan_sejak', ''),
+  ]);
+
+  const nilai: NilaiPengadaan = { template: template ?? '', harga, lookback, kuota };
+
+  return (
+    <section>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> — setiap pembelian yang disimpan
+        lewat menu <span className="font-medium text-foreground">Transaksi Pengadaan Obat, Alkes &amp; BHP Medis</span>{' '}
+        dikirim sebagai nota berisi pemasok, daftar barang, dan totalnya. Sakelarnya sendiri,{' '}
+        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep.
+      </p>
+
+      {/* Sengaja TIDAK dilipat, dan isinya kebalikan dari peringatan di tab
+          Notifikasi resep: yang di sana memperingatkan adanya data pasien, yang
+          di sini justru menjelaskan ketiadaannya. Keduanya perlu dikatakan,
+          karena tanpa ini pembacanya wajar mengira seluruh halaman Farmasi
+          membawa risiko yang sama -- dan rumah sakit yang menunda menyalakan
+          notifikasi resep akan ikut menunda yang ini tanpa sebab. */}
+      <Callout className="mb-4" title="Nota pembelian tidak menyebut satu pun pasien">
+        Yang dibaca hanya <span className="font-mono">pembelian</span> dan <span className="font-mono">detailbeli</span>{' '}
+        beserta master pemasok, barang, dan petugas — tidak ada satu kolom pun yang menautkan sebuah pembelian dengan
+        seorang pasien, dan variabel pasien memang tidak tersedia untuk ditambahkan ke isi pesan. Yang tetap perlu
+        dipertimbangkan adalah <span className="font-medium text-foreground">harga beli dari pemasok</span>, yang punya
+        nilai dagang tersendiri — lihat sakelarnya di bawah.
+      </Callout>
+
+      <PengadaanSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
+
+      <PengadaanForm nilai={nilai} adaTujuan={adaTujuan} />
     </section>
   );
 }
