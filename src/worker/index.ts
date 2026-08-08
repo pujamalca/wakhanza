@@ -333,8 +333,38 @@ async function main(): Promise<void> {
    * Yang satu jadwal harian, yang satu jendela pindai; menggabungkannya berarti
    * pemberitahuan "surat Anda sudah dibuat" ikut menunggu pukul 09:00 esok hari,
    * padahal seluruh gunanya justru datang saat pasien masih memegang kertasnya.
+   *
+   * ==========================================================================
+   * `pollIntervalMs` (60 detik), BUKAN `scanIntervalMs` -- dan ini pengecualian
+   * ==========================================================================
+   *
+   * Keenam siklus pindai di atas memakai interval 5 menit dengan alasan yang
+   * sama: mereka membaca ULANG seluruh jendelanya tiap kali jalan, jadi interval
+   * rapat berarti mengulang pekerjaan yang sama belasan kali tanpa hasil
+   * tambahan. Alasan itu berlaku penuh di sini juga -- yang berbeda BIAYANYA.
+   *
+   * Diukur langsung, tiga kali berturut-turut pada kondisi hangat:
+   *
+   *   alca  (1 baris)    0,07 ms
+   *   sik   (253 baris)  0,07 ms
+   *
+   * 1.440 kali sehari berjumlah sekitar SEPERSEPULUH DETIK waktu database.
+   * Bandingkan `runBpjsKontrolIfDue`, yang biaya sekali bacanya ~35 ms dan tetap
+   * dinilai layak diulang sepanjang hari. Yang membuat pemindaian penuh di sini
+   * murah bukan keberuntungan melainkan bentuk tabelnya: `skdp_bpjs` bertambah
+   * hanya saat poliklinik menerbitkan surat kontrol (~4/hari pada puncaknya),
+   * jadi ia tetap tabel berukuran ratusan baris selama bertahun-tahun.
+   *
+   * Yang DIBELI dengan itu: pemberitahuan sampai dalam hitungan menit sesudah
+   * petugas menekan simpan, bukan sesudah lima menit -- selaras dengan QUEUE_REG
+   * yang juga 60 detik, dan itulah pengalaman yang dibandingkan orang ("kenapa
+   * yang registrasi langsung masuk, yang ini tidak").
+   *
+   * Kalau `maxRows` pada plan check-nya suatu saat berbunyi, YANG PERTAMA
+   * ditinjau adalah mengembalikan siklus ini ke `scanIntervalMs` -- bukan
+   * menaikkan angkanya.
    */
-  void loop('kontrol-terbit', runKontrolTerbitCycle, scanIntervalMs);
+  void loop('kontrol-terbit', runKontrolTerbitCycle, pollIntervalMs);
   /**
    * Surat sakit otomatis -- siklus PINDAI, dan di sini pilihan intervalnya
    * punya alasan yang tidak dipunyai keempat siklus di atas: satu surat berarti
