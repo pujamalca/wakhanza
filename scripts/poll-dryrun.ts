@@ -79,8 +79,15 @@ async function reportSection(
   }>,
   sensitivePoli: string[],
   sensitiveExam: string[],
-  triggerCode: string = label, // beberapa label tampilan (mis. "RESULT_READY(lab)") berbeda dari trigger_code template sungguhan
 ): Promise<void> {
+  // Label bagian = kode pemicunya, tanpa kekecualian. Dulu ada parameter
+  // `triggerCode` terpisah karena hasil penunjang tampil sebagai
+  // "RESULT_READY(lab)"/"RESULT_READY(radiologi)" sementara templatenya satu
+  // baris bernama RESULT_READY. Sejak migrations/034 kodenya memang dua
+  // (LAB_RESULT/RAD_RESULT), jadi kekecualiannya hilang -- dan parameter
+  // dengan nilai bawaan yang tidak dipakai siapa pun adalah persis tempat
+  // pratinjau dan produksi mulai menyimpang tanpa satu pun galat.
+  const triggerCode = label;
   console.log(`\n=== ${label}: ${rows.length} baris kandidat ===`);
   if (rows.length === 0) return;
 
@@ -243,9 +250,9 @@ async function main() {
   );
 
   // PERMINTAAN sebelum HASIL, mengikuti urutan kejadiannya di dunia nyata.
-  // Kode pemicunya per jenis (LAB_REQUEST/RAD_REQUEST), berbeda dari
-  // RESULT_READY yang satu kode untuk keduanya -- jadi label dan trigger_code
-  // di sini kebetulan sama, dan tidak perlu argumen keempat reportSection().
+  // Keempatnya berkode per jenis sejak migrations/034 (LAB_REQUEST/RAD_REQUEST
+  // dan LAB_RESULT/RAD_RESULT), jadi keempat bagian di bawah berlabel persis
+  // seperti kode pemicunya.
   for (const jenis of ['lab', 'radiologi'] as PermintaanJenis[]) {
     const rows = await pollPermintaan(jenis, DISTANT_PAST, lookbackDays);
     await reportSection(
@@ -265,7 +272,7 @@ async function main() {
   for (const jenis of ['lab', 'radiologi'] as PenunjangJenis[]) {
     const rows = await pollResultReady(jenis, DISTANT_PAST, lookbackDays);
     await reportSection(
-      `RESULT_READY(${jenis})`,
+      jenis === 'lab' ? 'LAB_RESULT' : 'RAD_RESULT',
       rows.map((r) => ({
         noRkmMedis: r.no_rkm_medis,
         rawPhone: r.no_tlp,
@@ -275,7 +282,6 @@ async function main() {
       })),
       sensitivePoli,
       sensitiveExam,
-      'RESULT_READY',
     );
   }
 

@@ -117,7 +117,7 @@ Enqueue terpisah total dari kirim: kegagalan kirim tidak pernah menghapus jejak 
 
 | Kelas | Pemicu | Berangkat dari | Tunduk daftar tolak | Jam tenang |
 |---|---|---|---|---|
-| **Sisip** (watermark) | `QUEUE_REG`, `RESULT_READY`, `PHARMACY_READY`, `BILLING_READY`, `BOOK_CONFIRM` | Kejadian di `sik` | Ya | Ya |
+| **Sisip** (watermark) | `QUEUE_REG`, `LAB_RESULT`, `RAD_RESULT`, `LAB_REQUEST`, `RAD_REQUEST`, `PHARMACY_READY`, `BILLING_READY`, `BOOK_CONFIRM` | Kejadian di `sik` | Ya | Ya |
 | **Pindai** (jendela) | `BOOK_CANCEL`, `BOOK_REMIND` | Kejadian di `sik` | Ya | `BOOK_CANCEL` lewat |
 | **Broadcast** | `BROADCAST` | Staf menekan kirim | Tidak | Ya |
 | **Broadcast terjadwal** | `BROADCAST` | Worker, saat jadwal jatuh tempo | Tidak | Ya |
@@ -338,7 +338,7 @@ Sistem ini menyentuh data pasien, jadi batasannya dinyatakan sebagai mekanisme �
 
 **Kolom sensitif tidak pernah diambil.** Query di `src/khanza/` tidak men-`SELECT` nama pemeriksaan lab, nama obat, hasil, maupun diagnosis. Bukan diambil lalu disaring saat render — memang tidak pernah masuk klausa `SELECT`. Menambahkan variabel template baru berarti membaca [ARCHITECTURE.md §5.2](ARCHITECTURE.md) dan [PRD.md §F4](PRD.md) lebih dulu.
 
-**Poli sensitif diganti pesan generik.** Daftarnya diisi rumah sakit di `/pengaturan`, default kosong. Untuk `RESULT_READY` yang menggabungkan beberapa pemeriksaan, **satu kode sensitif saja** cukup membuat seluruh pesan diganti.
+**Poli sensitif diganti pesan generik.** Daftarnya diisi rumah sakit di `/pengaturan`, default kosong. Untuk hasil penunjang (`LAB_RESULT`/`RAD_RESULT`) yang menggabungkan beberapa pemeriksaan per kunjungan, **satu kode sensitif saja** cukup membuat seluruh pesan diganti.
 
 **Substitusi template wajib satu lintasan.** Nama pasien, nama poli, dan nama dokter berasal dari ketikan bebas petugas pendaftaran. Substitusi `{variabel}` tidak boleh diulang sampai stabil — pasien bernama `{kontak_rs}` tidak boleh membuat nomor telepon rumah sakit muncul di posisi namanya sendiri. Dipatok unit test.
 

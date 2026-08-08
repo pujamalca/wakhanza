@@ -27,14 +27,14 @@ describe('checkPrivacy', () => {
     expect(checkPrivacy({}, ['U0099'], ['LAB001'])).toEqual({ safe: true });
   });
 
-  it('RESULT_READY: tidak aman bila SALAH SATU dari beberapa kode pemeriksaan sensitif', () => {
+  it('hasil penunjang: tidak aman bila SALAH SATU dari beberapa kode pemeriksaan sensitif', () => {
     expect(checkPrivacy({ kdJenisPrw: ['LAB010', 'LAB001', 'LAB020'] }, [], ['LAB001'])).toEqual({
       safe: false,
       reason: 'pemeriksaan_sensitif:LAB001',
     });
   });
 
-  it('RESULT_READY: aman bila semua kode dalam larik tidak sensitif', () => {
+  it('hasil penunjang: aman bila semua kode dalam larik tidak sensitif', () => {
     expect(checkPrivacy({ kdJenisPrw: ['LAB010', 'LAB020'] }, [], ['LAB001'])).toEqual({ safe: true });
   });
 });

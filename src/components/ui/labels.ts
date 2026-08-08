@@ -69,12 +69,27 @@ export const TRIGGER_LABEL: Record<string, string> = {
   BOOK_REMIND: 'Pengingat H-1',
   BOOK_CANCEL: 'Booking batal',
   QUEUE_REG: 'Nomor antrian',
-  RESULT_READY: 'Hasil penunjang',
-  // Pasangan RESULT_READY dari ujung yang lain. Labelnya menyebut "permintaan"
-  // secara eksplisit supaya baris di Antrean tidak tertukar dengan hasilnya --
-  // keduanya menyangkut kunjungan dan pasien yang sama pada hari yang sama.
+  // Hasil penunjang, dipisah per jenis sejak migrations/034. Labelnya menyebut
+  // "permintaan" versus "hasil" secara eksplisit supaya keempatnya tidak
+  // tertukar di Antrean -- semuanya menyangkut kunjungan dan pasien yang sama
+  // pada hari yang sama, dan yang dicari orang saat menelusuri justru pemicu
+  // MANA yang mengirim.
+  LAB_RESULT: 'Hasil lab',
+  RAD_RESULT: 'Hasil radiologi',
   LAB_REQUEST: 'Permintaan lab',
   RAD_REQUEST: 'Permintaan radiologi',
+  /**
+   * Baris PENINGGALAN, dan sengaja tidak dihapus. Sejak migrations/034 tidak
+   * ada lagi pemicu berkode ini, tapi baris `outbox` dan `send_log` yang
+   * terlanjur tercatat dengannya tetap ada -- riwayat tidak ditulis ulang.
+   * Tanpa baris ini halaman Antrean dan Log menampilkan kode mentah untuk
+   * pesan yang dulu benar-benar terkirim ke pasien.
+   *
+   * TRIGGER_SOURCE sengaja TIDAK punya padanannya: yang itu menjelaskan baris
+   * `template` yang ADA, dan `labels.test.ts` menolak keterangan untuk pemicu
+   * yang tidak ada. Ketidaksamaan kedua daftar ini disengaja, bukan kelalaian.
+   */
+  RESULT_READY: 'Hasil penunjang (lama)',
   PHARMACY_READY: 'Obat siap',
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
@@ -162,16 +177,22 @@ export const TRIGGER_SOURCE: Record<string, TriggerSource> = {
     tabel: ['booking_registrasi'],
     kapan: 'Sehari sebelum tanggal periksa, pada jam yang disetel di Pengaturan.',
   },
-  RESULT_READY: {
-    tabel: ['periksa_lab', 'periksa_radiologi'],
-    kapan: 'Saat hasil pemeriksaan tersimpan.',
+  LAB_RESULT: {
+    tabel: ['periksa_lab'],
+    kapan: 'Saat hasil pemeriksaan laboratorium tersimpan.',
     catatan:
-      'Satu pesan per kunjungan, bukan per item: panel darah lengkap menghasilkan belasan baris di Khanza dan tetap jadi satu pesan. Lab dan radiologi berbagi jenis pesan ini — yang membedakan isinya adalah variabel {jenis_layanan}.',
+      'Satu pesan per kunjungan, bukan per item: panel darah lengkap menghasilkan belasan baris di Khanza dan tetap jadi satu pesan. Pasangan “Permintaan lab” dari ujung yang lain.',
+  },
+  RAD_RESULT: {
+    tabel: ['periksa_radiologi'],
+    kapan: 'Saat hasil pemeriksaan radiologi tersimpan.',
+    catatan:
+      'Dipisah dari Hasil lab supaya isi pesan, sakelar aktif, dan tujuan tambahannya bisa berbeda — grup Laboratorium dan grup Radiologi tidak perlu menerima hasil satu sama lain.',
   },
   LAB_REQUEST: {
     tabel: ['permintaan_lab'],
     kapan: 'Saat dokter memesan pemeriksaan laboratorium — bukan saat hasilnya keluar.',
-    catatan: 'Pasangan “Hasil penunjang” dari ujung yang lain: yang ini memberi tahu ada pemeriksaan yang harus dijalani.',
+    catatan: 'Pasangan “Hasil lab” dari ujung yang lain: yang ini memberi tahu ada pemeriksaan yang harus dijalani.',
   },
   RAD_REQUEST: {
     tabel: ['permintaan_radiologi'],

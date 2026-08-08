@@ -8,18 +8,22 @@ function parseSikDateTime(date: string, time: string): Date {
 }
 
 /**
- * Kode pemicu per jenis, BUKAN satu kode bersama seperti RESULT_READY.
- *
- * Di sana satu kode cukup karena pesannya memang sama dan `{jenis_layanan}`
- * membedakannya. Di sini yang menuntut pemisahan bukan isi pesannya melainkan
+ * Kode pemicu per jenis. Yang menuntut pemisahan bukan isi pesannya melainkan
  * TUJUANNYA: sejak `template_target` (018), tujuan tambahan dipasang per
  * `trigger_code`. Satu kode bersama berarti grup Laboratorium dan grup
  * Radiologi tidak bisa dipisahkan -- keduanya menerima setiap permintaan,
  * termasuk yang bukan pekerjaannya.
  *
- * Akibat lain yang kebetulan menguntungkan: karena kodenya berbeda, watermarknya
- * juga berbeda dengan sendirinya -- tidak perlu `cursorKey` terpisah seperti
- * RESULT_READY, dan karena itu tidak ada kesempatan salah memasangkannya.
+ * Pemicu HASIL sempat jadi kekecualian atas alasan itu (satu `RESULT_READY`
+ * untuk kedua jenis, dengan alasan yang menjawab pertanyaan tentang ISI
+ * pesannya alih-alih tentang tujuannya), dan `migrations/034` menyudahinya --
+ * keempatnya kini simetris.
+ *
+ * Akibat lain yang kebetulan menguntungkan di SINI, dan tidak berlaku di sana:
+ * karena kodenya berbeda sejak awal, watermarknya juga berbeda dengan
+ * sendirinya -- tidak perlu `cursorKey` terpisah, jadi tidak ada kesempatan
+ * salah memasangkannya. `pollerResultReady.ts` tetap memerlukannya karena nama
+ * watermark lamanya sengaja dipertahankan.
  */
 const KODE: Record<PermintaanJenis, string> = {
   lab: 'LAB_REQUEST',
@@ -33,7 +37,7 @@ async function runOne(jenis: PermintaanJenis): Promise<void> {
     fetchRows: (cursorTs, lookbackDays) => pollPermintaan(jenis, cursorTs, lookbackDays),
     getEventAt: (row) => parseSikDateTime(row.tgl_permintaan, row.jam_permintaan),
     /**
-     * Kunci per `noorder`, bukan per (no_rawat, tanggal) seperti RESULT_READY.
+     * Kunci per `noorder`, bukan per (no_rawat, tanggal) seperti pemicu HASIL.
      *
      * Bedanya karena bentuk tabelnya: `periksa_lab` berisi satu baris per ITEM
      * pemeriksaan, sehingga panel darah lengkap menghasilkan belasan baris untuk
@@ -56,8 +60,9 @@ async function runOne(jenis: PermintaanJenis): Promise<void> {
 }
 
 /**
- * PERMINTAAN lab & radiologi (kelas sisip) -- pasangan RESULT_READY dari ujung
- * yang lain: yang ini saat pemeriksaan DIPESAN, yang itu saat hasilnya selesai.
+ * PERMINTAAN lab & radiologi (kelas sisip) -- pasangan LAB_RESULT/RAD_RESULT
+ * dari ujung yang lain: yang ini saat pemeriksaan DIPESAN, yang itu saat
+ * hasilnya selesai.
  *
  * Keduanya menjaga sakelarnya sendiri lewat baris `template`-nya masing-masing
  * (`is_active`, bawaan MATI), jadi aman dipanggil tiap siklus tanpa syarat --

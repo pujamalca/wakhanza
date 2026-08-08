@@ -44,7 +44,11 @@ describe('respectsOptOut', () => {
       'BOOK_CONFIRM',
       'BOOK_CANCEL',
       'BOOK_REMIND',
-      'RESULT_READY',
+      // Hasil penunjang, dipisah per jenis sejak migrations/034. Keduanya
+      // terikat lewat alasan PASANGAN yang sama seperti LAB_REQUEST/RAD_REQUEST
+      // dan KONTROL_TERBIT/KONTROL_ULANG di bawah.
+      'LAB_RESULT',
+      'RAD_RESULT',
       'PHARMACY_READY',
       'BILLING_READY',
       // Pengingat surat kontrol BPJS: otomatis, berangkat dari sik, tanpa ada
@@ -61,18 +65,25 @@ describe('respectsOptOut', () => {
       // satunya terus mengirim surat yang sama akan terbaca pasien sebagai
       // permintaannya diabaikan sebagian.
       'KONTROL_TERBIT',
-      // Permintaan lab/radiologi -- pasangan RESULT_READY, yang sudah terikat.
-      // Pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
-      // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
+      // Permintaan lab/radiologi -- pasangan LAB_RESULT/RAD_RESULT, yang sudah
+      // terikat. Pasangan yang satu terikat sementara satunya tidak akan jadi
+      // janji yang mustahil dijelaskan ke pasien yang sudah meminta berhenti.
       'LAB_REQUEST',
       'RAD_REQUEST',
       // Surat sakit yang dikirim OTOMATIS begitu dokternya menyimpan. Pasangan
       // manualnya (ADMINISTRASI) sengaja TIDAK terikat -- lihat uji berikutnya.
       'SURAT_SAKIT',
+      // PENINGGALAN: tidak ada lagi pemicu berkode ini sejak migrations/034,
+      // tapi baris `outbox` yang terlanjur mengantre dengannya tetap harus
+      // tercoret saat pasiennya meminta berhenti.
+      'RESULT_READY',
     ]) {
       expect(respectsOptOut(code)).toBe(true);
     }
-    expect(optOutTriggerCodes()).toHaveLength(13);
+    // 13 -> 15: RESULT_READY pecah jadi dua (+1), lalu kode lamanya DITAHAN
+    // sebagai peninggalan (+1) supaya baris `outbox` yang terlanjur mengantre
+    // dengannya tetap tercoret saat pasiennya meminta berhenti.
+    expect(optOutTriggerCodes()).toHaveLength(15);
   });
 
   it('BROADCAST dan AUTO_REPLY TIDAK terikat -- kanal terpisah, keputusan RS', () => {

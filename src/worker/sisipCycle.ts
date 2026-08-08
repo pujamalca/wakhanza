@@ -6,14 +6,22 @@ import { getCursor, advanceCursor, recordCursorError } from './cursor';
 import { logger, safeError } from '@/lib/logger';
 
 export interface SisipCycleParams<TRow> {
-  /** Nama pemicu untuk template/privacy/outbox.trigger_code (mis. 'RESULT_READY'). */
+  /** Nama pemicu untuk template/privacy/outbox.trigger_code (mis. 'QUEUE_REG'). */
   triggerCode: string;
   /**
-   * Kunci watermark poll_cursor. Default = triggerCode. Pisahkan dari
-   * triggerCode saat satu trigger_code punya lebih dari satu sumber sik
-   * dengan laju berbeda (mis. RESULT_READY dari periksa_lab DAN
-   * periksa_radiologi) -- watermark tercampur antara dua sumber independen
-   * bisa membuat salah satunya "melompati" baris yang belum diproses.
+   * Kunci watermark poll_cursor. Default = triggerCode.
+   *
+   * Dipisahkan dari triggerCode saat nama barisnya di `poll_cursor` memang
+   * BERBEDA dari kode pemicunya. Satu-satunya pemakainya sekarang
+   * `pollerResultReady.ts`: watermarknya dibuat waktu lab dan radiologi masih
+   * berbagi satu `trigger_code`, dan namanya (`RESULT_READY_LAB` /
+   * `RESULT_READY_RADIOLOGI`) sengaja TIDAK ikut diganti saat pemicunya dipecah
+   * (migrations/034) -- kunci ini identitas baris, dan mengganti nama baris
+   * watermark sama artinya dengan membuangnya.
+   *
+   * Yang tetap wajib apa pun namanya: dua sumber sik yang lajunya berbeda tidak
+   * boleh berbagi satu cursor_ts, karena watermark tercampur bisa membuat salah
+   * satunya "melompati" baris yang belum diproses.
    */
   cursorKey?: string;
   fetchRows: (cursorTs: Date, lookbackDays: number) => Promise<TRow[]>;

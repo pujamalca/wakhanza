@@ -76,7 +76,11 @@ export async function pollResultReady(jenis: PenunjangJenis, cursorTs: Date, loo
 
 for (const jenis of Object.keys(TABLE_BY_JENIS) as PenunjangJenis[]) {
   registerPlanCheck({
-    name: `RESULT_READY(${jenis})`,
+    // Deskriptif, bukan kode pemicunya -- sama seperti `PERMINTAAN(${jenis})`
+    // di permintaanPenunjang.ts. Satu query di sini melayani satu jenis, dan
+    // kode pemicu yang memakainya (LAB_RESULT/RAD_RESULT sejak migrations/034)
+    // ditentukan di worker, bukan di modul khanza/.
+    name: `HASIL(${jenis})`,
     sql: buildResultReadySql(jenis),
     replacements: { lookbackPrefix: formatRawatPrefix(lookbackDate(30)), cursorTs: new Date() },
     maxRows: 500,

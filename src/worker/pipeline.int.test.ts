@@ -207,7 +207,7 @@ describe('enqueueMessage: privasi', () => {
   });
 
   it('satu kode sensitif di antara beberapa sudah cukup mengganti pesan', async () => {
-    // RESULT_READY digabung per kunjungan bisa membawa beberapa kode sekaligus.
+    // Hasil penunjang digabung per kunjungan bisa membawa beberapa kode sekaligus.
     const k = kunci('privasi-larik');
     await enqueueMessage(
       {

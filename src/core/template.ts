@@ -36,7 +36,7 @@ export const TRIGGER_TEMPLATE_VARIABLES = [
    * Ketiganya hanya terisi pada KONTROL_ULANG (pengingat surat kontrol
    * non-BPJS, migrations/032). Daftar ini memang dipakai bersama seluruh
    * pemicu pasien -- `{jenis_layanan}` sudah lebih dulu begitu, terisi pada
-   * RESULT_READY saja -- jadi variabel yang tidak berlaku bagi sebuah pemicu
+   * pemicu HASIL saja -- jadi variabel yang tidak berlaku bagi sebuah pemicu
    * dirender kosong, bukan ditolak saat disimpan.
    *
    * `{tanggal_kontrol}` dan `{sisa_hari}` sengaja bernama SAMA dengan milik

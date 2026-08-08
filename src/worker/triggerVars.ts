@@ -70,14 +70,14 @@ export function varsResultReady(row: ResultReadyRow, jenis: PenunjangJenis): Var
  * PERMINTAAN penunjang. Bentuknya nyaris sama dengan `varsResultReady` dan
  * bedanya justru yang perlu diperhatikan:
  *
- * - `{nama_dokter}` ADA di sini dan TIDAK ada di RESULT_READY, karena yang
+ * - `{nama_dokter}` ADA di sini dan TIDAK ada di pemicu HASIL, karena yang
  *   berarti bagi pasien memang berbeda: pada hasil, dokter pemeriksanya tidak
  *   menambah apa-apa; pada permintaan, "dokter siapa yang menyuruh" adalah
  *   yang membuat pesannya masuk akal dan bukan tampak seperti salah kirim.
  *   Diambil dari `dokter_perujuk`, bukan dokter poli.
  * - `{tanggal}`/`{jam}` adalah waktu PERMINTAANNYA dibuat, bukan jadwal
  *   pemeriksaan -- Khanza tidak menyimpan jadwal untuk ini.
- * - `jumlah_item` TIDAK ADA, sama seperti RESULT_READY (§4.3: banyaknya
+ * - `jumlah_item` TIDAK ADA, sama seperti pemicu HASIL (§4.3: banyaknya
  *   pemeriksaan pun petunjuk medis), dan nama pemeriksaannya pun tidak pernah
  *   diambil dari sik sejak query-nya.
  */

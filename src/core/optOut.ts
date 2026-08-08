@@ -5,8 +5,10 @@ import { normalizeInbound } from './autoReply';
  *
  * Sampai sebelumnya opt-out berlaku untuk segalanya: sekali pasien mengirim
  * "STOP", tidak ada pesan apa pun lagi yang keluar untuk nomor itu. Sekarang
- * cakupannya sengaja dipersempit ke tujuh pemicu otomatis saja -- itulah arti
- * frasanya yang baru, dan itulah yang dijanjikan ke pasien.
+ * cakupannya sengaja dipersempit ke pemicu OTOMATIS KE PASIEN saja -- itulah
+ * arti frasanya yang baru, dan itulah yang dijanjikan ke pasien. Jumlahnya
+ * sengaja tidak disebut di sini; ia bertambah tiap ada pemicu pasien baru, dan
+ * angka yang ditulis di prosa adalah angka yang cepat atau lambat basi.
  */
 
 /**
@@ -24,7 +26,7 @@ import { normalizeInbound } from './autoReply';
 export const OPT_OUT_PHRASE = 'Berhenti Kirim Otomatis';
 
 /**
- * Pemicu yang TUNDUK pada opt-out: ketujuh notifikasi otomatis yang berangkat
+ * Pemicu yang TUNDUK pada opt-out: notifikasi otomatis KE PASIEN yang berangkat
  * dari kejadian di sik tanpa ada manusia yang menekan apa pun.
  *
  * Yang TIDAK ada di sini, dan itu disengaja:
@@ -64,7 +66,13 @@ const OPT_OUT_TRIGGERS = new Set([
   'BOOK_CONFIRM',
   'BOOK_CANCEL',
   'BOOK_REMIND',
-  'RESULT_READY',
+  // Hasil penunjang, dipisah per jenis sejak migrations/034. KEDUANYA terikat,
+  // dan itu bukan sekadar menyalin baris lama dua kali: pasangan yang satu
+  // berhenti sementara satunya terus mengirim akan terbaca pasien sebagai
+  // permintaannya diabaikan sebagian -- alasan yang sama persis yang membuat
+  // LAB_REQUEST/RAD_REQUEST dan KONTROL_TERBIT/KONTROL_ULANG masuk berpasangan.
+  'LAB_RESULT',
+  'RAD_RESULT',
   'PHARMACY_READY',
   'BILLING_READY',
   'BPJS_KONTROL',
@@ -87,9 +95,9 @@ const OPT_OUT_TRIGGERS = new Set([
    */
   'KONTROL_TERBIT',
   // Permintaan lab/radiologi: pemberitahuan otomatis dari kejadian di sik ke
-  // nomor pasien, sekelas dengan ketujuh di atasnya. Pasangan RESULT_READY --
-  // dan pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
-  // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
+  // nomor pasien, sekelas dengan yang di atasnya. Pasangan LAB_RESULT/RAD_RESULT
+  // -- dan pasangan yang satu terikat sementara satunya tidak akan jadi janji
+  // yang mustahil dijelaskan ke pasien yang sudah meminta berhenti.
   'LAB_REQUEST',
   'RAD_REQUEST',
   /**
@@ -107,6 +115,19 @@ const OPT_OUT_TRIGGERS = new Set([
    * mengirimi berkas orang yang sudah bilang berhenti.
    */
   'SURAT_SAKIT',
+  /**
+   * PENINGGALAN. Sejak migrations/034 tidak ada lagi pemicu berkode
+   * RESULT_READY -- ia dipecah jadi LAB_RESULT dan RAD_RESULT di atas.
+   *
+   * Tetap di sini karena daftar ini dipakai untuk DUA hal, dan yang kedua
+   * menyentuh baris lama: `respectsOptOut()` saat enqueue (kode ini tidak akan
+   * pernah muncul lagi), TAPI juga pencoretan antrean di `wa-client.ts` yang
+   * mencari baris `outbox` berstatus `pending`. Baris RESULT_READY yang
+   * terlanjur mengantre sebelum migrasi harus tetap tercoret saat pasiennya
+   * meminta berhenti; membuangnya dari daftar berarti pesan lolos ke orang yang
+   * sudah bilang berhenti, karena kodenya kebetulan sudah tidak dipakai lagi.
+   */
+  'RESULT_READY',
 ]);
 
 /**

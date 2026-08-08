@@ -13,7 +13,7 @@
  */
 export interface PrivacyCheckInput {
   kdPoli?: string | null;
-  /** Satu kode, atau beberapa kode sekaligus untuk hasil yang digabung (RESULT_READY, §4.3). */
+  /** Satu kode, atau beberapa kode sekaligus untuk hasil yang digabung (LAB_RESULT/RAD_RESULT, §4.3). */
   kdJenisPrw?: string | string[] | null;
 }
 

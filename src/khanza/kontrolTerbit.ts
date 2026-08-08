@@ -8,7 +8,7 @@ import { SELECT_SURAT_KONTROL, type KontrolUlangRow } from './kontrolUlang';
  *   KONTROL_TERBIT  surat DISIMPAN dokter   -> "surat kontrol Anda sudah dibuat"
  *   KONTROL_ULANG   H-N sebelum tanggalnya  -> "jangan lupa, kontrol besok"
  *
- * Bentuk yang sama dengan LAB_REQUEST/RESULT_READY dan SURAT PEMESANAN/
+ * Bentuk yang sama dengan LAB_REQUEST/LAB_RESULT dan SURAT PEMESANAN/
  * PENGADAAN: dua kejadian yang benar-benar berbeda pada satu benda, masing-
  * masing berbunyi tepat sekali. Yang PERTAMA menjawab pertanyaan yang selama ini
  * tidak terjawab sama sekali -- pasien meninggalkan poliklinik memegang selembar

@@ -8,7 +8,7 @@ export type PermintaanJenis = 'lab' | 'radiologi';
  * PERMINTAAN penunjang -- saat dokter MEMESAN pemeriksaan, bukan saat hasilnya
  * selesai.
  *
- * Pasangan RESULT_READY, dan bedanya menentukan gunanya: RESULT_READY memberi
+ * Pasangan LAB_RESULT/RAD_RESULT, dan bedanya menentukan gunanya: yang itu memberi
  * tahu pasien bahwa ia boleh mengambil hasil, sementara ini memberi tahu bahwa
  * ada pemeriksaan yang HARUS DIJALANI -- pasien rawat jalan yang pulang tanpa
  * tahu ada permintaan lab akan datang lagi hanya untuk itu. Dipasangkan dengan
@@ -27,7 +27,7 @@ export type PermintaanJenis = 'lab' | 'radiologi';
  * yang sama dengan `status_prb` pada surat kontrol BPJS.
  *
  * `kd_jenis_prw` diambil sebagai KODE dan hanya untuk `checkPrivacy()`, persis
- * seperti RESULT_READY. Nama pemeriksaannya (`jns_perawatan_lab.nm_perawatan`)
+ * seperti pemicu HASIL. Nama pemeriksaannya (`jns_perawatan_lab.nm_perawatan`)
  * tidak pernah ikut, dan `jumlah_item` juga tidak -- §4.3: banyaknya pemeriksaan
  * pun petunjuk medis.
  */

@@ -29,7 +29,7 @@ import { logger, safeError } from '@/lib/logger';
  *   SURAT PEMESANAN (ini)   pesanan DIKIRIM ke pemasok    "sedang dipesan"
  *   PENGADAAN               barang DITERIMA dari pemasok  "sudah datang"
  *
- * Bentuk yang sama dengan LAB_REQUEST/RESULT_READY (migrations/025). Khanza
+ * Bentuk yang sama dengan LAB_REQUEST/LAB_RESULT (migrations/025). Khanza
  * sendiri yang menyambung keduanya: `DlgPembelian.java:1810-1826` membaca
  * `surat_pemesanan_medis` untuk mengisi layar pembelian, jadi kedatangan barang
  * melahirkan baris `pembelian` tersendiri yang sudah diberitakan PENGADAAN.

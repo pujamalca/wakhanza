@@ -286,7 +286,7 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
  * satu pun galat -- ia hanya berperilaku sebagai "tidak terikat", dan pesannya
  * tetap terkirim ke pasien yang sudah meminta berhenti.
  */
-describe('LAB_REQUEST / RAD_REQUEST -- pasangan RESULT_READY dari ujung yang lain', () => {
+describe('LAB_REQUEST / RAD_REQUEST -- pasangan LAB_RESULT/RAD_RESULT dari ujung yang lain', () => {
   function ctxPermintaan(triggerCode: string): PipelineContext {
     return {
       triggerCode,

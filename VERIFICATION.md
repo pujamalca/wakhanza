@@ -1295,3 +1295,244 @@ SEMUA LOLOS
 Tidak ada migrasi, tidak ada perubahan skema, tidak ada sakelar kebijakan yang
 disentuh: perubahannya murni keterangan di layar plus satu uji. `template.is_active`
 seluruh baris tidak diubah, dan tidak satu pun pesan dikirim selama verifikasi.
+
+## HASIL lab & radiologi dipisah (`migrations/034`) -- kekecualian yang disudahi
+
+Verifikasi 8 Agustus 2026. Nama pasien, nomor telepon, nama dokter, dan nama
+rumah sakit sungguhan TIDAK disalin ke berkas ini (preseden commit `1cb8e92`).
+
+### Keadaan SEBELUM migrasi, diukur bukan diingat
+
+```
+$ mysql wakhanza -e "SELECT trigger_code, is_active, tujuan_mode, CHAR_LENGTH(body) ..."
+RESULT_READY   is_active=0   tujuan_mode=pasien   body=243 karakter
+
+template_target WHERE trigger_code='RESULT_READY'   -> 0 baris
+poll_cursor  RESULT_READY_LAB         2026-08-03 12:37:15
+             RESULT_READY_RADIOLOGI   2026-08-03 12:37:15
+app_setting  dispatch.stale_hours_by_trigger -> {... "RESULT_READY":12 ...}
+outbox       trigger_code='RESULT_READY' -> 1 baris (pasien uji, status expired)
+```
+
+Angka-angka itu yang menentukan bentuk migrasinya: baris yang dipecah sedang
+NONAKTIF di sini, tapi migrasinya tetap harus benar untuk instalasi yang
+menyalakannya -- karena itu `is_active` disalin, bukan ditulis `0`.
+
+### Sesudah `npm run migrate` -- nol-perubahan-perilaku dibuktikan kolom per kolom
+
+```
+$ npm run migrate
+[migrate] jalankan 034_hasil_penunjang_dipisah.sql ...
+[migrate] selesai  034_hasil_penunjang_dipisah.sql
+
+LAB_RESULT   is_active=0  tujuan_mode=pasien  body=243  label='Hasil laboratorium selesai'
+RAD_RESULT   is_active=0  tujuan_mode=pasien  body=243  label='Hasil radiologi selesai'
+sisa_result_ready_di_template        -> 0
+target_result_ready_tersisa          -> 0
+
+body_kedua_baris_sama       -> 1     (LAB_RESULT.body = RAD_RESULT.body, byte per byte)
+masih_pakai_jenis_layanan   -> 1     ({jenis_layanan} utuh, jadi teksnya tidak berubah)
+frasa_berhenti_utuh         -> 1     ("Berhenti Kirim Otomatis" tidak tergunting)
+```
+
+`is_active`, `tujuan_mode`, dan panjang badan pesan (243) sama persis dengan
+baris lamanya -- itulah bukti bahwa yang terjadi PEMECAHAN, bukan penulisan
+ulang. `label` satu-satunya yang berbeda, dan memang harus berbeda.
+
+**Ambang basi ikut pindah dengan angka yang BERLAKU, bukan angka seed:**
+
+```
+sebelum : {"QUEUE_REG":6,"RESULT_READY":12,"PHARMACY_READY":12, ...}
+sesudah : {"QUEUE_REG":6,"PHARMACY_READY":12, ..., "LAB_RESULT":12,"RAD_RESULT":12}
+```
+
+Kunci lain tidak tersentuh. Tanpa langkah ini keduanya jatuh ke
+`dispatch.stale_threshold_hours_default` = 6 jam -- pengetatan diam-diam yang
+muncul sebagai pesan `expired`, bukan sebagai galat.
+
+**Yang sengaja TIDAK berubah, dan diperiksa memang tidak berubah:**
+
+```
+poll_cursor  RESULT_READY_LAB         2026-08-03 12:37:15   (utuh)
+             RESULT_READY_RADIOLOGI   2026-08-03 12:37:15   (utuh)
+outbox       RESULT_READY -> 1 baris                        (riwayat, utuh)
+```
+
+Watermark yang diganti nama = watermark yang hilang: `getCursor` jatuh ke
+`now - polling.lookback_days` (30 hari) dan poller mengirim ulang sebulan penuh
+hasil pemeriksaan. Prefiks kunci idempotennya tetap `RESULT_READY` lewat alasan
+yang sama -- hasil yang sudah pernah dikirim harus tetap dikenali duplikat.
+
+### Worker benar-benar menjalankan EMPAT siklus penunjang, bukan tiga
+
+Sesudah `pm2 start wakhanza-worker` (log worker sungguhan, pid 16300):
+
+```
+21:05:04  LAB_REQUEST | pemicu nonaktif atau template belum ada, lewati siklus
+21:05:04  RAD_REQUEST | pemicu nonaktif atau template belum ada, lewati siklus
+21:05:04  LAB_RESULT  | pemicu nonaktif atau template belum ada, lewati siklus
+21:05:04  RAD_RESULT  | pemicu nonaktif atau template belum ada, lewati siklus
+```
+
+Sebelum migrasi baris ketiga dan keempat adalah SATU baris `RESULT_READY`.
+
+Pesan itu sendiri ambigu ("nonaktif ATAU template belum ada"), jadi yang
+membuktikan templatenya benar-benar ketemu adalah `poll:dryrun`, yang
+membedakan keduanya:
+
+```
+$ npm run poll:dryrun
+=== LAB_REQUEST: 16 baris kandidat ===
+  (template nonaktif -- akan dilewati oleh worker sungguhan)
+=== RAD_REQUEST: 0 baris kandidat ===
+=== LAB_RESULT: 3 baris kandidat ===
+  (template nonaktif -- akan dilewati oleh worker sungguhan)     <- bukan "belum ada template"
+=== RAD_RESULT: 0 baris kandidat ===
+```
+
+`reportSection()` sekaligus kehilangan parameter `triggerCode`-nya: ia ada
+justru karena hasil penunjang tampil sebagai `RESULT_READY(lab)` sementara
+templatenya satu baris. Kekecualiannya hilang, dan parameter bernilai bawaan
+yang tidak dipakai siapa pun adalah persis tempat pratinjau dan produksi mulai
+menyimpang tanpa satu pun galat.
+
+### Gerbang `labels.test.ts` diajari membaca migrasi yang MENGHAPUS
+
+Parsernya semula hanya mengenali `INSERT INTO template ... VALUES`. Migrasi ini
+memakai `INSERT ... SELECT` (untuk menyalin) dan `DELETE` (untuk membuang baris
+lama). Kedua penanganan itu dirusak sengaja, satu per satu:
+
+```
+A. penanganan DELETE dilumpuhkan
+   × pemecahan RESULT_READY terbaca sebagai pemecahan, bukan penambahan
+   × setiap baris template yang dimigrasikan punya keterangan sumbernya
+   Tests: 2 failed, 6 passed
+
+B. penanganan INSERT...SELECT dilumpuhkan
+   × migrasinya benar-benar terbaca (kalau nol, parsernya yang rusak)
+   × pemecahan RESULT_READY terbaca sebagai pemecahan, bukan penambahan
+   × tidak menjelaskan pemicu yang bukan baris template
+   Tests: 3 failed, 5 passed
+
+C. dikembalikan
+   Tests: 8 passed
+```
+
+Perhatikan arah kegagalannya berbeda, dan itu yang membuktikan gerbangnya
+menjaga DUA hal: DELETE yang terlewat membuat uji menuntut keterangan untuk
+pemicu yang sudah tidak ada; SELECT yang terlewat membuat dua pemicu yang
+benar-benar berjalan tidak pernah diperiksa punya keterangan sama sekali.
+
+Ditambah dua uji baru yang menyatakan ketidaksamaan ketiga daftar secara
+eksplisit: `TRIGGER_LABEL.RESULT_READY` **ada** (baris riwayat butuh labelnya)
+sementara `TRIGGER_SOURCE.RESULT_READY` **tidak** (ia menjelaskan baris
+`template` yang ADA).
+
+### Seluruh suite
+
+```
+$ npm run typecheck   # tsc --noEmit, bersih
+$ npx jest
+Test Suites: 32 passed, 32 total
+Tests:       553 passed, 553 total
+$ npm run lint        # bersih
+$ npm run build       # sukses
+$ npm run verify:db      # sik tetap menolak tulisan, audit_log tetap append-only
+$ npm run verify:plans   # lolos
+```
+
+**Satu uji lama GAGAL dan itu benar**: `optOut.test.ts` mematok
+`optOutTriggerCodes()` sepanjang 13, jadi mengubah daftarnya memaksa
+keputusannya diambil sadar-sadar. 13 -> 15: RESULT_READY pecah jadi dua (+1),
+lalu kode lamanya DITAHAN sebagai peninggalan (+1) karena daftar itu juga
+dipakai untuk MENCORET antrean di `wa-client.ts` -- baris `pending` berkode lama
+harus tetap tercoret saat pasiennya meminta berhenti.
+
+`verify:plans` menamainya `HASIL(lab)` / `HASIL(radiologi)` -- deskriptif seperti
+`PERMINTAAN(jenis)`, bukan kode pemicunya, karena kode itu ditentukan di worker
+bukan di modul `khanza/`. Keduanya lolos TANPA izin pindai penuh:
+
+```
+[ok] HASIL(lab)        periksa_lab range PRIMARY  rows~3  (Using index)
+[ok] HASIL(radiologi)  periksa_radiologi index kd_jenis_prw  rows~1  (Using index)
+```
+
+### Verifikasi HTTP -- lewat instance PM2 (port 3100), 31 pemeriksaan
+
+Akun admin sementara dibuat dan **dihapus di alur yang sama** (dikonfirmasi
+lewat `users -- list`: tinggal satu akun milik pemilik sistem). Pagar
+anti-build-lama aktif: penanda fitur baru tidak ada -> `exit 2`.
+
+```
+[ok]  /template HTTP 200
+[ok]  Hasil lab: barisnya ada / sumbernya periksa_lab / kapan berbunyinya
+[ok]  Hasil radiologi: barisnya ada / sumbernya periksa_radiologi / kapan berbunyinya
+[ok]  Permintaan lab: barisnya ada / sumbernya permintaan_lab / kapan berbunyinya
+[ok]  Permintaan radiologi: barisnya ada / sumbernya permintaan_radiologi / kapan berbunyinya
+[ok]  baris RESULT_READY tidak ada lagi
+[ok]  label lama "Hasil penunjang selesai" tidak ada lagi
+[ok]  tidak ada baris bersumber "periksa_lab + periksa_radiologi"
+[ok]  {jenis_layanan} masih terpakai di badan pesannya
+[ok]  frasa berhenti utuh di badan pesannya
+[ok]  tidak menawarkan variabel klinis {diagnosa}/{terapi}/{hasil_lab}/{nama_pemeriksaan}
+[ok]  Ringkasan memakai label peninggalan, bukan kode mentah
+[ok]  Ringkasan tidak menampilkan kode mentah RESULT_READY
+[ok]  /antrean, /log, /bpjs, /farmasi, /balasan-otomatis, /pengaturan masih HTTP 200
+
+SEMUA LOLOS
+```
+
+Tiga asersi sengaja BERPOLARITAS TERBALIK (baris lama hilang, label lama
+hilang, sumber gabungan hilang): tanpa itu "pemecahannya benar-benar terjadi di
+layar" cuma niat di komentar. Pemeriksaan Ringkasan adalah pasangannya dari arah
+sebaliknya -- baris `outbox` peninggalan tetap tampil sebagai
+"Hasil penunjang (lama)", bukan sebagai kode mentah.
+
+### Worker: satu restart yang berubah jadi lingkaran, dan pemulihannya
+
+`pm2 restart wakhanza-worker` menjatuhkan worker ke lingkaran restart ~7 detik:
+tiap instance baru meminta pemegang sesi mundur, pemegangnya keluar dengan
+`exitCode 75`, PM2 membaca itu sebagai crash lalu menyalakan instance baru lagi.
+Bentuknya yang sudah tercatat di CLAUDE.md ("satu perintah restart meluncurkan
+dua proses"), tapi **BUKAN** lewat sebab yang di sana: tidak ada Chromium yatim
+sama sekali (`Get-CimInstance ... wwebjs_auth` -> **0** proses), dan serah-terima
+`singleInstance.ts` sendiri bekerja normal -- yang berputar adalah autorestart
+PM2 di atas keluarnya proses lama.
+
+Pemulihannya mengikuti urutan yang sudah terdokumentasi, dan berhasil:
+
+```
+pm2 stop wakhanza-worker
+Get-CimInstance Win32_Process ... wwebjs_auth  -> 0 proses (tidak ada yang perlu dimatikan)
+netstat :3101 LISTENING                        -> 0 (kunci worker sudah lepas)
+pm2 start wakhanza-worker
+-> status online, uptime 45s, restarts TETAP 34 (tidak bertambah)
+-> wa_session: status=ready, umur heartbeat 27 detik (ambang basi 40 detik)
+```
+
+Yang membocorkan lingkarannya bukan `status` melainkan **umur heartbeat dan
+jumlah restart yang terus naik** -- pelajaran yang sama seperti insiden 29
+restart: `wa_session.status` ditulis proses yang sudah mati dan tidak ada yang
+membatalkannya.
+
+### Kebersihan
+
+Tidak ada perubahan skema (tidak ada kolom/tabel baru; `template` dan
+`template_target` cuma berganti isi baris), tidak ada grant baru yang
+diperlukan -- `wakhanza_rw` sudah memegang `UPDATE`/`DELETE` untuk `template`,
+`template_target`, dan `app_setting`, dan itu diperiksa lewat
+`SHOW GRANTS FOR CURRENT_USER()` sebelum migrasinya ditulis, bukan diasumsikan.
+
+**Tidak ada sakelar kebijakan yang berubah**: `LAB_RESULT` dan `RAD_RESULT`
+mewarisi `is_active = 0` dari baris yang dipecah, jadi tidak satu pun pemicu
+menyala maupun padam sebagai akibat migrasi ini. Tidak satu pun pesan dikirim
+selama verifikasi. Akun admin sementara dihapus, dan skrip verifikasinya tinggal
+di luar repo.
+
+**`periksa_radiologi` KOSONG di kedua database** (`COUNT(*)` = 0 pada `alca`
+maupun `sik`), jadi RAD_RESULT belum pernah berjalan atas satu baris data pun --
+keadaan yang sama persis dengan `permintaan_radiologi` saat RAD_REQUEST dibuat.
+Yang terbukti: bentuk SQL-nya identik dengan yang lab (satu
+`buildResultReadySql()` yang cuma berganti nama tabel), EXPLAIN-nya lolos, dan
+worker menjalankan siklusnya. Yang TIDAK terbukti: bahwa barisnya terbaca.
+Periksa lewat `npm run poll:dryrun` sebelum menyalakan templatenya.
