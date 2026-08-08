@@ -17,5 +17,6 @@ export * from './hibah';
 export * from './pemesanan';
 export * from './bpjsBatal';
 export * from './bpjsKontrol';
+export * from './kontrolUlang';
 export * from './permintaanPenunjang';
 export * from './suratPasien';

@@ -36,6 +36,8 @@ import { pollPermintaan, type PermintaanJenis } from '../src/khanza/permintaanPe
 import { pollBpjsBatal } from '../src/khanza/bpjsBatal';
 import { pollBpjsKontrol } from '../src/khanza/bpjsKontrol';
 import { varsBatal, varsKontrol } from '../src/worker/bpjsRunner';
+import { pollKontrolUlang } from '../src/khanza/kontrolUlang';
+import { varsKontrolUlang } from '../src/worker/kontrolUlangRunner';
 import { bacaHariSebelum, sasaranKontrol } from '../src/core/bpjs';
 
 const SAMPLE_SIZE = 5;
@@ -313,6 +315,32 @@ async function main() {
   await reportSection(
     'BOOK_CANCEL',
     cancelRows.map((r) => ({ noRkmMedis: r.no_rkm_medis, rawPhone: r.no_tlp, kdPoli: r.kd_poli, vars: bookingVars(r) })),
+    sensitivePoli,
+    sensitiveExam,
+  );
+
+  /**
+   * Pengingat surat kontrol NON-BPJS.
+   *
+   * Sasarannya dihitung dari setelan yang SAMA yang dipakai worker
+   * (`schedule.kontrol_ulang_hari_sebelum` -> `sasaranKontrol`), bukan dari
+   * jendela lookback seperti pemicu di atasnya -- ini pemicu harian H-N, dan
+   * pratinjau yang memakai jendela berbeda dari produksi akan menampilkan baris
+   * yang tidak akan pernah dikirim.
+   */
+  const rawHariKontrol = (await getSetting('schedule.kontrol_ulang_hari_sebelum', '1')) ?? '1';
+  const sasaranKu = sasaranKontrol(bacaHariSebelum(rawHariKontrol), new Date());
+  const selisihKu = new Map(sasaranKu.map((s) => [s.tanggal, s.hariSebelum]));
+  const kontrolUlangRows = await pollKontrolUlang(sasaranKu.map((s) => s.tanggal));
+  console.log(`\n--- KONTROL_ULANG menyasar tanggal: ${sasaranKu.map((s) => s.tanggal).join(', ') || '(tidak ada)'} ---`);
+  await reportSection(
+    'KONTROL_ULANG',
+    kontrolUlangRows.map((r) => ({
+      noRkmMedis: r.no_rkm_medis ?? '',
+      rawPhone: r.no_tlp,
+      kdPoli: r.kd_poli,
+      vars: { ...idVars, ...varsKontrolUlang(r, selisihKu.get(r.tgl_kontrol) ?? 0) },
+    })),
     sensitivePoli,
     sensitiveExam,
   );

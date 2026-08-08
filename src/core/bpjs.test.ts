@@ -1,5 +1,6 @@
 import {
   bacaHariSebelum,
+  tahunDariTanggal,
   tulisHariSebelum,
   sasaranKontrol,
   labelSisaHari,
@@ -139,5 +140,42 @@ describe('tanggalLokal', () => {
 
   it('memberi nol di depan untuk bulan dan tanggal satu digit', () => {
     expect(tanggalLokal(new Date(2026, 2, 7))).toBe('2026-03-07');
+  });
+});
+
+describe('tahunDariTanggal (pemangkas PK skdp_bpjs, KONTROL_ULANG)', () => {
+  it('satu tanggal -> satu tahun', () => {
+    expect(tahunDariTanggal(['2026-08-15'])).toEqual([2026]);
+  });
+
+  it('beberapa tanggal di tahun yang sama tidak digandakan', () => {
+    // Setelan "7,3,1" dalam satu minggu menyasar tiga tanggal, satu tahun.
+    // Tahun yang berulang di klausa IN bukan salah, tapi ia menyembunyikan
+    // apakah dedupnya benar-benar bekerja saat tahunnya memang beda.
+    expect(tahunDariTanggal(['2026-08-15', '2026-08-19', '2026-08-21'])).toEqual([2026]);
+  });
+
+  it('PERGANTIAN TAHUN menghasilkan DUA tahun', () => {
+    // Inilah alasan fungsi ini mengembalikan larik. Pengingat "7,1" yang jalan
+    // 28 Desember menyasar 4 Januari dan 29 Desember sekaligus; satu tahun saja
+    // membuang yang seberang tanpa galat apa pun -- pengingat yang hilang tepat
+    // di pergantian tahun, saat paling sedikit orang memeriksanya.
+    expect(tahunDariTanggal(['2027-01-04', '2026-12-29'])).toEqual([2026, 2027]);
+  });
+
+  it('hasilnya terurut naik', () => {
+    expect(tahunDariTanggal(['2027-01-04', '2025-12-29', '2026-06-01'])).toEqual([2025, 2026, 2027]);
+  });
+
+  it('daftar kosong -> tahun kosong', () => {
+    // Pemanggilnya memakai ini untuk berhenti sebelum menyusun `IN ()`, yang
+    // bukan SQL yang sah.
+    expect(tahunDariTanggal([])).toEqual([]);
+  });
+
+  it('tanggal yang tidak berbentuk tahun dibuang, bukan jadi NaN', () => {
+    // NaN yang lolos ke klausa IN menghasilkan galat SQL yang sama sekali tidak
+    // menyebut sebabnya.
+    expect(tahunDariTanggal(['', 'bukan-tanggal', '2026-01-01'])).toEqual([2026]);
   });
 });

@@ -68,6 +68,16 @@ const OPT_OUT_TRIGGERS = new Set([
   'PHARMACY_READY',
   'BILLING_READY',
   'BPJS_KONTROL',
+  /**
+   * KONTROL_ULANG -- pengingat surat kontrol untuk pasien NON-BPJS
+   * (migrations/032). Ada di sini lewat alasan yang identik dengan
+   * BPJS_KONTROL tepat di atasnya, dan justru karena keduanya sepasang maka
+   * ketidaksamaannya akan jadi janji yang mustahil dijelaskan: pasien yang
+   * sudah meminta berhenti lalu tetap diingatkan hanya karena suratnya
+   * kebetulan tidak lewat bridging BPJS akan membaca frasa yang dijanjikan
+   * sistem sebagai bohong.
+   */
+  'KONTROL_ULANG',
   // Permintaan lab/radiologi: pemberitahuan otomatis dari kejadian di sik ke
   // nomor pasien, sekelas dengan ketujuh di atasnya. Pasangan RESULT_READY --
   // dan pasangan yang satu terikat sementara satunya tidak akan jadi janji yang

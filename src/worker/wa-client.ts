@@ -44,7 +44,14 @@ import { resolveMediaPath } from '@/lib/mediaStorage';
  */
 const OPT_OUT_CONFIRMATION = [
   'Baik, kami hentikan pemberitahuan otomatis untuk nomor ini:',
-  'nomor antrian, konfirmasi & pengingat jadwal, pengingat kontrol BPJS, permintaan & hasil pemeriksaan, obat siap, tagihan, dan surat keterangan sakit.',
+  // "pengingat kontrol" tanpa kata BPJS, dan itu bukan penyederhanaan: sejak
+  // migrations/032 ada DUA pemicu pengingat kontrol yang terikat daftar tolak
+  // (BPJS_KONTROL dan KONTROL_ULANG untuk pasien non-BPJS). Menyebut salah
+  // satunya membuat janji yang dibaca pasien lebih SEMPIT dari yang dijalankan
+  // mesin -- di sini arahnya kebetulan aman, tapi pasien non-BPJS yang membaca
+  // "kontrol BPJS" wajar menyimpulkan pengingatnya TIDAK ikut berhenti lalu
+  // mengeluh saat ia benar-benar berhenti.
+  'nomor antrian, konfirmasi & pengingat jadwal, pengingat kontrol, permintaan & hasil pemeriksaan, obat siap, tagihan, dan surat keterangan sakit.',
   '',
   'Yang MASIH akan Anda terima: pengumuman dari rumah sakit, jawaban atas pesan yang Anda kirim sendiri, dan dokumen yang Anda minta sendiri kepada petugas.',
   '',

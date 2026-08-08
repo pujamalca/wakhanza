@@ -25,6 +25,7 @@
     "dryrun:bpjs": "tsx scripts/dryrun-bpjs.ts",
     "dryrun:surat": "tsx scripts/dryrun-surat.ts",
     "dryrun:hibah": "tsx scripts/dryrun-hibah.ts",
+    "dryrun:kontrol": "tsx scripts/dryrun-kontrol.ts",
     "dryrun:pemesanan": "tsx scripts/dryrun-pemesanan.ts"
   },
   "dependencies": {

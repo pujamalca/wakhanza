@@ -92,6 +92,11 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // sampai ke pasien padahal penerimanya memang staf.
   BPJS_BATAL: 'BPJS: pembatalan Mobile JKN',
   BPJS_KONTROL: 'BPJS: pengingat kontrol',
+  // Padanan BPJS_KONTROL dari sisi Khanza sendiri. Labelnya WAJIB menyebut
+  // "non-BPJS" secara eksplisit: dua baris berdampingan di Antrean yang
+  // sama-sama berbunyi "pengingat kontrol" tidak bisa dibedakan sama sekali,
+  // dan yang dicari orang saat menelusuri justru pemicu MANA yang mengirim.
+  KONTROL_ULANG: 'Pengingat kontrol (non-BPJS)',
   // Satu-satunya baris yang membawa BERKAS, bukan kabar. Labelnya menyebut
   // "dokumen" supaya jelas dari halaman Antrean bahwa yang gagal terkirim
   // bukan sekadar pemberitahuan yang bisa diulang isinya -- ada surat yang

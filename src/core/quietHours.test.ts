@@ -94,4 +94,24 @@ describe('computeScheduledAt', () => {
     expect(computeScheduledAt(eventAt, 'BROADCAST', 21, 7)).not.toEqual(eventAt);
     expect(computeScheduledAt(eventAt, 'QUEUE_REG', 21, 7)).not.toEqual(eventAt);
   });
+
+  /**
+   * KEDUA pengingat kontrol tunduk jam tenang, dan yang dijaga di sini bukan
+   * nilai masing-masing melainkan bahwa keduanya SAMA.
+   *
+   * BPJS_KONTROL dan KONTROL_ULANG mengirim kalimat yang sama gunanya kepada
+   * pasien yang sama-sama tidak menunggunya; satu-satunya bedanya adalah lewat
+   * kanal mana suratnya diterbitkan, dan itu bukan hal yang boleh menentukan
+   * apakah seseorang dibangunkan tengah malam. Keduanya juga dijadwalkan pada
+   * jam yang dipilih staf, jadi dalam pemakaian normal jam tenang memang tidak
+   * pernah menggigit -- pagar ini untuk siklus yang tertunda, bukan yang wajar.
+   */
+  it('kedua pengingat kontrol sama-sama TUNDUK jam tenang', () => {
+    const eventAt = at(22, 30);
+    for (const code of ['BPJS_KONTROL', 'KONTROL_ULANG']) {
+      const dijadwalkan = computeScheduledAt(eventAt, code, 21, 7);
+      expect(dijadwalkan).not.toEqual(eventAt);
+      expect(dijadwalkan.getHours()).toBe(7);
+    }
+  });
 });

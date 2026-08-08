@@ -753,3 +753,251 @@ diubah sama sekali** -- `farmasi.hibah_enabled` tetap `1` dan `terima_hibah` tet
 sebagaimana mereka setel sendiri, dan `farmasi.hibah_nilai` dikembalikan ke `1` setelah diuji
 dimatikan. `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`,
 umur heartbeat 27 detik).
+
+## PENGINGAT KONTROL non-BPJS (`migrations/032`) -- padanan BPJS_KONTROL dari sisi Khanza sendiri
+
+Verifikasi 8 Agustus 2026. Nama pasien, nomor telepon, dan nama dokter sungguhan
+yang muncul di keluaran perintah TIDAK disalin ke berkas ini (preseden commit
+`1cb8e92`); yang dicatat bentuk dan jumlahnya.
+
+### Menu mana yang benar, dan tabelnya
+
+Dibaca dari sumber Khanza, bukan disimpulkan dari nama tabel:
+
+```
+$ grep -n -iE "surat.?kontrol|SuratKontrol" src/simrskhanza/frmUtama.java
+5997:        btnSKDPBPJS.setText("Surat Kontrol");
+13402:        SuratKontrol form = new SuratKontrol(this, false);
+45758:        btnBPJSSuratKontrol.setText("Surat Kontrol VClaim");
+17775:        BPJSSuratKontrol form = new BPJSSuratKontrol(this, false);
+```
+
+`surat/SuratKontrol.java`'s `isBooking()` menulis 13 kolom ke `skdp_bpjs`, dan
+kolom ke-9/ke-10 membuktikan arti kedua tanggalnya:
+
+```java
+Sequel.menyimpantf("skdp_bpjs","?,?,?,?,?,?,?,?,?,?,?,?,?", ... 13, new String[]{
+     TanggalPeriksa...substring(6,10),   // 1 tahun
+     ...
+     Valid.SetTgl(TanggalPeriksa)+" "+..., // 9 tanggal_datang  <- tanggal KONTROL
+     Valid.SetTgl(TanggalSurat)+" "+...,   // 10 tanggal_rujukan <- tanggal SURAT
+     NoSurat.getText(), KdDokter.getText(), Status...            // 11-13
+ })
+```
+
+### Invarian pemangkas: `tahun` == `YEAR(tanggal_datang)`
+
+```
+$ for d in sik sik-dev-alca sik-ridda-dev; do ... SUM(tahun <> YEAR(tanggal_datang)) ...
+sik              253 baris, meleset=0, datang NULL=0
+sik-dev-alca     13 baris,  meleset=0, datang NULL=0
+sik-ridda-dev    9 baris,   meleset=0, datang NULL=0
+```
+
+275 baris, **0 meleset**. Bandingkan prefiks `no_faktur` pengadaan (9 dari 910
+menyimpang) dan `nobooking` pembatalan BPJS (144 dari 1.808). Tidak ada margin
+yang perlu ditambahkan.
+
+### Tabrakan dengan BOOK_REMIND -- diukur, bukan diduga
+
+```
+$ grep -i kontrol setting/database.xml
+    <entry key="JADIKANBOOKINGSURATKONTROL">yes</entry>
+    <entry key="JADIKANBOOKINGSURATKONTROLAPIBPJS">no</entry>
+
+$ mysql sik -e "SELECT COUNT(*) total_surat,
+      SUM(CASE WHEN b.no_rkm_medis IS NOT NULL THEN 1 ELSE 0 END) ada_booking
+    FROM skdp_bpjs s LEFT JOIN booking_registrasi b
+      ON b.no_rkm_medis=s.no_rkm_medis AND b.tanggal_periksa=DATE(s.tanggal_datang)"
+total_surat  ada_booking
+253          253
+```
+
+**253/253.** Karena itu peringatannya ada, dan karena itu ia TIDAK jadi pagar
+mesin -- lihat CLAUDE.md.
+
+Status suratnya (alasan `WHERE status='Menunggu'`):
+
+```
+status          n
+Menunggu        151
+Sudah Periksa   102
+```
+
+Sebaran cara bayar di arsip: BPJS 252, UMUM 1 -- menunya sempat dipakai untuk
+pasien BPJS sebelum bridging VClaim dipakai.
+
+### verify:plans -- tanpa satu pun izin pindai penuh
+
+Dijalankan terhadap `alca`, tempat `skdp_bpjs` **nol baris** -- justru keadaan
+yang membuat `sks` dan `permintaan_lab` jatuh ke `type=ALL` dan perlu izin
+sementara:
+
+```
+$ npm run verify:plans
+[ok] KONTROL_ULANG        s ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        p eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        d eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        b eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        pk eq_ref PRIMARY  rows~1
+...
+verify:plans lolos.
+```
+
+Alias `b` = `booking_registrasi`, satu-satunya tabel yang punya izin pindai
+penuh yang disengaja di proyek ini -- di sini ia `eq_ref` karena dimasuki lewat
+PRIMARY KEY-nya sendiri `(no_rkm_medis, tanggal_periksa)`.
+
+### Pratinjau terhadap data sungguhan
+
+`alca` (produksi) -- pembedaan "kosong" vs "tidak jatuh tempo" bekerja:
+
+```
+$ npm run dryrun:kontrol
+=== dryrun:kontrol terhadap database "alca" -- tidak menulis apa pun ===
+baris template : ADA, is_active=0, tujuan_mode=pasien
+hari sebelum   : "1" -> menyasar tanggal 2026-08-09
+--- seluruh isi skdp_bpjs (BUKAN yang akan dikirim) ---
+  0 baris -- menu "Surat Kontrol" di Khanza belum pernah dipakai di database ini.
+--- KONTROL_ULANG: 0 baris kandidat pada tanggal acuan ---
+```
+
+Arsip `sik`, tanggal acuan diserahkan supaya H-1 jatuh pada tanggal yang berisi:
+
+```
+$ npm run dryrun:kontrol -- sik 2024-02-04
+hari sebelum   : "1" -> menyasar tanggal 2024-02-05
+--- seluruh isi skdp_bpjs (BUKAN yang akan dikirim) ---
+  253 baris, tanggal kontrol 2023-12-09 s/d 2024-02-05
+--- KONTROL_ULANG: 16 baris kandidat pada tanggal acuan ---
+  kolom yang benar-benar terbaca: tahun, no_antrian, no_rkm_medis, tgl_kontrol,
+                                  nm_pasien, no_tlp, nm_dokter, kd_poli, nm_poli
+  kolom klinis yang ikut terbaca: TIDAK ADA (benar)
+  tanpa nomor sah  : 2 / 16
+  tanpa poli       : 0 / 16
+```
+
+Privasi dibuktikan pada **objek barisnya** (`Object.keys()`), bukan dengan
+membaca SQL: `diagnosa`, `terapi`, `alasan1`, `alasan2`, `rtl1`, `rtl2` tidak
+ada di sana sama sekali -- padahal keenamnya tercetak di surat kertasnya
+(`rptSuratSKDPBPJS.jrxml` memakai `$F{temp4}`..`$F{temp9}`).
+
+Bentuk pesan yang dirender (isi sungguhan disamarkan):
+
+```
+Yth. (nama pasien), kami mengingatkan jadwal kontrol Anda di (nama RS, dari sik.setting):
+
+Tanggal : 2024-02-05 (besok)
+Dokter : (nama dokter, disamarkan di berkas ini)
+No. surat : 000219
+
+Mohon membawa surat kontrol Anda. Informasi: Telepon : (kontak RS)
+
+Balas "Berhenti Kirim Otomatis" untuk berhenti menerima pemberitahuan otomatis.
+
+Kode Pengiriman : 2026-08-08 09:35:58 MM4WZ8
+```
+
+### Uji unit
+
+```
+$ npx jest
+Test Suites: 31 passed, 31 total
+Tests:       545 passed, 545 total
+```
+
+Yang ditambahkan: enam kasus `tahunDariTanggal` di `core/bpjs.test.ts`
+(termasuk pergantian tahun yang menghasilkan DUA tahun -- alasan fungsi itu
+mengembalikan larik), `KONTROL_ULANG` masuk daftar terikat opt-out
+(`optOutTriggerCodes()` 11 -> 12), dan asersi BERPASANGAN di
+`quietHours.test.ts` bahwa BPJS_KONTROL dan KONTROL_ULANG sama-sama TUNDUK jam
+tenang -- yang dijaga bukan nilai masing-masing melainkan bahwa keduanya SAMA.
+
+### Verifikasi HTTP lewat instance PM2 (port 3100)
+
+`npm run build` lalu `pm2 restart wakhanza-web`, diuji lewat port produksi.
+Akun admin sementara dibuat dan **dihapus di alur yang sama**.
+
+```
+[ok]   login berhasil -- HTTP 302
+[ok]   /template HTTP 200
+[ok]   baris pemicu baru muncul di tabel
+[ok]   kode pemicunya tampil
+[ok]   judul peringatan tabrakan ada
+[ok]   menyebut setelan Khanza penyebabnya
+[ok]   menyebut akibatnya: pesan kedua
+[ok]   menerangkan syarat {nama_poli}
+[ok]   saat KONTROL_ULANG nonaktif, TIDAK memakai bentuk peringatan mendesak
+[ok]   menawarkan {no_surat_kontrol} / {tanggal_kontrol} / {sisa_hari}
+[ok]   tidak menawarkan variabel klinis {diagnosa} / {terapi} / {rtl1} / {alasan1}
+[ok]   template bawaan menyebut nomor suratnya
+[ok]   template bawaan memuat frasa berhenti
+[ok]   /ringkasan, /antrean, /bpjs masih HTTP 200
+
+SEMUA LOLOS
+
+$ npm run users -- delete verifikasi.kontrol
+[ok] 'verifikasi.kontrol' dihapus permanen.
+```
+
+### Siklus worker benar-benar berjalan
+
+Jalur kosongnya sunyi menurut rancangan, jadi ia dibuktikan dengan mengaktifkan
+templatenya SEBENTAR. Aman karena `alca.skdp_bpjs` nol baris (nol pesan mungkin
+terkirim) dan karena sakelar itu dibuat migrasi ini sendiri dengan bawaan 0 --
+bukan keputusan pemilik sistem, berbeda dari `farmasi.hibah_enabled`.
+
+```
+$ tail logs/wakhanza.1.log | grep kontrol
+"msg":"tidak ada surat kontrol non-BPJS yang jatuh tempo"
+
+$ mysql wakhanza -e "SELECT k,v FROM app_setting WHERE k='schedule.kontrol_ulang_last_run'"
+schedule.kontrol_ulang_last_run   2026-08-08
+```
+
+Membuktikan seluruh rantainya: loop terdaftar -> sakelar dibaca -> konteks
+dimuat -> `sik` di-query -> hasil kosong dicatat -> penanda harian maju.
+
+Dikembalikan seketika, dan dibuktikan kembali ke bawaan migrasi:
+
+```
+trigger_code   is_active
+KONTROL_ULANG  0
+
+k                                 nilai
+schedule.kontrol_ulang_hari_sebelum  [1]
+schedule.kontrol_ulang_jam           [9]
+schedule.kontrol_ulang_last_run      []
+
+$ SELECT COUNT(*) FROM outbox WHERE trigger_code='KONTROL_ULANG'
+0
+```
+
+**Nol baris `outbox` pernah dibuat**, dan nol pesan pernah terkirim.
+
+### Catatan operasional: restart worker memicu kaskade peluncuran PM2
+
+`pm2 restart wakhanza-worker` (diperlukan untuk memuat siklus baru) jatuh ke
+loop pengambilalihan -- instance baru meminta pemegang mundur, keluarnya
+pemegang dihitung PM2 sebagai exit yang perlu autorestart, berputar tiap ~7
+detik dengan `Protocol error (Runtime.callFunctionOn): Target closed`. Persis
+pola yang sudah tercatat di CLAUDE.md.
+
+Pemulihannya mengikuti tiga langkah yang sudah didokumentasikan, dan langkah
+kedua menemukan sesuatu yang layak dicatat:
+
+```
+Chromium pemegang sesi: 0
+sisa sesudah dibersihkan: 0
+chrome.exe milik pemakai yang TIDAK disentuh: 14
+```
+
+**Tidak ada Chromium yatim sama sekali** -- jadi penyebabnya murni kaskade
+peluncuran ganda PM2, bukan sesi yang tersangkut. Penyaring baris perintah
+(`*wwebjs_auth*`) tetap membuktikan nilainya: 14 `chrome.exe` milik pemakai
+tidak tersentuh. Sesudah `pm2 stop` + `pm2 start` sekali, sesi pulih:
+
+```
+status  umur_detik
+ready   13
+```

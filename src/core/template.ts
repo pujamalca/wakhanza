@@ -32,6 +32,27 @@ export const TRIGGER_TEMPLATE_VARIABLES = [
   'jam',
   'jenis_layanan',
   'cara_bayar',
+  /**
+   * Ketiganya hanya terisi pada KONTROL_ULANG (pengingat surat kontrol
+   * non-BPJS, migrations/032). Daftar ini memang dipakai bersama seluruh
+   * pemicu pasien -- `{jenis_layanan}` sudah lebih dulu begitu, terisi pada
+   * RESULT_READY saja -- jadi variabel yang tidak berlaku bagi sebuah pemicu
+   * dirender kosong, bukan ditolak saat disimpan.
+   *
+   * `{tanggal_kontrol}` dan `{sisa_hari}` sengaja bernama SAMA dengan milik
+   * BPJS_KONTROL: keduanya berarti hal yang persis sama bagi pasien, dan nama
+   * kedua untuk arti yang sama adalah cara paling murah membuat staf menyalin
+   * template lalu mendapat pesan berlubang.
+   */
+  'tanggal_kontrol',
+  'sisa_hari',
+  /**
+   * Nomor surat kontrol -- `skdp_bpjs.no_antrian`, tercetak sebagai "NO. SURAT"
+   * pada surat yang dipegang pasien. TERPISAH dari `{no_antrian}` yang sudah
+   * ada di atas: yang itu nomor antrian pendaftaran pada QUEUE_REG. Kolom
+   * Khanza-nya kebetulan bernama sama, artinya bagi pasien sama sekali tidak.
+   */
+  'no_surat_kontrol',
 ] as const;
 
 /**

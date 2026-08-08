@@ -50,6 +50,12 @@ describe('respectsOptOut', () => {
       // Pengingat surat kontrol BPJS: otomatis, berangkat dari sik, tanpa ada
       // manusia yang menekan apa pun -- sekelas dengan ketujuh di atasnya.
       'BPJS_KONTROL',
+      // Padanannya untuk pasien NON-BPJS (migrations/032). Sepasang dengan
+      // baris tepat di atasnya, dan justru karena sepasang maka
+      // ketidaksamaannya akan jadi janji yang mustahil dijelaskan: pasien yang
+      // sudah meminta berhenti lalu tetap diingatkan hanya karena suratnya
+      // kebetulan tidak lewat bridging BPJS.
+      'KONTROL_ULANG',
       // Permintaan lab/radiologi -- pasangan RESULT_READY, yang sudah terikat.
       // Pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
       // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
@@ -61,7 +67,7 @@ describe('respectsOptOut', () => {
     ]) {
       expect(respectsOptOut(code)).toBe(true);
     }
-    expect(optOutTriggerCodes()).toHaveLength(11);
+    expect(optOutTriggerCodes()).toHaveLength(12);
   });
 
   it('BROADCAST dan AUTO_REPLY TIDAK terikat -- kanal terpisah, keputusan RS', () => {

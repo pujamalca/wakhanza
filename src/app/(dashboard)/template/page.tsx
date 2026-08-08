@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { TriggerTemplateTable, BroadcastTemplateTable } from './TemplateTable';
-import { PageHeader, Pagination } from '@/components/ui';
+import { PageHeader, Pagination, Callout } from '@/components/ui';
 
 export default async function TemplatePage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
@@ -11,10 +11,11 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
 
   const { page: pageParam } = await searchParams;
   // Hanya tabel template BROADCAST yang dipaginasi. Tabel di atasnya berisi
-  // satu baris per PEMICU (PK-nya `trigger_code`), dan bertambah hanya saat
-  // ada pemicu baru -- bukan seiring pemakaian. Sembilan hari ini; dulu tujuh,
-  // lalu LAB_REQUEST dan RAD_REQUEST menambahkannya (migrations/025). Jadi
-  // kendali halaman di sana tidak akan pernah bisa berpindah ke mana pun.
+  // satu baris per PEMICU (PK-nya `trigger_code`), dan bertambah hanya saat ada
+  // pemicu BARU -- bukan seiring pemakaian -- jadi kendali halaman di sana tidak
+  // akan pernah bisa berpindah ke mana pun. Jumlah barisnya sengaja TIDAK
+  // ditulis di sini: klaim "tepat tujuh baris" pernah ada dan terbukti keliru
+  // dua kali (025 menambah dua, 032 menambah satu lagi).
   const p = hitungPaginasi(bacaHalaman(pageParam), await BroadcastTemplate.count(), UKURAN_HALAMAN.konfigurasi);
 
   const [templates, broadcastTemplates, semuaTarget, grup, sesi] = await Promise.all([
@@ -66,6 +67,51 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
         Tombol <span className="font-medium">Tujuan</span> mengatur ke mana pesannya dikirim. Bawaannya hanya ke nomor pasien
         yang bersangkutan; bisa ditambah (atau diganti) grup WhatsApp / nomor petugas — sama seperti notifikasi farmasi.
       </p>
+
+      {/*
+        Peringatan tabrakan KONTROL_ULANG x BOOK_REMIND.
+
+        Ditampilkan sebagai peringatan TERBENTANG hanya saat keduanya benar-benar
+        aktif -- itulah satu-satunya keadaan yang merugikan pasien, dan
+        melipatnya di situ menukar halaman yang lebih pendek dengan pasien yang
+        menerima dua pesan tanpa seorang pun tahu kenapa. Di luar itu ia tetap
+        ada tapi dilipat, supaya alasannya bisa dibaca SEBELUM sakelarnya
+        dinyalakan alih-alih sesudah keluhan masuk.
+      */}
+      {(() => {
+        const aktif = (kode: string) => templates.some((t) => t.triggerCode === kode && t.isActive);
+        const bentrok = aktif('KONTROL_ULANG') && aktif('BOOK_REMIND');
+        return (
+          <Callout
+            variant={bentrok ? 'warning' : 'neutral'}
+            className="mb-3"
+            collapsible={!bentrok}
+            title={
+              bentrok
+                ? 'Pengingat kontrol (non-BPJS) dan Pengingat H-1 sama-sama aktif — sebagian pasien menerima DUA pesan'
+                : 'Kalau menyalakan “Pengingat kontrol (non-BPJS)”, periksa dulu “Pengingat H-1”'
+            }
+          >
+            <p>
+              Khanza punya setelan <span className="font-mono">JADIKANBOOKINGSURATKONTROL</span>. Bila menyala, setiap surat
+              kontrol yang disimpan <span className="font-medium">juga membuat satu booking</span> untuk pasien dan tanggal yang
+              sama — sehingga Pengingat H-1 sudah mengingatkan pasien itu, dan Pengingat kontrol akan mengirim pesan kedua untuk
+              kunjungan yang sama.
+            </p>
+            <p className="mt-1">
+              Di server ini setelan tersebut <span className="font-medium">menyala</span>, dan dari data yang ada{' '}
+              <span className="font-medium">seluruh surat kontrol punya bookingnya</span>. Jadi pilih salah satu: Pengingat H-1
+              (berlaku untuk semua booking) atau Pengingat kontrol (kalimatnya menyebut nomor suratnya). Menyalakan keduanya
+              hanya benar bila setelan Khanza itu dimatikan.
+            </p>
+            <p className="mt-1">
+              Catatan variabel: <span className="font-mono">{'{nama_poli}'}</span> pada Pengingat kontrol hanya terisi bila
+              setelan Khanza itu menyala — poli tidak disimpan di tabel suratnya. Karena di server ini menyala, variabel itu aman
+              ditambahkan; di server lain ia bisa tampil kosong.
+            </p>
+          </Callout>
+        );
+      })()}
       <TriggerTemplateTable
         readOnly={readOnly}
         waSiap={sesi?.status === 'ready'}

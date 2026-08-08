@@ -89,6 +89,28 @@ export function sasaranKontrol(hariSebelum: number[], hariIni: Date): SasaranKon
 }
 
 /**
+ * Tahun-tahun yang tersentuh sekumpulan tanggal sasaran, tanpa duplikat.
+ *
+ * Dipakai KONTROL_ULANG (migrations/032), yang memangkas `skdp_bpjs` lewat
+ * kolom `tahun` -- kolom pertama PRIMARY KEY-nya. Tinggal di sini, bukan di
+ * `khanza/kontrolUlang.ts`, karena ia matematika tanggal murni dan karena
+ * modul `khanza/` menarik koneksi database sehingga tidak bisa diuji unit.
+ *
+ * LARIK, bukan satu nilai, dan itu bukan kelebihan-rekayasa: setelan "7,1"
+ * pada 28 Desember menghasilkan tanggal sasaran di DUA tahun berbeda, dan satu
+ * tahun saja akan membuang yang seberang tanpa satu pun galat -- pengingat yang
+ * hilang tepat di pergantian tahun, saat paling sedikit orang memeriksanya.
+ */
+export function tahunDariTanggal(tanggalTarget: readonly string[]): number[] {
+  const tahun = new Set<number>();
+  for (const t of tanggalTarget) {
+    const y = Number(t.slice(0, 4));
+    if (Number.isFinite(y) && y > 0) tahun.add(y);
+  }
+  return [...tahun].sort((a, b) => a - b);
+}
+
+/**
  * Kalimat yang dibaca pasien untuk `{sisa_hari}`.
  *
  * "0 hari lagi" adalah bentuk yang benar secara aritmetika dan salah secara

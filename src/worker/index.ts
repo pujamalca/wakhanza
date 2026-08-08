@@ -11,6 +11,7 @@ import { runBookingCycle } from './pollerBooking';
 import { runFarmasiCycles } from './farmasiRunner';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
 import { runBpjsBatalCycles, runBpjsKontrolIfDue } from './bpjsRunner';
+import { runKontrolUlangIfDue } from './kontrolUlangRunner';
 import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
@@ -313,6 +314,17 @@ async function main(): Promise<void> {
   // jadi mengubahnya di dashboard berlaku hari itu juga alih-alih menunggu
   // worker dimulai ulang oleh orang yang tidak tahu ia perlu melakukannya.
   void loop('bpjs-kontrol', runBpjsKontrolIfDue, scanIntervalMs);
+  /**
+   * Pengingat surat kontrol NON-BPJS -- padanan siklus tepat di atasnya, dan
+   * SIKLUS TERSENDIRI alih-alih menumpang di sana.
+   *
+   * Keduanya membaca tabel yang berbeda dan punya sakelar yang berbeda
+   * (`bpjs.kontrol_enabled` versus `template.is_active`), jadi satu siklus
+   * gabungan yang gagal pada paruh pertamanya akan menghentikan paruh yang
+   * satunya -- kanal yang dimatikan rumah sakit bisa menjatuhkan kanal yang
+   * dinyalakannya. Alasan yang sama memisahkan siklus hibah dari pengadaan.
+   */
+  void loop('kontrol-ulang', runKontrolUlangIfDue, scanIntervalMs);
   /**
    * Surat sakit otomatis -- siklus PINDAI, dan di sini pilihan intervalnya
    * punya alasan yang tidak dipunyai keempat siklus di atas: satu surat berarti
