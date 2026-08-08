@@ -46,6 +46,41 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
    * kebalikannya.
    */
   declare terimaPengadaan: CreationOptional<boolean>;
+  /**
+   * Menerima nota HIBAH dari alamat ini (migrations/031).
+   *
+   * SENGAJA tanpa nomor urut. Penomorannya di tabel ini sudah terlanjur
+   * menyimpang (`terimaPengadaan` "KEEMPAT" langsung diikuti `terimaPemesanan`
+   * "KEENAM"), dan tiap kolom baru menambah satu tempat lagi yang bisa salah
+   * hitung tanpa ada yang menyadarinya. Yang mengikat adalah daftar
+   * pertanyaannya, bukan urutannya:
+   *
+   *   is_active            ke mana notifikasi resep dikirim
+   *   boleh_tanya          siapa yang boleh membuat nomor RS menjawab
+   *   terima_darurat_stok  siapa yang menerima rekap persediaan
+   *   terima_pengadaan     siapa yang menerima nota pembelian
+   *   terima_pemesanan     siapa yang menerima nota pesanan ke pemasok
+   *   terima_hibah         siapa yang menerima nota barang pemberian
+   *
+   * Terpisah dari `terimaPengadaan` karena batas kerahasiaannya
+   * berbeda, bukan demi keseragaman: harga beli pemasok punya nilai dagang dan
+   * wajar dibatasi ke bagian pengadaan, sementara nilai barang PEMBERIAN justru
+   * sering perlu dilihat lebih luas -- kepala instalasi, akuntansi, sampai
+   * bagian yang menyusun ucapan terima kasih ke pemberinya.
+   */
+  declare terimaHibah: CreationOptional<boolean>;
+  /**
+   * Menerima nota SURAT PEMESANAN dari alamat ini (migrations/030).
+   *
+   * Kolom KEENAM. Terpisah dari `terimaPengadaan` walau keduanya memuat harga
+   * pemasok, dan pemisahannya soal WAKTU bukan kerahasiaan: nota pesanan berguna
+   * bagi yang perlu tahu sesuatu sedang DALAM PERJALANAN -- gudang yang
+   * menyiapkan tempat, bagian yang menagih pemasok yang terlambat -- sementara
+   * nota pembelian berguna bagi yang mencocokkan barang yang SUDAH datang.
+   * Menggabungkannya memaksa siapa pun yang ingin memantau pesanan ikut menerima
+   * setiap nota penerimaan.
+   */
+  declare terimaPemesanan: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -71,6 +106,18 @@ FarmasiTarget.init(
       allowNull: false,
       defaultValue: false,
       field: 'terima_pengadaan',
+    },
+    terimaHibah: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_hibah',
+    },
+    terimaPemesanan: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_pemesanan',
     },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },

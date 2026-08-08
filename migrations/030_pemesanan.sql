@@ -1,0 +1,242 @@
+-- 030_pemesanan.sql
+-- SURAT PEMESANAN OBAT & BHP -- nota PESANAN yang dikirim ke pemasok.
+--
+-- Sumbernya menu "Surat Pemesanan Obat & BHP" di Khanza
+-- (`src/inventory/InventorySuratPemesanan.java`, tombolnya dinamai
+-- `btnSuratPemesananMedis` di `frmUtama.java:5216`), yang menulis satu baris
+-- `surat_pemesanan_medis` berikut sekian baris `detail_surat_pemesanan_medis`.
+--
+-- Fitur farmasi KEENAM:
+--
+--   NOTIFIKASI FARMASI (016)  dipicu kejadian di `sik`  (resep divalidasi/diserahkan)
+--   BALASAN STOK       (019)  dipicu pesan MASUK        (ada yang bertanya)
+--   DARURAT STOK       (021)  dipicu WAKTU              (jadwal jatuh tempo)
+--   PENGADAAN          (028)  dipicu kejadian di `sik`  (pembelian disimpan)
+--   HIBAH              (029)  dipicu kejadian di `sik`  (penerimaan hibah disimpan)
+--   SURAT PEMESANAN    (ini)  dipicu kejadian di `sik`  (pesanan disimpan)
+--
+-- ---------------------------------------------------------------------------
+-- Ia PASANGAN pengadaan dari ujung yang lain, bukan salinannya
+-- ---------------------------------------------------------------------------
+-- Bentuknya paling gampang dipahami lewat pasangan yang sudah ada di proyek ini
+-- (`migrations/025`, LAB_REQUEST/RESULT_READY):
+--
+--   SURAT PEMESANAN   pesanan DIKIRIM ke pemasok    "barang ini sedang dipesan"
+--   PENGADAAN (028)   barang DITERIMA dari pemasok  "barang ini sudah datang"
+--
+-- Keduanya dua ujung dari satu alur pengadaan yang sama, dan Khanza sendiri yang
+-- menyambungnya: `DlgPembelian.java:1810-1826` MEMBACA `surat_pemesanan_medis`
+-- beserta rinciannya untuk mengisi layar pembelian. Jadi sebuah pesanan yang
+-- barangnya datang akan melahirkan baris `pembelian` tersendiri, dan PENGADAAN
+-- sudah memberitakannya.
+--
+-- Akibat langsungnya, dan ini keputusan desain yang paling gampang keliru:
+-- pemicu ini TIDAK memberitakan kedatangan barang. Ia berbunyi tepat sekali, saat
+-- pesanannya disimpan. Memberitakan kedatangan di sini berarti gudang menerima
+-- dua pesan untuk satu kejadian yang sama, dari dua fitur yang tidak saling tahu.
+--
+-- ---------------------------------------------------------------------------
+-- `status` BISA DIBALIK BOLAK-BALIK, dan itu yang menjauhkannya dari kunci
+-- ---------------------------------------------------------------------------
+-- `surat_pemesanan_medis.status` adalah enum('Proses Pesan','Sudah Datang'), dan
+-- ia satu-satunya kolom pemicu di proyek ini yang benar-benar BERUBAH sesudah
+-- barisnya tertulis. Menggoda untuk memasukkannya ke kunci idempoten seperti
+-- BOOK_CONFIRM/BOOK_CANCEL -- keduanya berbagi satu query dan dibedakan lewat
+-- status (CLAUDE.md, "Dua kelas pemicu").
+--
+-- Ditolak, dan sebabnya ada di sumber Khanza, bukan di selera:
+-- `DlgCariSuratPemesanan.java` menyediakan DUA butir menu klik-kanan yang
+-- membalik nilainya dengan tangan -- `ppDatang` (baris 1212) menyetel
+-- 'Sudah Datang', `ppProses` (baris 1230) menyetelnya KEMBALI ke 'Proses Pesan'.
+-- Arah maju punya penjaga ("Data pemesanan sudah tervalidasi..!!"); arah balik
+-- TIDAK PUNYA SAMA SEKALI. Jadi status di sini bukan penanda kejadian melainkan
+-- sakelar alur kerja yang boleh digeser sesering yang staf mau, dan kunci yang
+-- memuatnya berarti satu orang yang bolak-balik menekan dua butir menu itu bisa
+-- menghasilkan pesan tanpa batas ke grup gudang.
+--
+-- Statusnya TETAP dicetak di dalam pesan ({status}) -- ia keterangan yang berguna
+-- ("pesanan ini masih terbuka atau sudah ditutup"), cuma bukan pemicu.
+--
+-- ---------------------------------------------------------------------------
+-- TIGA hal yang BERBEDA dari 028/029, dan ketiganya gagal DIAM kalau disalin
+-- ---------------------------------------------------------------------------
+--   1. **Prefiks `no_pemesanan` memakai tahun DUA digit.** `SPM` + `YYMMDD` +
+--      urutan 3 digit (`SPM230610001` = 10 Juni 2023), sementara `PG` (028) dan
+--      `HO` (029) memakai `YYYYMMDD`. Terbukti di
+--      `InventorySuratPemesanan.java:1677`, yang merakitnya sebagai
+--      `substring(8,10) + substring(3,5) + substring(0,2)` atas kotak Tanggal
+--      berformat dd-MM-yyyy.
+--
+--      Menyalin pemangkas 028 apa adanya menghasilkan `SPM20260807000`, yang
+--      secara LEKSIKAL berada di atas seluruh nilai `SPM26...` -- jadi jendelanya
+--      mengembalikan nol baris selamanya, tanpa satu pun galat. Kelas kegagalan
+--      yang sama persis dengan prefiks `nobooking` pada pembatalan BPJS.
+--
+--   2. **`nip` menunjuk `pegawai.nik`, BUKAN `petugas.nip`.** Ditegakkan foreign
+--      key di tabelnya sendiri (`surat_pemesanan_medis_ibfk_2`), dan itu pula
+--      yang di-join `InventoryVerifikasiPenerimaan.java:718`. Pengadaan dan hibah
+--      keduanya memakai `petugas`, jadi menyeragamkannya terasa benar -- dan
+--      terukur salah: atas 40 baris di `sik-ridda-dev`, `pegawai` menyelesaikan
+--      40 dari 40 sementara `petugas` hanya 21 dari 40. Sisanya (mis. `010101`,
+--      `08998998`, `D0000003`) akan tampil sebagai nama petugas KOSONG pada 47%
+--      pesanan, tanpa satu pun galat.
+--
+--   3. **TIDAK ADA `kd_bangsal`.** Tabel ini tidak punya kolom gudang sama
+--      sekali, berbeda dari `pembelian` dan `hibah_obat_bhp` yang keduanya punya.
+--      Masuk akal: sebuah PESANAN belum menentukan ke gudang mana barangnya akan
+--      masuk -- itu baru diputuskan saat penerimaan. Karena itu tidak ada
+--      `{nama_gudang}` di daftar variabelnya, dan tidak ada yang bisa
+--      ditambahkan.
+--
+-- Satu perbedaan lagi yang tidak berbahaya tapi harus ikut: header punya
+-- `meterai` (bea meterai) yang tidak dipunyai `pembelian`, dan Khanza
+-- memasukkannya ke tagihan (`InventorySuratPemesanan.java:1205`:
+-- `tagihan = ttl + ppn + meterai`). Mencetak tagihan tanpa menyebut meterainya
+-- membuat angka penutupnya tidak bisa dicocokkan dengan penjumlahan di layar.
+--
+-- ---------------------------------------------------------------------------
+-- Kelas PINDAI, lewat sebab yang sama persis dengan 028 dan 029
+-- ---------------------------------------------------------------------------
+-- `surat_pemesanan_medis` punya sebelas kolom dan tidak satu pun stempel waktu --
+-- yang ada cuma `tanggal` bertipe DATE, dan tanggal itu DIPILIH staf. Watermark
+-- karena itu mustahil benar. Jendelanya berbagi penurunan dengan SURAT_SAKIT,
+-- PENGADAAN, dan HIBAH lewat `core/jendelaPindai.ts`.
+--
+-- Arah penyimpangan prefiks DIUKUR, dan hasilnya berbeda dari pengadaan: atas
+-- 109 baris di enam database (`sik`, `sik-dev`, `sik-dev-alca`, `sik-ridda-dev`,
+-- `alca-dev`, `sik05112026`), prefiks dan `tanggal` COCOK pada seluruhnya -- nol
+-- maju, nol mundur. Sebabnya terlihat di `Valid.autoNomer3`-nya: query urutannya
+-- sendiri menyaring `WHERE tanggal = <tanggal terpilih>`, jadi nomor dan tanggal
+-- lahir dari kotak yang sama pada saat yang sama. Jendelanya TETAP merentang ke
+-- dua arah: staf masih bisa menggeser kotak Tanggal SESUDAH nomornya dibuatkan,
+-- dan kalau itu terjadi ia menyimpang ke arah yang sudah dijaring.
+--
+-- TIDAK ADA SATU PUN DATA PASIEN pada pemicu ini, dan tidak bisa ada --
+-- `surat_pemesanan_medis`/`detail_surat_pemesanan_medis` tidak punya satu kolom
+-- pun yang menautkannya dengan seorang pasien.
+--
+-- ---------------------------------------------------------------------------
+-- YANG HARUS DIKETAHUI SEBELUM MENYALAKANNYA
+-- ---------------------------------------------------------------------------
+-- `surat_pemesanan_medis` di database produksi (`alca`) berisi TEPAT SATU baris,
+-- bertanggal 27-03-2024 dan masih berstatus 'Proses Pesan'. Query-nya karena itu
+-- SUDAH terbukti atas data sungguhan rumah sakit ini -- berbeda dari HIBAH (029),
+-- yang tabelnya benar-benar kosong dan hanya bisa dibuktikan lewat salinan uji.
+--
+-- Angka itu perlu dicatat cara memperolehnya, karena percobaan pertama salah:
+-- `information_schema.TABLES.TABLE_ROWS` melaporkan **0** untuk tabel ini. Nilai
+-- itu PERKIRAAN pada InnoDB, bukan hitungan -- dan pada tabel sekecil ini ia
+-- membulat ke nol. Yang menemukan kekeliruannya bukan pembacaan ulang melainkan
+-- pratinjau di dashboard, yang merender nota SPM240327001 sungguhan pada saat
+-- berkas ini masih menyatakan tabelnya kosong. Pakai `COUNT(*)`, jangan
+-- `TABLE_ROWS`.
+--
+-- Yang harus tetap diketahui: satu pesanan dalam lebih dari dua tahun berarti
+-- menu ini praktis tidak dipakai di sini. Ditambah lantai aktivasi yang diisi
+-- tanggal hari ini, menyalakan sakelarnya tidak akan mengirim apa pun sampai ada
+-- pesanan BARU disimpan. Bentuk pesannya juga diuji terhadap salinan berisi lebih
+-- banyak baris (`sik-dev-alca`: 14 pesanan / 43 rincian; `sik`: 10/1).
+--
+-- Satu bentuk data yang wajib diketahui: di arsip `sik`, SEMBILAN dari sepuluh
+-- header tidak punya satu baris rincian pun. Di keempat database yang sehat,
+-- nol dari 91 header yang begitu. Jadi ia bukan keadaan normal -- tapi ia nyata,
+-- dan runner-nya MELEWATI header semacam itu alih-alih mengirim nota tanpa
+-- barang (lihat `worker/pemesananRunner.ts`).
+
+-- ---------------------------------------------------------------------------
+-- farmasi_target.terima_pemesanan -- kolom KEENAM, dan sekali lagi TERPISAH
+-- ---------------------------------------------------------------------------
+-- Tabel ini kini menjawab ENAM pertanyaan berbeda tentang satu tujuan:
+--
+--   is_active            ke mana notifikasi resep dikirim
+--   boleh_tanya          siapa yang boleh membuat nomor RS menjawab
+--   terima_darurat_stok  siapa yang menerima peringatan persediaan
+--   terima_pengadaan     siapa yang menerima nota pembelian
+--   terima_hibah         siapa yang menerima nota penerimaan hibah
+--   terima_pemesanan     siapa yang menerima nota PESANAN ke pemasok
+--
+-- Terpisah dari `terima_pengadaan` walau keduanya memuat harga pemasok, dan
+-- alasannya bukan kerahasiaan melainkan WAKTU: nota pesanan berguna bagi orang
+-- yang perlu tahu sesuatu sedang DALAM PERJALANAN -- gudang yang menyiapkan
+-- tempat, bagian yang menagih pemasok yang terlambat -- sementara nota pembelian
+-- berguna bagi yang mencocokkan barang yang SUDAH datang. Sangat wajar sebuah
+-- grup hanya perlu salah satunya, dan menggabungkan keduanya memaksa siapa pun
+-- yang ingin memantau pesanan ikut menerima setiap nota penerimaan.
+--
+-- DEFAULT 0 -- tidak satu pun tujuan lama mulai menerima nota pesanan tanpa ada
+-- yang memutuskannya di dashboard.
+ALTER TABLE farmasi_target
+  ADD COLUMN terima_pemesanan TINYINT(1) NOT NULL DEFAULT 0 AFTER terima_hibah;
+
+-- ---------------------------------------------------------------------------
+-- Pengaturan
+-- ---------------------------------------------------------------------------
+INSERT INTO app_setting (k, v) VALUES
+
+-- Sakelar utama MATI secara bawaan, dan BERDIRI SENDIRI dari `farmasi.enabled`,
+-- `farmasi.pengadaan_enabled`, maupun `farmasi.hibah_enabled`. Keempatnya
+-- menjawab pertanyaan kebijakan yang berbeda.
+('farmasi.pemesanan_enabled', '0'),
+
+-- LANTAI aktivasi -- diisi tanggal hari ini tiap kali sakelarnya dinyalakan.
+--
+-- Tanpa ini, menyalakan sakelar berarti seluruh isi jendela langsung jadi pesan
+-- WhatsApp pada siklus berikutnya. Pelajaran yang sama dengan
+-- `farmasi.pengadaan_sejak` (028), `farmasi.hibah_sejak` (029), dan
+-- `administrasi.auto_sejak` (027).
+--
+-- Konsekuensi yang HARUS disadari, dan yang dikatakan halamannya di depan staf:
+-- pesanan bernomor sebelum hari aktivasi tidak pernah terkirim otomatis,
+-- selamanya.
+('farmasi.pemesanan_sejak', ''),
+
+-- Berapa hari ke belakang DAN ke depan yang dipindai ulang tiap siklus.
+--
+-- Dua arah, walau pengukuran atas 109 baris tidak menemukan satu pun
+-- penyimpangan antara prefiks dan `tanggal`. Yang menopangnya bukan pengukuran
+-- itu melainkan MEKANISMENYA: staf masih bisa menggeser kotak Tanggal sesudah
+-- nomornya dibuatkan, dan nol dari 109 membuktikan bahwa itu jarang -- bukan
+-- bahwa itu mustahil. Jendela satu arah akan membuang barisnya diam-diam.
+('farmasi.pemesanan_lookback_hari', '7'),
+
+-- Kuota per siklus. Kelebihannya dikirim siklus berikutnya, TIDAK dibuang.
+('farmasi.pemesanan_max_per_siklus', '5'),
+
+-- Apakah harga pesanannya ikut dicetak.
+--
+-- MENYALA secara bawaan, sama seperti `farmasi.pengadaan_harga` dan
+-- `farmasi.hibah_nilai`: yang diminta adalah surat pesanan, dan harga adalah
+-- bagian dari surat pesanan -- ia yang dicocokkan pemasok dengan penawarannya.
+-- Kunci ini ada untuk MEMATIKAN harga, bukan untuk menambah satu langkah lagi
+-- sebelum fiturnya berguna; yang menahan seluruhnya tetap
+-- `farmasi.pemesanan_enabled` yang mati.
+--
+-- Saat mati, kolom harga PER BARANG tidak di-SELECT sama sekali (lihat
+-- khanza/pemesanan.ts) -- merendernya jadi mustahil, bukan sekadar terlarang
+-- (§5.2).
+--
+-- Keempat angka HEADER tetap dibaca, persis seperti `{tagihan}` pada pengadaan
+-- dan kedua total pada hibah. Sebabnya sudah dibayar di 029: label angka penutup
+-- ditulis di template sebagai baris tersendiri, jadi memutusnya menyisakan
+-- "Tagihan :" tanpa angka -- baris menggantung yang terbaca sebagai sistem
+-- rusak. RS yang tidak ingin satu pun angka beredar menghapus {total},
+-- {potongan}, {ppn}, {meterai}, dan {tagihan} dari templatenya, satu tindakan
+-- yang terlihat di halaman yang sedang dibukanya.
+('farmasi.pemesanan_harga', '1'),
+
+-- Isi pesannya. `{daftar_barang}` dirakit core/pemesanan.ts (banyak baris, tiap
+-- nama barang dan satuan sudah lewat sanitizeValue) -- lihat MULTILINE_VARIABLES.
+--
+-- `{status}` ada di sini walau nyaris selalu berbunyi "Proses Pesan" pada saat
+-- pesan terkirim (Khanza menuliskannya mati saat menyimpan,
+-- `InventorySuratPemesanan.java:1205`). Ia tetap berarti: jendela pindai
+-- merentang beberapa hari ke belakang, jadi pesanan yang baru terjangkau pada
+-- hari aktivasi bisa saja sudah ditutup staf.
+--
+-- TIDAK ADA `{nama_gudang}` -- tabelnya tidak punya `kd_bangsal`, karena sebuah
+-- pesanan belum menentukan gudang tujuannya.
+--
+-- Tidak ada satu pun variabel pasien di sini, dan tidak ada yang tersedia untuk
+-- ditambahkan -- lihat PEMESANAN_TEMPLATE_VARIABLES di core/template.ts.
+('farmasi.template_pemesanan',
+ '*Surat Pemesanan Obat & BHP*\n{nama_rs}\n\nNo. Pemesanan : {no_pemesanan}\nTanggal : {tgl_pemesanan}\nPemasok : {nama_suplier}\nPetugas : {nama_petugas}\nStatus : {status}\n\n*Barang ({jumlah_item}):*\n{daftar_barang}\n\nSubtotal : {total}\nPotongan : {potongan}\nPPN : {ppn}\nMeterai : {meterai}\n*Tagihan : {tagihan}*');

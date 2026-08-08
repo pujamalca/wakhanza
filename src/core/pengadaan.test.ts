@@ -1,12 +1,15 @@
-import {
-  formatRupiah,
-  formatTanggalBeli,
-  formatDaftarBarang,
-  pecahDaftarBarang,
-  kelompokkanDetail,
-  BATAS_KARAKTER_PENGADAAN,
-  type BarisDetailPengadaan,
-} from './pengadaan';
+import { formatDaftarBarang, pecahDaftarBarang, kelompokkanDetail, type BarisDetailPengadaan } from './pengadaan';
+import { formatRupiah, formatTanggalDokumen, BATAS_KARAKTER_NOTA } from './notaBarang';
+
+/**
+ * Nama-nama lama dipertahankan sebagai alias LOKAL di berkas uji ini, dan itu
+ * disengaja: asersinya tidak berubah satu karakter pun ketika pembulatan rupiah
+ * dan penanda tanggal pindah ke `core/notaBarang.ts` untuk dipakai bersama
+ * hibah. Uji yang isinya ikut ditulis ulang bersama kodenya tidak membuktikan
+ * apa pun tentang perpindahannya.
+ */
+const formatTanggalBeli = formatTanggalDokumen;
+const BATAS_KARAKTER_PENGADAAN = BATAS_KARAKTER_NOTA;
 
 function item(nama: string, extra: Partial<BarisDetailPengadaan> = {}): BarisDetailPengadaan {
   return { no_faktur: 'PG20260807001', kode_brng: 'B000000001', nama_brng: nama, satuan: 'Botol', jumlah: 10, ...extra };

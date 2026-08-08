@@ -28,6 +28,8 @@ import {
 } from './actions';
 import { toggleTerimaDaruratAction } from './daruratActions';
 import { toggleTerimaPengadaanAction } from './pengadaanActions';
+import { toggleTerimaHibahAction } from './hibahActions';
+import { toggleTerimaPemesananAction } from './pemesananActions';
 
 export interface TargetRow {
   id: number;
@@ -40,6 +42,10 @@ export interface TargetRow {
   terimaDaruratStok: boolean;
   /** Menerima nota PENGADAAN, termasuk harga beli pemasok (migrations/028). */
   terimaPengadaan: boolean;
+  /** Menerima nota HIBAH -- barang pemberian, bukan pembelian (migrations/031). */
+  terimaHibah: boolean;
+  /** Menerima nota SURAT PEMESANAN -- barang yang DIPESAN, belum datang (migrations/030). */
+  terimaPemesanan: boolean;
 }
 
 export interface GrupRow {
@@ -139,18 +145,25 @@ export function TargetTable({
                   <td className={cellClass}>
                     <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
                   </td>
-                  {/* SATU kolom untuk ketiga centang, bukan satu kolom
+                  {/* SATU kolom untuk SELURUH centang, bukan satu kolom
                       masing-masing.
 
-                      Keempat kolom `farmasi_target` menjawab empat pertanyaan
+                      Tiap kolom `farmasi_target` menjawab pertanyaan yang
                       berbeda dan tetap terpisah DI DATABASE (lihat migrations
-                      020/021/028) -- yang digabung di sini cuma tempatnya di
-                      layar. Sebabnya terukur: satu kolom per centang membuat
-                      yang ketiga tersembunyi di bawah `xl` dan yang keempat
-                      praktis tidak pernah terlihat sama sekali, sehingga
-                      pilihan yang sengaja dipisah di database berakhir sebagai
-                      pilihan yang tidak bisa dijangkau siapa pun -- persis
-                      "pilihan yang hilang" yang jadi alasan pemisahannya. */}
+                      020/021/028/030/031) -- yang digabung di sini cuma
+                      tempatnya di layar. Sebabnya terukur: satu kolom per
+                      centang membuat yang ketiga tersembunyi di bawah `xl` dan
+                      yang keempat praktis tidak pernah terlihat sama sekali,
+                      sehingga pilihan yang sengaja dipisah di database berakhir
+                      sebagai pilihan yang tidak bisa dijangkau siapa pun --
+                      persis "pilihan yang hilang" yang jadi alasan
+                      pemisahannya.
+
+                      Bentuk ini pula yang membuat centang demi centang tidak
+                      menambah satu masalah tata letak pun: yang tumbuh adalah
+                      tinggi satu sel, bukan lebar tabelnya. Kalau suatu saat
+                      terlalu tinggi, yang benar adalah memindahkannya ke modal
+                      per baris -- bukan kembali ke satu kolom per centang. */}
                   <td className={`${cellClass} hidden md:table-cell`}>
                     <div className="flex flex-col gap-1">
                       <label className="flex cursor-pointer items-center gap-2" title="Boleh membuat nomor rumah sakit menjawab pertanyaan stok/harga">
@@ -181,6 +194,30 @@ export function TargetTable({
                           onChange={() => jalankan(() => toggleTerimaPengadaanAction(t.id, !t.terimaPengadaan))}
                         />
                         <span className="text-xs text-muted-foreground">Pengadaan</span>
+                      </label>
+                      <label
+                        className="flex cursor-pointer items-center gap-2"
+                        title="Menerima nota barang yang diterima sebagai hibah, berikut nilainya"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={t.terimaHibah}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleTerimaHibahAction(t.id, !t.terimaHibah))}
+                        />
+                        <span className="text-xs text-muted-foreground">Hibah</span>
+                      </label>
+                      <label
+                        className="flex cursor-pointer items-center gap-2"
+                        title="Menerima nota pesanan yang dikirim ke pemasok — barangnya belum datang"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={t.terimaPemesanan}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleTerimaPemesananAction(t.id, !t.terimaPemesanan))}
+                        />
+                        <span className="text-xs text-muted-foreground">Pemesanan</span>
                       </label>
                     </div>
                   </td>

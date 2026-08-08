@@ -7,12 +7,10 @@ import {
 import {
   pecahDaftarBarang,
   kelompokkanDetail,
-  formatRupiah,
-  formatTanggalBeli,
-  BATAS_KARAKTER_PENGADAAN,
   type BarisPengadaan,
   type BarisDetailPengadaan,
 } from '@/core/pengadaan';
+import { formatRupiah, formatTanggalDokumen, BATAS_KARAKTER_NOTA } from '@/core/notaBarang';
 import { hitungJendelaPindai } from '@/core/jendelaPindai';
 import { buildIdempotencyKey, turunkanKunciBagian } from '@/core/idempotency';
 import { formatTanggalPesan, formatJamPesan } from '@/core/tanggalPesan';
@@ -99,7 +97,7 @@ export function susunVarsPengadaan(
 ): Array<Partial<Record<TemplateVariable, string>>> {
   const dasar: Partial<Record<TemplateVariable, string>> = {
     no_faktur: header.no_faktur,
-    tgl_beli: formatTanggalBeli(header.tgl_beli),
+    tgl_beli: formatTanggalDokumen(header.tgl_beli),
     nama_suplier: header.nama_suplier ?? '',
     nama_petugas: header.nama_petugas ?? '',
     nama_gudang: header.nm_bangsal ?? '',
@@ -120,7 +118,7 @@ export function susunVarsPengadaan(
    * tanpa nomor faktur maupun nama pemasok. Dengan memecah daftarnya lebih dulu,
    * tiap bagian adalah nota utuh: kepalanya, potongan barangnya, dan totalnya.
    */
-  const potongan = pecahDaftarBarang(detail, BATAS_KARAKTER_PENGADAAN);
+  const potongan = pecahDaftarBarang(detail, BATAS_KARAKTER_NOTA);
   // Faktur tanpa satu baris detail pun tetap menghasilkan SATU pesan: itu
   // keadaan yang benar-benar terjadi bila staf menyimpan header lalu mengisi
   // barangnya belakangan, dan mendiamkannya berarti nota itu tidak pernah

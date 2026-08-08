@@ -15,6 +15,8 @@ import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
 import { runPengadaanCycle } from './pengadaanRunner';
+import { runHibahCycle } from './hibahRunner';
+import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
@@ -333,6 +335,37 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('pengadaan', runPengadaanCycle, scanIntervalMs);
+  /**
+   * HIBAH -- siklus terpisah dari pengadaan, bukan digabung ke dalamnya.
+   *
+   * Menggabungkannya menggoda (keduanya nota barang, keduanya kelas pindai,
+   * keduanya jalan pada interval yang sama), dan justru itu yang membuatnya
+   * salah: sakelarnya terpisah, jadi satu siklus gabungan yang gagal pada
+   * setengah pertamanya akan menghentikan setengah yang satunya -- fitur yang
+   * dimatikan RS bisa menjatuhkan fitur yang dinyalakannya. `loop()` menangkap
+   * galat per siklus, dan itu perlindungan yang hilang begitu dua fitur berbagi
+   * satu siklus.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('hibah', runHibahCycle, scanIntervalMs);
+  /**
+   * SURAT PEMESANAN -- siklus keenam di keluarga farmasi, dan sekali lagi
+   * TERPISAH, bukan digabung ke dalam siklus pengadaan.
+   *
+   * Menggabungkannya lebih menggoda di sini daripada pada hibah, karena keduanya
+   * membaca dua ujung dari alur pengadaan yang sama. Justru itu yang membuatnya
+   * salah: sakelarnya terpisah dan RS sangat mungkin menyalakan yang satu tanpa
+   * yang lain, sehingga satu siklus gabungan yang gagal pada setengah pertamanya
+   * akan menghentikan setengah yang satunya -- fitur yang dimatikan bisa
+   * menjatuhkan fitur yang dinyalakan. `loop()` menangkap galat per siklus, dan
+   * itu perlindungan yang hilang begitu dua fitur berbagi satu siklus.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('pemesanan', runPemesananCycle, scanIntervalMs);
   void dispatcherLoop();
   void loop(
     'heartbeat',

@@ -419,3 +419,337 @@ UPDATE farmasi_target SET terima_pengadaan = terima_pengadaan WHERE 1=0;
 **Pemeriksaan menyeluruh**: `npm test` **507 lolos / 29 suite**, `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses, `verify:plans` exit 0, `verify:db` lolos (`sik` tetap menolak tulisan, `audit_log` tetap append-only).
 
 **Kebersihan**: tujuan uji dihapus (`farmasi_target` kembali 1 baris, `terima_pengadaan=0`), akun `verifikasi.pengadaan` dihapus, server uji port 3199 dihentikan, dan **`farmasi.pengadaan_enabled` dikembalikan ke `0`** -- menyalakannya adalah keputusan rumah sakit, bukan efek samping verifikasi. `farmasi.pengadaan_sejak` sengaja DIBIARKAN terisi: mengosongkannya saat mematikan berarti menyalakan kembali akan membongkar arsip, dan itu justru urutan tindakan yang paling wajar dilakukan orang yang sedang mencoba-coba.
+
+## Kelas kedua belas: SURAT PEMESANAN (`/farmasi`, migrations/030) -- ujung yang lain dari pengadaan
+
+**Sumbernya dibaca, bukan ditebak.** `inventory/InventorySuratPemesanan.java` (tombolnya `btnSuratPemesananMedis`, `frmUtama.java:5216` = "Surat Pemesanan Obat & BHP") menulis `surat_pemesanan_medis` + `detail_surat_pemesanan_medis`. `DlgPembelian.java:1810-1826` MEMBACA kedua tabel itu untuk mengisi layar pembelian -- itulah yang membuktikan pemicu ini pasangan PENGADAAN dari ujung yang lain, bukan salinannya, dan karena itu ia tidak boleh ikut memberitakan kedatangan.
+
+**Prefiks tahun DUA digit, dibuktikan dari sumber Khanza dan dari data.** `InventorySuratPemesanan.java:1677` merakitnya sebagai `"SPM" + substring(8,10) + substring(3,5) + substring(0,2)` atas kotak `dd-MM-yyyy` -> `SPM` + `YYMMDD` + 3 digit. Cocok dengan data (`SPM230610001` = 2023-06-10). Menyalin bentuk `PG`/`HO` (`YYYYMMDD`) menghasilkan `SPM20260807000` yang leksikal DI ATAS seluruh `SPM26...` -> nol baris selamanya, tanpa galat.
+
+**Arah prefiks vs `tanggal` diukur atas 109 baris di enam database** (`sik` 10, `sik-dev` 19, `sik-dev-alca` 14, `sik-ridda-dev` 40, `alca-dev` 18, `sik05112026` 8): **0 maju, 0 mundur** -- cocok seluruhnya. Sebabnya terlihat di `Valid.autoNomer3`-nya, yang query urutannya sendiri menyaring `WHERE tanggal = <tanggal terpilih>`. Jendela tetap dua arah karena mekanismenya masih mengizinkan penyimpangan. Diulang lewat jalur produksi di `dryrun:pemesanan`: `sik-dev-alca` **14 cocok / 0 berbeda**, `sik` **10 cocok / 0 berbeda**.
+
+**`pegawai` vs `petugas` -- terukur, bukan dipilih.** Atas 40 baris `sik-ridda-dev`: `pegawai.nik` menyelesaikan **40/40**, `petugas.nip` **21/40**. Yang gagal termasuk `010101`, `08998998`, `D0000003`, `D0000004`. Terlihat langsung di keluaran dryrun -- `SRI WAHYUNI` (nip `08998998`) terender, dan ia salah satu yang `petugas` tidak bisa selesaikan. Sejalan dengan foreign key `surat_pemesanan_medis_ibfk_2` dan `InventoryVerifikasiPenerimaan.java:718`.
+
+**`status` mutable dan reversibel**, dibuktikan dari sumber: `DlgCariSuratPemesanan.java:1212` menyetel 'Sudah Datang' (berpenjaga), `:1230` menyetelnya KEMBALI ke 'Proses Pesan' (**tanpa penjaga**). Karena itu ia tidak masuk kunci idempoten. Sebaran nyata: 88 'Sudah Datang', 15 'Proses Pesan', 0 NULL.
+
+**Bentuk data yang menentukan dua keputusan:**
+
+- **Header tanpa rincian**: arsip `sik` **9 dari 10**; empat database sehat **0 dari 91**. Karena itu dilewati, bukan dikirim sebagai nota kosong -- dan dibuktikan menyala: `dryrun:pemesanan -- sik` mencetak `SPM231011002 | 0 barang` -> `(tanpa satu baris rincian pun -- worker MELEWATI pesanan seperti ini)`.
+- **`subtotal` vs `total`**: diskon baris terpakai pada **1 dari 122** baris `sik-ridda-dev`, dan pada baris itu pula keduanya berselisih. Yang dicetak `total`. Dipatok unit test tersendiri.
+- **`jumlah2`**: sama persis dengan `jumlah` pada seluruh 122 baris -> tidak diambil.
+- Rata 3,1 barang per pesanan, maksimal 8.
+
+**Nota terbukti bisa dicocokkan sendiri** (dryrun `sik-dev-alca`, SPM260629001): 1.110.000 + 369.300 + 440.000 = **1.919.300** = Subtotal; + PPN 211.123 + Meterai 0 = **2.130.423** = Tagihan.
+
+**Sakelar harga memutus KOLOMNYA, dibuktikan pada objek barisnya** -- bukan dengan membaca SQL. Menyala: `no_pemesanan, kode_brng, nama_brng, satuan, jumlah, h_pesan, total`. Mati: `no_pemesanan, kode_brng, nama_brng, satuan, jumlah` -- `h_pesan`/`total` **absen dari kunci**, sementara kelima angka header tetap terender.
+
+**Rencana query**: `FARMASI_PEMESANAN` `p range PRIMARY` / `s eq_ref PRIMARY` / `pg eq_ref nik_2`; `FARMASI_PEMESANAN_DETAIL` dan `_DETAIL_HARGA` keduanya `d ref no_pemesanan (Using index)`. **Tanpa izin pindai penuh**, dan dibuktikan di kedua ujung ukuran -- `alca` (1 baris) maupun `sik-ridda-dev` (40/122) sama-sama `range PRIMARY`, justru keadaan yang membuat `sks` dan `permintaan_lab` gagal.
+
+**Grant kolom baru TIDAK diperlukan**, dibuktikan empiris lewat `wakhanza_rw`: `UPDATE farmasi_target SET terima_pemesanan = terima_pemesanan WHERE 1=0` berhasil. Grant melekat pada TABEL, dan kolom bukan tabel.
+
+**`information_schema.TABLE_ROWS` berbohong, dan itu sempat masuk dokumentasi.** `TABLE_ROWS` melaporkan **0** untuk `alca.surat_pemesanan_medis`; `COUNT(*)` menjawab **1** (SPM240327001, 27-03-2024, 'Proses Pesan', 1 rincian, 0 header tanpa rincian, prefiks cocok). Migrasi, halaman `/farmasi`, dan skrip dryrun sempat menyatakan tabelnya KOSONG atas dasar angka perkiraan itu. **Yang menemukannya bukan pembacaan ulang melainkan pratinjau dashboard**, yang merender nota sungguhan pada saat dokumentasinya masih menyatakan sebaliknya -- lalu keempat tempat itu dikoreksi. Konsekuensi baiknya: query-nya kini terbukti atas data produksi, bukan cuma salinan uji.
+
+**Uji peramban: 21 dari 22 pemeriksaan lolos, dan yang ke-22 sengaja TIDAK diklaim lolos.** Yang lolos, terhadap build produksi lewat peramban sungguhan: tab muncul di bilah, callout "ujung yang lain dari Pengadaan" dan "tidak menyebut satu pun pasien" terender, sakelar default MATI, lantai aktivasi dikatakan sebelum ditekan, kelima variabel khas (`{no_pemesanan}` `{tgl_pemesanan}` `{status}` `{meterai}` `{tagihan}`) bisa disisipkan, `{nama_gudang}` dan variabel pasien TIDAK ditawarkan, pratinjau merender `Nota SPM240327001` berikut kelima angka penutup dan tanpa baris Gudang, centang keenam ada di tabel tujuan, keterangannya menyebut "Enam centang", dan tab lain tidak ikut merender isi tab ini.
+
+**Yang ke-22 adalah judul callout ketiga**, dan statusnya harus dinyatakan apa adanya: asersinya GAGAL pada putaran terakhir yang benar-benar dijalankan, karena server uji basi (jebakan 2 di bawah). Sesudah judulnya dikoreksi dan build diulang, putaran keempat **tidak pernah dijalankan** -- pekerjaannya beralih ke instance PM2 atas permintaan pemilik sistem, dan akun uji sudah dihapus. Yang membuktikan koreksinya sampai ke produksi karena itu bukan peramban melainkan artefak build: `grep -rl "hampir tidak pernah dipakai" .next/server` menemukan `chunks/ssr/src_app_(dashboard)_farmasi_147p68f._.js`, dan instance PM2 dijalankan ulang atas build itu. Kedua puluh satu asersi lain tidak tersentuh perubahan tersebut -- yang berubah cuma satu string judul -- tapi keduanya diuji atas build sebelum koreksi, dan itu perbedaan yang layak dicatat alih-alih dibulatkan jadi "22/22".
+
+**Tiga jebakan verifikasi, ketiganya kegagalan UJI bukan kegagalan produk:**
+
+1. **Menunggu penanda pending HILANG, bukan hasil MUNCUL.** `waitForFunction(() => !text.includes('Membaca...'))` terpenuhi SEKETIKA -- transisi React ke "Membaca..." belum terjadi saat penantian dimulai, jadi asersinya membaca form yang belum bergerak. Bentuk baru dari jebakan `waitForFunction` yang sudah tercatat. Diperbaiki dengan menunggu salah satu dari SELURUH keadaan akhir yang mungkin, termasuk yang galat -- supaya penantiannya tidak pernah menutupi kegagalan sungguhan dengan timeout.
+2. **`pkill -f "next start -p 3197"` TIDAK mematikan servernya** (npx melahirkan proses anak dengan baris perintah lain). Port tetap dipegang proses lama, seluruh uji berikutnya melawan build lama, dan 21 dari 22 asersi tetap hijau karena yang berubah cuma satu kalimat. Yang membocorkannya `Get-Process -Id 2112 | Select StartTime` (19:46, sebelum suntingan). Bentuk ketiga dari jebakan server basi yang sudah dua kali tercatat.
+3. **Uji dijalankan dari direktori scratchpad** -> `ERR_MODULE_NOT_FOUND: puppeteer`. Skrip peramban harus jalan dari direktori proyek (`.tmp-*.mjs`, gitignored).
+
+**Sejak sesi ini, verifikasi HTTP dijalankan lewat instance PM2, bukan port sendiri** -- atas permintaan pemilik sistem, karena instalasi ini berjalan di atas database produksi. Nasihat lama di CLAUDE.md yang berbunyi kebalikannya sudah dicabut, dan jebakan (2) di atas adalah biaya terakhir yang dibayarnya. Bukti untuk perubahan yang butuh login diambil dari `.next` hasil build (`grep -rl` atas penandanya menemukan `chunks/ssr/src_app_(dashboard)_farmasi_147p68f._.js`), bukan dengan membuat akun uji.
+
+**Pemeriksaan menyeluruh**: `npm test` **538 lolos / 31 suite** (+13 di `pemesanan.test.ts`), `tsc --noEmit` bersih, `eslint` bersih, `next build` sukses, `verify:plans` exit 0, `verify:db` lolos (`sik` tetap menolak tulisan, `audit_log` tetap append-only), `npm run migrate` menerapkan `030_pemesanan.sql`.
+
+**Kebersihan**: akun admin sementara `ujipemesanan` **dihapus** (`npm run users -- list` kembali 1 baris), berkas `.tmp-*.mjs` dihapus, tidak ada server uji tersisa (`netstat` bersih pada 3197/3199), `farmasi.pemesanan_harga` dikembalikan ke `1` setelah diuji dimatikan, dan **`farmasi.pemesanan_enabled` tetap `0`** -- menyalakannya keputusan rumah sakit, bukan efek samping verifikasi. Sesudah verifikasi: `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`, umur heartbeat **1 detik**, log startup tanpa galat).
+
+---
+
+## Kelas ketiga belas: HIBAH (`/farmasi`, migrations/031) -- barang masuk tanpa pemasok
+
+### Bentuk data dibaca dari sumber Khanza, bukan ditebak dari nama tabel
+
+`src/inventory/InventoryHibahObatBHP.java` -- yang menentukan seluruh keputusannya:
+
+```
+:1386  Valid.autoNomer3(... , "HO"+TglBeli...substring(6,10)+substring(3,5)+substring(0,2), 3, NoFaktur)
+       -> prefiks HO + YYYYMMDD, dirakit dari kotak Tanggal yang DIPILIH staf
+       -> mekanisme identik dengan no_faktur pengadaan, sampai ke nama variabelnya (TglBeli)
+
+:798   menyimpantf2("hibah_obat_bhp", 7 kolom)
+       no_hibah, kode_pemberi, nip, tgl_hibah, totalhibah(ttl), totalnilai(ttl2), kd_bangsal
+
+:64-65 nama kolom di layar Khanza:
+       "Nilai Hibah(Rp)"  "Subttl Hibah(Rp)"  "Nilai Diakui(Rp)"  "Subttl Diakui(Rp)"
+:547   "Total Nilai Hibah :"
+:561   "Total Pengakuan Nilai Persediaan Hibah :"
+
+:838-846  jurnal hanya bila ttl2 > 0:
+          PERSEDIAAN HIBAH OBAT & BHP  <-> PENDAPATAN HIBAH
+          -> totalnilai (dari h_diakui) yang masuk buku, BUKAN totalhibah
+          -> itulah alasan nilai DIAKUI jadi angka utama tiap baris
+
+:824   cabang non-batch: Trackobat.catatRiwayat(..., "Hibah", ..., "", "", ...)
+       -> no_faktur diteruskan KOSONG, persis DlgPembelian.java:998
+```
+
+Skema, dan ketiadaan stempel waktu yang memaksa kelas PINDAI:
+
+```
+$ mysql -u root alca -e "SHOW CREATE TABLE hibah_obat_bhp\G"
+  no_hibah      varchar(20) NOT NULL,      PRIMARY KEY (no_hibah)
+  kode_pemberi  char(5) DEFAULT NULL,      -> NULLABLE (kd_bangsal NOT NULL)
+  nip           varchar(20) DEFAULT NULL,
+  tgl_hibah     date DEFAULT NULL,         -> DATE, dipilih staf; tidak ada kolom jam
+  totalhibah    double NOT NULL,
+  totalnilai    double NOT NULL,
+  kd_bangsal    char(5) NOT NULL
+```
+
+### Tabelnya KOSONG di produksi -- diukur dengan COUNT(*), bukan TABLE_ROWS
+
+Pelajaran 030 diterapkan sejak awal:
+
+```
+$ mysql -u root -N -e "SELECT table_schema, table_rows FROM information_schema.tables
+                       WHERE table_name='hibah_obat_bhp';"
+alca 0 . alca-dev 0 . ridda-dev 0 . sik 0 . sik05112026 0 . sik12062026 0
+sik-dev 0 . sik-dev-alca 3 . sik-ridda-dev 3
+
+$ mysql -u root alca -e "SELECT COUNT(*) FROM hibah_obat_bhp"     -> 0   (dikonfirmasi)
+$ mysql -u root sik  -e "SELECT COUNT(*) FROM hibah_obat_bhp"     -> 0   (dikonfirmasi)
+$ mysql -u root "sik-dev-alca"   -e "SELECT COUNT(*) ..."         -> 3
+$ mysql -u root "sik-ridda-dev"  -e "SELECT COUNT(*) ..."         -> 3   (14 baris rincian total)
+```
+
+**Batas yang harus disebut apa adanya**: RAD_REQUEST-nya fitur ini. Query-nya terbukti atas
+data sungguhan dari instalasi Khanza LAIN, tapi belum pernah berjalan atas satu baris pun
+milik RS ini.
+
+### Prefiks: diukur, dan pengukurannya diakui TIDAK cukup
+
+```
+$ mysql: DATEDIFF(prefix(no_hibah), tgl_hibah) atas seluruh 6 baris kedua database uji
+HO20260604001 0 . HO20260625001 0 . HO20260702001 0
+HO20250630001 0 . HO20250719001 0 . HO20251110001 0
+```
+
+Enam baris, semuanya nol. Berbeda dari pengadaan (910 baris: 9 maju / **0 mundur**), ini tidak
+membuktikan arah penyimpangannya. Yang menopang keputusannya adalah kesamaan mekanismenya di
+sumber Khanza; jendelanya tetap dua arah supaya penyimpangan yang mungkin sudah terjaring.
+
+`riwayat_barang_medis` ditolak, dan di sini bahkan tidak punya barisnya:
+
+```
+$ mysql -u root alca -e "SELECT posisi, COUNT(*) n, SUM(no_faktur='') kosong
+                         FROM riwayat_barang_medis GROUP BY posisi ORDER BY n DESC;"
+Pemberian Obat 58683/58683 . Penjualan 29763/29763 . Opname 20261/20261
+Pengadaan 5374/5374 . Retur Beli 30/30          <- TIDAK ADA posisi 'Hibah' sama sekali
+```
+
+### EXPLAIN: `range PRIMARY` bahkan pada tabel KOSONG
+
+Justru inilah yang membedakannya dari `sks` dan `permintaan_lab`, yang perlu izin pindai penuh
+sementara karena kolom pemangkasnya bukan PK. Query yang SAMA, dua database:
+
+```
+alca (0 baris)          h range PRIMARY rows~1 . pm/pt/g eq_ref PRIMARY rows~1
+sik-dev-alca (3 baris)  h range PRIMARY rows~3 . pm/pt/g eq_ref PRIMARY rows~1
+```
+
+`npm run verify:plans` (exit 0), keempat pemeriksaan baru tanpa satu pun izin pindai penuh:
+
+```
+[ok] FARMASI_HIBAH        h range PRIMARY  rows~1
+[ok] FARMASI_HIBAH        pm eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH        pt eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH        g  eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL d ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL br eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL sat eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL_NILAI d ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL_NILAI br eq_ref PRIMARY  rows~1
+[ok] FARMASI_HIBAH_DETAIL_NILAI sat eq_ref PRIMARY  rows~1
+```
+
+### Sakelar nilai: §5.2 dibuktikan pada Object.keys(), bukan dengan membaca SQL
+
+```
+$ npm run dryrun:hibah -- sik-dev-alca            # farmasi.hibah_nilai = 1
+kolom header  : no_hibah, tgl_hibah, nama_pemberi, nama_petugas, nm_bangsal, totalhibah, totalnilai
+kolom rincian : no_hibah, kode_brng, nama_brng, satuan, jumlah, h_hibah, h_diakui, subtotaldiakui
+
+$ (farmasi.hibah_nilai = 0)
+Nilai PER BARANG ikut dibaca: TIDAK  -- kedua total header selalu dibaca
+  | . Cervarix Vaksin - 20 Box/Dus/Kotak
+  | . Engerix B 0,5 ml Vaksin Bayi - 20 Ampul
+  | Total nilai hibah : Rp40
+  | *Nilai diakui : Rp40*
+kolom header  : no_hibah, tgl_hibah, nama_pemberi, nama_petugas, nm_bangsal, totalhibah, totalnilai
+kolom rincian : no_hibah, kode_brng, nama_brng, satuan, jumlah      <- h_* LENYAP
+```
+
+**Cacat yang ditemukan lewat keluaran ini, bukan lewat pembacaan ulang.** Versi pertama memutus
+kedua total header juga, dan hasilnya:
+
+```
+  | Total nilai hibah :
+  | *Nilai diakui : *
+```
+
+Dua baris label menggantung. Diperbaiki dengan mempersempit arti sakelarnya ke nilai PER BARANG
+(padanan `{tagihan}` pada pengadaan), bukan dengan menyuruh staf ikut menyunting templatenya.
+
+### Kiriman WhatsApp SUNGGUHAN
+
+Keadaan saat verifikasi: pemilik sistem sudah menyalakan `farmasi.hibah_enabled` sendiri dari
+dashboard (`audit_log` id 454, `puja`, 2026-08-07 20:00:10 WIB) dan mencentang `terima_hibah`
+pada grup apotek SUNGGUHAN (id 452, 19:59:45). Karena itu siklusnya **tidak** dipakai untuk uji
+kirim: skrip ujinya memanggil rantai fungsi produksi yang sama persis
+(`pollHibahJendela` -> `ambilDetailHibah` -> `susunVarsHibah` -> `enqueueMessage`) dengan tujuan
+dan jendela diserahkan langsung -- **nol tulisan ke `app_setting`, nol tulisan ke
+`farmasi_target`**, dan data uji tidak pernah menyentuh grup apotek.
+
+```
+database Khanza : sik-dev-alca
+tujuan uji      : 6282283082916@c.us  (grup apotek sungguhan TIDAK disentuh)
+baris hibah terbaca: 3
+memakai HO20260702001 (2 barang, 1 pesan)
+baris outbox FARMASI_HIBAH: 0 -> 1
+sesudah pengulangan : 1 (idempoten OK)
+
+id: 31273  status: sent  chat_id: 6282283082916@c.us  attempts: 1  last_error: NULL
+dibuat_wib: 2026-08-08 08:18:22   terkirim_wib: 2026-08-08 08:18:27
+```
+
+Isi pesan yang benar-benar terkirim (dibaca lewat Sequelize, bukan CLI `mysql`):
+
+```
+*Penerimaan Hibah Obat & BHP*
+RS SIMRS KHANZA
+
+No. Hibah : HO20260702001
+Tanggal : 02-07-2026
+Asal hibah : DINKES PROPINSI
+Gudang : Apotek
+Petugas : (nama petugas, disamarkan di berkas ini)
+
+*Barang (2):*
+. Amoxsan 500 mg - 1.000 Kapsul @ Rp4.029 = Rp4.029.000
+. Amoxsan 500 mg - 1.000 Kapsul @ Rp6.839 = Rp6.839.000
+
+Total nilai hibah : Rp10.868.000
+*Nilai diakui : Rp10.868.000*
+
+Kode Pengiriman : 2026-08-08 08:18:22 7C02Q5
+```
+
+(Butir aslinya memakai U+2022 dan U+2014; diganti di kutipan ini supaya berkas dokumentasi
+tetap ASCII.) Baris kode pengiriman itu yang membuktikan ia lewat `enqueueMessage()` yang sama,
+bukan jalur pintas. `nama_rs` berbunyi "RS SIMRS KHANZA" karena `getHospitalIdentity()` membaca
+`setting` dari database uji yang sedang ditunjuk -- benar, bukan cacat.
+
+### Jalur produksi apa adanya: nol baris, nol pesan
+
+```
+$ npx tsx <skrip> ; runHibahCycle() terhadap alca, pengaturan pemilik sistem tidak disentuh
+database Khanza: alca
+outbox FARMASI_HIBAH: 1 -> 1  (nol pesan baru, benar)
+```
+
+Sakelar menyala, tujuan tercentang, nol baris terbaca, nol pesan keluar -- persis yang akan
+dilakukan worker.
+
+### Siklusnya benar-benar terdaftar di worker yang berjalan
+
+Jalur kosong sengaja SENYAP (`if (header.length === 0) return;`), jadi tidak ada baris log yang
+bisa membuktikannya. Dibuktikan lewat satu-satunya keadaan yang memang berisik -- `terima_hibah`
+dimatikan sebentar (aman: tabel sumbernya kosong, tidak ada pesan yang bisa terlewat), lalu
+dikembalikan:
+
+```
+{"level":40,"time":1786152280377,"pid":8980,"hostname":"PMA",
+ "msg":"hibah menyala tapi belum ada tujuan yang mencentang \"terima hibah\""}
+```
+
+`pid 8980` = worker BARU (sebelumnya 9664), jadi ia menjalankan kode yang baru ditulis.
+Sesudahnya `terima_hibah` dikembalikan ke `1` dan seluruh barisnya diperiksa ulang:
+
+```
+id 15 . Apotek Alca . is_active 1 . boleh_tanya 1 . terima_darurat_stok 1
+        terima_pengadaan 1 . terima_pemesanan 1 . terima_hibah 1
+farmasi.hibah_enabled 1 . hibah_lookback_hari 7 . hibah_max_per_siklus 5
+farmasi.hibah_nilai 1 . hibah_sejak 2026-08-07
+```
+
+### Verifikasi HTTP -- lewat instance PM2 (port 3100), 34 pemeriksaan
+
+Pagar anti-build-lama lebih dulu (`exit 2` bila penanda fitur baru tidak ada), lalu:
+
+```
+[ok] login berhasil -- HTTP 302
+[ok] tab Hibah HTTP 200
+[ok] menyebut menu Khanza asalnya
+     (keadaan sakelar saat diuji: MENYALA)
+[ok] saat menyala, menyebut sejak kapan berlakunya
+[ok] saat menyala, menjelaskan pemicunya
+[ok] menyebut ketiadaan data pasien
+[ok] sakelar nilai ada
+[ok] menjelaskan bahwa kedua TOTAL tetap ikut saat nilai dimatikan
+[ok] isian jendela pindai ada          [ok] isian kuota ada
+[ok] editor isi pesan ada              [ok] pratinjau menyebut memakai nilai tersimpan
+[ok] memperingatkan tabel hibah masih kosong di RS ini
+[ok] tidak menawarkan {nama_pasien}    [ok] tidak menawarkan {no_rm}
+[ok] menawarkan {daftar_barang}        [ok] menawarkan {total_diakui}
+     (tujuan hibah tercentang: ADA)
+[ok] peringatan tujuan sesuai keadaan sebenarnya
+[ok] tab Tujuan HTTP 200               [ok] kolom gabungan "Boleh / menerima"
+[ok] centang Hibah tampil di baris     [ok] centang Pengadaan masih ada
+[ok] centang Pemesanan masih ada       [ok] centang Darurat stok masih ada
+[ok] keterangan menyebut enam centang
+[ok] tab resep/stok/darurat/pengadaan/pemesanan masih HTTP 200 (5x)
+[ok] tab tsb tidak ikut memuat form hibah (5x)   <- pemisahan per-URL masih bekerja
+SEMUA LOLOS
+```
+
+**Jebakan verifikasi, dan kali ini bukan salah kode maupun salah uji.** Tiga asersi pertama
+gagal karena ditulis dengan anggapan sakelarnya MATI (keadaan bawaan migrasinya) -- padahal
+pemilik sistem menyalakannya sendiri dari dashboard di tengah pekerjaan ini. `audit_log` yang
+menjawabnya dalam satu query, bukan penelusuran kode. Ujinya diubah jadi **membaca keadaan yang
+sedang berlaku lalu memeriksa keterangan yang sesuai untuk keadaan itu** -- uji yang memaksakan
+keadaan bawaan pada sistem yang sedang dipakai orang akan terus melaporkan "gagal" atas halaman
+yang berperilaku benar.
+
+### Refaktor bersama: dibuktikan nol-perubahan-perilaku
+
+`core/notaBarang.ts` mengangkat `formatRupiah` / `formatJumlah` / `keAngka` /
+`formatTanggalDokumen` / `kelompokkanPerNomor` / `pecahBarisBarang` / `BATAS_KARAKTER_NOTA` dari
+`core/pengadaan.ts`. Ke-20 uji pengadaan yang ada lolos **tanpa satu asersi pun berubah** (hanya
+nama impornya, dengan alias lokal supaya isinya tetap identik):
+
+```
+$ npx jest core/pengadaan              ->  20 passed, 20 total
+$ npx jest core/hibah core/pengadaan   ->  38 passed
+```
+
+### Pemeriksaan menyeluruh
+
+`npm test` **538 lolos / 31 suite** (+18 di `hibah.test.ts`), `tsc --noEmit` bersih, `eslint`
+bersih, `next build` sukses, `verify:plans` exit 0, `verify:db` lolos (`sik` tetap menolak
+tulisan, `audit_log` tetap append-only), `npm run migrate` menerapkan `031_hibah.sql`.
+
+**Nomor migrasi**: pertama ditulis `029_hibah.sql`, diganti jadi `031_hibah.sql` begitu ketahuan
+`030_pemesanan.sql` sudah terlanjur diterapkan lebih dulu. Baris `schema_migrations` ikut
+diganti nama; `npm run migrate` sesudahnya menjawab "sudah mutakhir, tidak ada yang dijalankan".
+
+### Kebersihan
+
+Akun admin sementara `verifikasi.hibah` **dihapus**; grant `SELECT` sementara untuk
+`wakhanza_ro` pada `sik-dev-alca` **dicabut** (`SHOW GRANTS` kembali ke `sik` + `alca` saja);
+berkas sementara di luar scratchpad dihapus. **Pengaturan hibah milik pemilik sistem tidak
+diubah sama sekali** -- `farmasi.hibah_enabled` tetap `1` dan `terima_hibah` tetap `1`
+sebagaimana mereka setel sendiri, dan `farmasi.hibah_nilai` dikembalikan ke `1` setelah diuji
+dimatikan. `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`,
+umur heartbeat 27 detik).

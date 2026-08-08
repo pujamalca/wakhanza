@@ -210,6 +210,123 @@ export const PENGADAAN_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * HIBAH OBAT & BHP (`/farmasi`) -- barang medis yang DITERIMA sebagai pemberian.
+ *
+ * Kembaran PENGADAAN_TEMPLATE_VARIABLES, dan pagarnya sama persis: tidak ada
+ * `{nama_pasien}`, `{no_rm}`, `{no_resep}`, maupun `{nama_poli}`, karena
+ * `hibah_obat_bhp`/`detailhibah_obat_bhp` tidak punya satu kolom pun yang
+ * menautkan penerimaan barang dengan seorang pasien.
+ *
+ * DUA angka penutup, bukan empat, dan itu langsung dari bentuk tabelnya: sebuah
+ * hibah tidak punya potongan, PPN, maupun tagihan -- tidak ada yang dibayar.
+ * Yang ada sebagai gantinya adalah dua penilaian atas barang yang sama:
+ *
+ *   {total_hibah}    "Total Nilai Hibah"                        -- disebut pemberi
+ *   {total_diakui}   "Total Pengakuan Nilai Persediaan Hibah"   -- diakui RS, dan
+ *                                                                 inilah yang
+ *                                                                 dijurnal Khanza
+ *
+ * Keduanya HEADER dan SELALU dibaca, persis seperti `{tagihan}` pada pengadaan.
+ * Nilai PER BARANG hanya muncul di dalam `{daftar_barang}`, dan hanya bila
+ * `farmasi.hibah_nilai` menyala -- saat mati, kolomnya tidak di-SELECT sama
+ * sekali sehingga merendernya mustahil, bukan sekadar terlarang (§5.2).
+ *
+ * Kenapa sakelarnya TIDAK ikut memutus kedua total: label keduanya ditulis di
+ * template sebagai baris tersendiri, jadi memutusnya menyisakan "Total nilai
+ * hibah :" tanpa angka -- baris menggantung yang terbaca sebagai sistem rusak.
+ * RS yang tidak ingin satu pun angka beredar menghapus kedua variabel ini dari
+ * templatenya, satu tindakan yang terlihat. Uraian lengkapnya di
+ * `khanza/hibah.ts`.
+ *
+ * `{daftar_barang}` dipakai bersama pengadaan dan berbentuk banyak baris, karena
+ * itu masuk MULTILINE_VARIABLES di bawah -- aman HANYA karena `core/hibah.ts`
+ * memanggil sanitizeValue() sendiri untuk tiap nama barang dan satuan, persis
+ * seperti `core/pengadaan.ts`.
+ */
+export const HIBAH_TEMPLATE_VARIABLES = [
+  'no_hibah',
+  'tgl_hibah',
+  'nama_pemberi',
+  'nama_petugas',
+  'nama_gudang',
+  'daftar_barang',
+  'jumlah_item',
+  'total_hibah',
+  'total_diakui',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
+ * SURAT PEMESANAN OBAT & BHP (`/farmasi`) -- pesanan yang DIKIRIM ke pemasok.
+ *
+ * Pasangan PENGADAAN_TEMPLATE_VARIABLES dari ujung yang lain: yang satu
+ * memberitakan barang DIPESAN, yang satu barang DITERIMA. Pagarnya sama persis:
+ * tidak ada `{nama_pasien}`, `{no_rm}`, `{no_resep}`, maupun `{nama_poli}`,
+ * karena `surat_pemesanan_medis`/`detail_surat_pemesanan_medis` tidak punya satu
+ * kolom pun yang menautkan sebuah pesanan dengan seorang pasien.
+ *
+ * TIGA hal yang berbeda dari daftar pengadaan, dan ketiganya berasal dari bentuk
+ * tabelnya -- bukan dari selera:
+ *
+ *   1. **TIDAK ADA `{nama_gudang}`.** `surat_pemesanan_medis` tidak punya
+ *      `kd_bangsal` sama sekali, karena sebuah pesanan belum menentukan gudang
+ *      mana yang akan menerimanya -- itu baru diputuskan saat penerimaan. Jadi
+ *      variabelnya bukan sekadar tidak dicantumkan: tidak ada kolom yang bisa
+ *      mengisinya.
+ *
+ *   2. **ADA `{meterai}`.** Bea meterai tidak dipunyai `pembelian`, dan Khanza
+ *      memasukkannya ke tagihan (`InventorySuratPemesanan.java:1205`:
+ *      `tagihan = ttl + ppn + meterai`). Mencetak tagihan tanpa menyebutnya
+ *      membuat angka penutupnya tidak bisa dicocokkan dengan penjumlahan di
+ *      layar Khanza.
+ *
+ *   3. **ADA `{status}`.** enum('Proses Pesan','Sudah Datang'), satu-satunya
+ *      kolom pemicu di proyek ini yang berubah sesudah barisnya tertulis. Ia
+ *      dicetak sebagai KETERANGAN dan tidak pernah masuk kunci idempoten --
+ *      staf membalikkannya lewat klik kanan, dan arah baliknya tanpa penjaga
+ *      sama sekali. Uraiannya di `worker/pemesananRunner.ts`.
+ *
+ * `{tgl_pemesanan}`, bukan `{tanggal}`: kolomnya memang bernama `tanggal` di
+ * Khanza, tapi nama itu sudah dipakai SELURUH pemicu untuk waktu pesannya
+ * dikirim. Padanan `{tgl_beli}` pada pengadaan dan `{tgl_hibah}` pada hibah.
+ *
+ * Kelima angka penutup SELALU dibaca; `farmasi.pemesanan_harga` hanya memutus
+ * harga PER BARANG di dalam `{daftar_barang}` -- saat mati, kolomnya tidak
+ * di-SELECT sama sekali sehingga merendernya mustahil, bukan sekadar terlarang
+ * (§5.2). Sebabnya sudah dibayar di hibah: label angka penutup ditulis di
+ * template sebagai baris tersendiri, jadi memutusnya menyisakan baris
+ * menggantung yang terbaca sebagai sistem rusak.
+ *
+ * `{daftar_barang}` dipakai bersama pengadaan dan hibah dan berbentuk banyak
+ * baris, karena itu masuk MULTILINE_VARIABLES di bawah -- aman HANYA karena
+ * `core/pemesanan.ts` memanggil sanitizeValue() sendiri untuk tiap nama barang
+ * dan satuan.
+ */
+export const PEMESANAN_TEMPLATE_VARIABLES = [
+  'no_pemesanan',
+  'tgl_pemesanan',
+  'nama_suplier',
+  'nama_petugas',
+  'status',
+  'daftar_barang',
+  'jumlah_item',
+  'total',
+  'potongan',
+  'ppn',
+  'meterai',
+  'tagihan',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
  * daftarnya lebih dekat ke FARMASI_TEMPLATE_VARIABLES daripada ke daftar
  * pemicu pasien.
@@ -281,6 +398,8 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...STOK_TEMPLATE_VARIABLES,
     ...DARURAT_TEMPLATE_VARIABLES,
     ...PENGADAAN_TEMPLATE_VARIABLES,
+    ...HIBAH_TEMPLATE_VARIABLES,
+    ...PEMESANAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
     ...BPJS_KONTROL_TEMPLATE_VARIABLES,
   ]),
@@ -294,6 +413,8 @@ export type TemplateVariable =
   | (typeof STOK_TEMPLATE_VARIABLES)[number]
   | (typeof DARURAT_TEMPLATE_VARIABLES)[number]
   | (typeof PENGADAAN_TEMPLATE_VARIABLES)[number]
+  | (typeof HIBAH_TEMPLATE_VARIABLES)[number]
+  | (typeof PEMESANAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_KONTROL_TEMPLATE_VARIABLES)[number];
 
@@ -345,8 +466,16 @@ const MULTILINE_VARIABLES = new Set<string>([
   'daftar_poli',
   'stok_obat',
   'daftar_stok',
-  // Dirakit core/pengadaan.ts, yang memanggil sanitizeValue() sendiri untuk tiap
-  // nama barang dan satuan -- dipatok unit test tersendiri di pengadaan.test.ts.
+  // Dipakai TIGA pemicu: pengadaan, hibah, dan surat pemesanan. Ketiganya
+  // merakitnya lewat core/notaBarang.ts dan memanggil sanitizeValue() sendiri
+  // untuk tiap nama barang dan satuan -- dipatok unit test tersendiri di
+  // pengadaan.test.ts, hibah.test.ts, DAN pemesanan.test.ts.
+  //
+  // Pengecualian ini berlaku untuk NAMA variabelnya, jadi pemicu berikutnya yang
+  // memakai nama yang sama ikut mewarisinya tanpa satu baris pun perubahan di
+  // sini -- dan itu justru bahayanya: tidak ada satu pun galat yang muncul bila
+  // perakit baru lupa menyanitasi. Yang menambahkannya wajib menulis patokannya
+  // sendiri, seperti ketiga yang sudah ada.
   'daftar_barang',
 ]);
 

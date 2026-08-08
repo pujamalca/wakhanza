@@ -13,6 +13,8 @@ export * from './jadwalDokter';
 export * from './stokObat';
 export * from './stokDarurat';
 export * from './pengadaan';
+export * from './hibah';
+export * from './pemesanan';
 export * from './bpjsBatal';
 export * from './bpjsKontrol';
 export * from './permintaanPenunjang';

@@ -23,7 +23,9 @@
     "test:int": "jest --config jest.integration.config.js",
     "audit": "npm audit --omit=dev",
     "dryrun:bpjs": "tsx scripts/dryrun-bpjs.ts",
-    "dryrun:surat": "tsx scripts/dryrun-surat.ts"
+    "dryrun:surat": "tsx scripts/dryrun-surat.ts",
+    "dryrun:hibah": "tsx scripts/dryrun-hibah.ts",
+    "dryrun:pemesanan": "tsx scripts/dryrun-pemesanan.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
