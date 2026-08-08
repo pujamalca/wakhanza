@@ -56,6 +56,11 @@ describe('respectsOptOut', () => {
       // sudah meminta berhenti lalu tetap diingatkan hanya karena suratnya
       // kebetulan tidak lewat bridging BPJS.
       'KONTROL_ULANG',
+      // Pasangannya dari ujung yang lain: pemberitahuan saat suratnya disimpan.
+      // Sekali lagi terikat karena PASANGAN -- yang satu berhenti sementara
+      // satunya terus mengirim surat yang sama akan terbaca pasien sebagai
+      // permintaannya diabaikan sebagian.
+      'KONTROL_TERBIT',
       // Permintaan lab/radiologi -- pasangan RESULT_READY, yang sudah terikat.
       // Pasangan yang satu terikat sementara satunya tidak akan jadi janji yang
       // mustahil dijelaskan ke pasien yang sudah meminta berhenti.
@@ -67,7 +72,7 @@ describe('respectsOptOut', () => {
     ]) {
       expect(respectsOptOut(code)).toBe(true);
     }
-    expect(optOutTriggerCodes()).toHaveLength(12);
+    expect(optOutTriggerCodes()).toHaveLength(13);
   });
 
   it('BROADCAST dan AUTO_REPLY TIDAK terikat -- kanal terpisah, keputusan RS', () => {

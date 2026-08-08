@@ -12,6 +12,7 @@ import { runFarmasiCycles } from './farmasiRunner';
 import { runDueBroadcastSchedules } from './broadcastScheduleRunner';
 import { runBpjsBatalCycles, runBpjsKontrolIfDue } from './bpjsRunner';
 import { runKontrolUlangIfDue } from './kontrolUlangRunner';
+import { runKontrolTerbitCycle } from './kontrolTerbitRunner';
 import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
@@ -325,6 +326,15 @@ async function main(): Promise<void> {
    * dinyalakannya. Alasan yang sama memisahkan siklus hibah dari pengadaan.
    */
   void loop('kontrol-ulang', runKontrolUlangIfDue, scanIntervalMs);
+  /**
+   * Surat kontrol DITERBITKAN -- pasangan siklus tepat di atasnya, dan sekali
+   * lagi siklus tersendiri.
+   *
+   * Yang satu jadwal harian, yang satu jendela pindai; menggabungkannya berarti
+   * pemberitahuan "surat Anda sudah dibuat" ikut menunggu pukul 09:00 esok hari,
+   * padahal seluruh gunanya justru datang saat pasien masih memegang kertasnya.
+   */
+  void loop('kontrol-terbit', runKontrolTerbitCycle, scanIntervalMs);
   /**
    * Surat sakit otomatis -- siklus PINDAI, dan di sini pilihan intervalnya
    * punya alasan yang tidak dipunyai keempat siklus di atas: satu surat berarti

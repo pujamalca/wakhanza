@@ -78,6 +78,14 @@ const OPT_OUT_TRIGGERS = new Set([
    * sistem sebagai bohong.
    */
   'KONTROL_ULANG',
+  /**
+   * KONTROL_TERBIT -- pemberitahuan saat surat kontrolnya disimpan
+   * (migrations/033), pasangan KONTROL_ULANG dari ujung yang lain. Terikat
+   * lewat alasan yang sama, dan sekali lagi karena PASANGAN: pemicu yang satu
+   * berhenti sementara satunya terus mengirim surat yang sama akan terbaca
+   * pasien sebagai permintaannya diabaikan sebagian.
+   */
+  'KONTROL_TERBIT',
   // Permintaan lab/radiologi: pemberitahuan otomatis dari kejadian di sik ke
   // nomor pasien, sekelas dengan ketujuh di atasnya. Pasangan RESULT_READY --
   // dan pasangan yang satu terikat sementara satunya tidak akan jadi janji yang

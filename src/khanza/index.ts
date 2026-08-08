@@ -18,5 +18,6 @@ export * from './pemesanan';
 export * from './bpjsBatal';
 export * from './bpjsKontrol';
 export * from './kontrolUlang';
+export * from './kontrolTerbit';
 export * from './permintaanPenunjang';
 export * from './suratPasien';

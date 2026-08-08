@@ -50,6 +50,19 @@ export interface KontrolUlangRow {
   no_rkm_medis: string | null;
   /** Tanggal pasien harus datang kembali (YYYY-MM-DD, `dateStrings: true`). */
   tgl_kontrol: string;
+  /**
+   * Tanggal suratnya dibuat (`tanggal_rujukan`). Namanya di Khanza menyesatkan
+   * -- "rujukan" di sini berarti tanggal surat, bukan tanggal rujuk. Dibuktikan
+   * dari `SuratKontrol.java`: parameter ke-10 diisi dari kotak **Tanggal
+   * Surat**, sementara parameter ke-9 (`tanggal_datang`) dari kotak Tanggal
+   * Periksa.
+   *
+   * Dipakai KONTROL_TERBIT sebagai jendela pindainya; ikut dibaca di sini
+   * supaya daftar kolomnya SATU untuk kedua pemicu -- yang tidak boleh
+   * menyimpang bukan kolom yang ada, melainkan keenam kolom klinis yang tidak
+   * ada.
+   */
+  tgl_surat: string;
   nm_pasien: string | null;
   no_tlp: string | null;
   nm_dokter: string | null;
@@ -121,12 +134,28 @@ export interface KontrolUlangRow {
  * kalau ada" -- izin pindai penuh yang menganggur adalah izin yang diam-diam
  * menutupi kemunduran berikutnya.
  */
-const SQL_KONTROL_ULANG = `
+/**
+ * Daftar kolom + join, DIPAKAI BERSAMA oleh kedua pemicu surat kontrol
+ * (KONTROL_ULANG di berkas ini, KONTROL_TERBIT di `kontrolTerbit.ts`).
+ *
+ * Berdiri sebagai fragmen bersama, bukan disalin, dan yang dijaga bukan kolom
+ * yang ADA melainkan keenam yang TIDAK ada: `diagnosa`, `terapi`, `alasan1`,
+ * `alasan2`, `rtl1`, `rtl2`. Dua daftar kolom yang menyimpang berarti satu
+ * pemicu diam-diam mulai membaca rekam medis sementara yang lain tidak, dan
+ * tidak ada satu pun galat yang menandainya.
+ *
+ * `status = 'Menunggu'` ikut di sini dengan alasan yang sama: ia berlaku untuk
+ * keduanya. Mengingatkan pasien yang kontrolnya sudah dibatalkan, atau
+ * mengabarkan surat yang batal, sama-sama membuat orang bertindak atas
+ * keterangan yang salah.
+ */
+export const SELECT_SURAT_KONTROL = `
   SELECT
     s.tahun,
     s.no_antrian,
     s.no_rkm_medis,
     DATE(s.tanggal_datang) AS tgl_kontrol,
+    DATE(s.tanggal_rujukan) AS tgl_surat,
     p.nm_pasien,
     p.no_tlp,
     d.nm_dokter,
@@ -139,6 +168,10 @@ const SQL_KONTROL_ULANG = `
     ON b.no_rkm_medis = s.no_rkm_medis
    AND b.tanggal_periksa = DATE(s.tanggal_datang)
   LEFT JOIN poliklinik pk ON pk.kd_poli = b.kd_poli
+`;
+
+const SQL_KONTROL_ULANG = `
+  ${SELECT_SURAT_KONTROL}
   WHERE s.tahun IN (:tahun)
     AND DATE(s.tanggal_datang) IN (:tanggalTarget)
     AND s.status = 'Menunggu'

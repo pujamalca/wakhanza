@@ -97,6 +97,10 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // sama-sama berbunyi "pengingat kontrol" tidak bisa dibedakan sama sekali,
   // dan yang dicari orang saat menelusuri justru pemicu MANA yang mengirim.
   KONTROL_ULANG: 'Pengingat kontrol (non-BPJS)',
+  // Pasangan baris di atasnya. Labelnya menyebut "dibuat" versus "Pengingat"
+  // supaya baris di Antrean bisa dibedakan -- keduanya menyangkut SURAT dan
+  // pasien yang sama, cuma pada dua saat yang berbeda.
+  KONTROL_TERBIT: 'Surat kontrol dibuat (non-BPJS)',
   // Satu-satunya baris yang membawa BERKAS, bukan kabar. Labelnya menyebut
   // "dokumen" supaya jelas dari halaman Antrean bahwa yang gagal terkirim
   // bukan sekadar pemberitahuan yang bisa diulang isinya -- ada surat yang

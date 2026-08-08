@@ -1001,3 +1001,153 @@ tidak tersentuh. Sesudah `pm2 stop` + `pm2 start` sekali, sesi pulih:
 status  umur_detik
 ready   13
 ```
+
+## SURAT KONTROL DITERBITKAN (`migrations/033`) -- pasangan KONTROL_ULANG dari ujung yang lain
+
+Verifikasi 8 Agustus 2026. Nama pasien, nomor telepon, nama dokter, dan nama
+rumah sakit sungguhan TIDAK disalin ke berkas ini (preseden commit `1cb8e92`).
+
+### Kenapa pemicu ini ada: surat sungguhan yang tidak menghasilkan apa-apa
+
+Sesudah 032 dipasang, surat kontrol sungguhan dibuat lewat Khanza dan tidak ada
+WhatsApp yang keluar. Bukan kegagalan -- diagnosis lengkapnya:
+
+```
+$ mysql alca -e "SELECT tahun,no_antrian,no_rkm_medis,tanggal_datang,status FROM skdp_bpjs"
+tahun  no_antrian  no_rkm_medis  tanggal_datang       status
+2026   000004      (no. RM)      2026-08-08 00:00:00  Menunggu
+
+$ tail logs/wakhanza.1.log | grep 'ontrol non-BPJS'
+10:30:33 tidak ada surat kontrol non-BPJS yang jatuh tempo ['2026-08-09']
+```
+
+Tanggal kontrolnya HARI ITU, sementara pengingatnya H-1 -- jadi saat H-1 jatuh
+(kemarin), suratnya belum ada. Sistemnya benar; yang tidak ada adalah pemicu
+untuk kejadian "surat disimpan". Itulah lubang yang ditutup 033.
+
+### Rencana query -- pindai penuh yang DISENGAJA, berbeda dari 032
+
+```
+$ npm run verify:plans
+[ok] KONTROL_ULANG        s ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        p eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        d eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        b eq_ref PRIMARY  rows~1
+[ok] KONTROL_ULANG        pk eq_ref PRIMARY  rows~1
+[--] KONTROL_TERBIT       s ALL — pemindaian penuh yang disengaja  rows~1
+[ok] KONTROL_TERBIT       p eq_ref PRIMARY  rows~1
+[ok] KONTROL_TERBIT       d eq_ref PRIMARY  rows~1
+[ok] KONTROL_TERBIT       b eq_ref PRIMARY  rows~1
+[ok] KONTROL_TERBIT       pk eq_ref PRIMARY  rows~1
+verify:plans lolos.
+```
+
+Izin pindai penuh HANYA untuk alias `s` (= `skdp_bpjs`); keempat tabel lain di
+query yang sama tetap dijaga dan tetap `eq_ref`. Alasannya bukan "tabelnya
+kecil" melainkan pemangkas yang tidak tersedia: jendelanya `tanggal_rujukan`,
+yang tidak punya hubungan tetap dengan `tahun` (selisih `tanggal_datang -
+tanggal_rujukan` terukur -57 s/d +309 hari di arsip), jadi menebak tahun berarti
+melewatkan baris tanpa galat.
+
+### Pratinjau: surat sungguhan terbaca pemicu baru
+
+```
+$ npm run poll:dryrun
+--- KONTROL_TERBIT jendela surat: 2026-08-05 s/d 2026-08-11 (lantai aktivasi diabaikan di pratinjau) ---
+
+=== KONTROL_TERBIT: 1 baris kandidat ===
+  (template nonaktif -- akan dilewati oleh worker sungguhan)
+  tanpa nomor valid : 0 / 1
+  layanan sensitif  : 0 / 1
+  - RM (disamarkan) -> (nomor pasien, disamarkan) [auto]
+      "Yth. (nama pasien), surat kontrol Anda di (nama RS) sudah dibuat.
+
+      Tanggal kontrol : 2026-08-08
+      Dokter : (nama dokter, disamarkan)
+      No. surat : 000004
+
+      Mohon datang sesuai tanggal di atas dan membawa surat kontrol Anda. ...
+```
+
+### Lantai aktivasi memasang dirinya sendiri, dan gerbangnya benar-benar menahan
+
+Sesudah worker dimuat ulang dengan siklus baru, templatenya masih `is_active=0`.
+Buktinya lantai aktivasinya TETAP KOSONG -- kalau gerbangnya tidak menahan,
+siklus pertama akan memasangnya:
+
+```
+$ mysql wakhanza -e "SELECT k,CONCAT('[',v,']') FROM app_setting WHERE k LIKE 'schedule.kontrol_terbit%'"
+schedule.kontrol_terbit_lookback_hari    [3]
+schedule.kontrol_terbit_max_per_siklus   [20]
+schedule.kontrol_terbit_sejak            []
+
+$ mysql wakhanza -e "SELECT trigger_code,is_active FROM template WHERE trigger_code LIKE 'KONTROL%'"
+KONTROL_TERBIT  0
+KONTROL_ULANG   1
+```
+
+Worker sehat sesudah dimuat ulang (`pm2 stop` + `pm2 start`, bukan `restart` --
+urutan itulah yang tidak memicu kaskade peluncuran ganda):
+
+```
+status  umur_detik
+ready   3
+```
+
+### Uji unit
+
+```
+$ npx jest
+Test Suites: 31 passed, 31 total
+Tests:       545 passed, 545 total
+```
+
+`optOutTriggerCodes()` 12 -> 13, dan asersi jam tenang diperluas menjadi KETIGA
+pemicu kontrol (BPJS_KONTROL, KONTROL_ULANG, KONTROL_TERBIT) sama-sama TUNDUK.
+KONTROL_TERBIT yang paling menggoda dikecualikan -- ia berbunyi seketika saat
+surat disimpan -- dan justru itu sebabnya dipatok: yang membenarkan pengecualian
+jam tenang selalu adanya ORANG YANG MENUNGGU, dan di sini tidak ada.
+
+### Verifikasi HTTP (PM2, port 3100)
+
+Akun admin sementara dibuat dan dihapus di alur yang sama.
+
+```
+[ok]   pemicu KONTROL_TERBIT muncul
+[ok]   pasangannya KONTROL_ULANG masih ada
+[ok]   tidak lagi mengklaim setelan Khanza menyala di sini
+[ok]   menyatakan tidak ada booking yang ikut terbentuk
+[ok]   memperingatkan setelan itu dipegang klien Khanza
+[ok]   memperingatkan {nama_poli} akan kosong
+[ok]   tidak menawarkan variabel klinis {diagnosa}/{terapi}/{rtl1}/{alasan1}
+[ok]   /ringkasan, /antrean, /bpjs, /farmasi masih HTTP 200
+
+SEMUA LOLOS
+```
+
+### KOREKSI atas seksi 032: tabrakan BOOK_REMIND tidak berlaku di instalasi ini
+
+Seksi 032 di atas semula menyatakan setelan Khanza `JADIKANBOOKINGSURATKONTROL`
+bernilai `yes` di mesin ini dan "253 dari 253 surat punya bookingnya". Angkanya
+benar tapi kedua sumbernya salah: 253/253 dari **arsip `sik`** (pemakaian awal
+2024), dan `yes` dibaca dari `setting/database.xml` di folder
+`D:\laragon\www\SIMRS-Khanza` -- yang BUKAN klien yang dijalankan rumah sakit ini.
+
+Diukur pada surat sungguhan yang baru dibuat lewat klien yang benar-benar dipakai:
+
+```
+$ mysql alca -e "SELECT ... FROM booking_registrasi WHERE no_rkm_medis='(no. RM pasien itu)'"
+(kosong)
+
+$ mysql alca -e "SELECT COUNT(*) FROM booking_registrasi WHERE tanggal_booking=CURDATE()"
+0
+```
+
+**Nol booking.** Jadi tabrakan dengan BOOK_REMIND tidak berlaku di sini, dan
+`{nama_poli}` memang akan kosong. Peringatan di `/template` sudah dikoreksi
+untuk menyatakan itu, berikut catatan bahwa setelannya dipegang klien Khanza dan
+bisa berubah tanpa tanda apa pun di sisi ini.
+
+Pelajarannya bukan tentang booking: **konfigurasi klien Khanza tidak bisa
+disimpulkan dari folder sumber mana pun yang kebetulan ada di mesin ini.** Yang
+menjawabnya cuma akibatnya di database.

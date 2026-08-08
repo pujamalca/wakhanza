@@ -38,6 +38,9 @@ import { pollBpjsKontrol } from '../src/khanza/bpjsKontrol';
 import { varsBatal, varsKontrol } from '../src/worker/bpjsRunner';
 import { pollKontrolUlang } from '../src/khanza/kontrolUlang';
 import { varsKontrolUlang } from '../src/worker/kontrolUlangRunner';
+import { pollKontrolTerbit } from '../src/khanza/kontrolTerbit';
+import { varsKontrolTerbit } from '../src/worker/kontrolTerbitRunner';
+import { hitungJendelaPindai } from '../src/core/jendelaPindai';
 import { bacaHariSebelum, sasaranKontrol } from '../src/core/bpjs';
 
 const SAMPLE_SIZE = 5;
@@ -340,6 +343,28 @@ async function main() {
       rawPhone: r.no_tlp,
       kdPoli: r.kd_poli,
       vars: { ...idVars, ...varsKontrolUlang(r, selisihKu.get(r.tgl_kontrol) ?? 0) },
+    })),
+    sensitivePoli,
+    sensitiveExam,
+  );
+
+  /**
+   * Surat kontrol DITERBITKAN -- jendela pindainya, bukan sasaran H-N.
+   * Lantai aktivasinya sengaja TIDAK diterapkan di sini: pratinjau yang
+   * menyembunyikan baris justru pada pemicu yang belum pernah menyala membuat
+   * staf tidak bisa melihat apa pun sebelum memutuskan menyalakannya.
+   */
+  const lookbackTerbit = await getSettingNumber('schedule.kontrol_terbit_lookback_hari', 3);
+  const jendelaTerbit = hitungJendelaPindai(new Date(), lookbackTerbit, null);
+  const terbitRows = await pollKontrolTerbit(jendelaTerbit.dari, jendelaTerbit.sampai);
+  console.log(`\n--- KONTROL_TERBIT jendela surat: ${jendelaTerbit.dari} s/d ${jendelaTerbit.sampai} (lantai aktivasi diabaikan di pratinjau) ---`);
+  await reportSection(
+    'KONTROL_TERBIT',
+    terbitRows.map((r) => ({
+      noRkmMedis: r.no_rkm_medis ?? '',
+      rawPhone: r.no_tlp,
+      kdPoli: r.kd_poli,
+      vars: { ...idVars, ...varsKontrolTerbit(r) },
     })),
     sensitivePoli,
     sensitiveExam,

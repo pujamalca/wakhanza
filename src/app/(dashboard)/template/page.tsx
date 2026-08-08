@@ -93,21 +93,23 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
             }
           >
             <p>
-              Khanza punya setelan <span className="font-mono">JADIKANBOOKINGSURATKONTROL</span>. Bila menyala, setiap surat
-              kontrol yang disimpan <span className="font-medium">juga membuat satu booking</span> untuk pasien dan tanggal yang
-              sama — sehingga Pengingat H-1 sudah mengingatkan pasien itu, dan Pengingat kontrol akan mengirim pesan kedua untuk
-              kunjungan yang sama.
+              Khanza punya setelan <span className="font-mono">JADIKANBOOKINGSURATKONTROL</span> di berkas konfigurasi
+              kliennya — <span className="font-medium">tidak terlihat dari dashboard ini</span>. Bila menyala, setiap surat
+              kontrol yang disimpan juga membuat satu booking untuk pasien dan tanggal yang sama, sehingga Pengingat H-1 sudah
+              mengingatkan pasien itu dan Pengingat kontrol akan mengirim pesan kedua untuk kunjungan yang sama.
             </p>
             <p className="mt-1">
-              Di server ini setelan tersebut <span className="font-medium">menyala</span>, dan dari data yang ada{' '}
-              <span className="font-medium">seluruh surat kontrol punya bookingnya</span>. Jadi pilih salah satu: Pengingat H-1
-              (berlaku untuk semua booking) atau Pengingat kontrol (kalimatnya menyebut nomor suratnya). Menyalakan keduanya
-              hanya benar bila setelan Khanza itu dimatikan.
+              Pada surat kontrol terakhir yang dibuat di server ini,{' '}
+              <span className="font-medium">tidak ada booking yang ikut terbentuk</span> — jadi sejauh yang terlihat, keduanya
+              tidak bertabrakan di sini. Tapi setelan itu dipegang klien Khanza, bukan sistem ini: kalau IT rumah sakit
+              mengubahnya, tabrakannya muncul tanpa ada tanda apa pun di sini. Kalau Anda menyalakan Pengingat H-1 juga,
+              periksa sekali apakah pasien menerima dua pesan.
             </p>
             <p className="mt-1">
-              Catatan variabel: <span className="font-mono">{'{nama_poli}'}</span> pada Pengingat kontrol hanya terisi bila
-              setelan Khanza itu menyala — poli tidak disimpan di tabel suratnya. Karena di server ini menyala, variabel itu aman
-              ditambahkan; di server lain ia bisa tampil kosong.
+              Catatan variabel: <span className="font-mono">{'{nama_poli}'}</span> hanya terisi bila setelan Khanza itu menyala
+              — poli tidak disimpan di tabel suratnya. Karena di sini tidak terbentuk booking,{' '}
+              <span className="font-medium">variabel itu akan tampil kosong</span>; jangan dipakai kecuali Anda sudah
+              memastikan bookingnya terbentuk.
             </p>
           </Callout>
         );
