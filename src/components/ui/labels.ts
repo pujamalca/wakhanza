@@ -118,6 +118,93 @@ export function triggerLabel(code: string): string {
   return TRIGGER_LABEL[code] ?? code;
 }
 
+export interface TriggerSource {
+  /** Tabel Khanza yang dibaca poller-nya, persis sebagaimana muncul di FROM. */
+  tabel: string[];
+  /** Satu kalimat: kapan pemicunya berbunyi. */
+  kapan: string;
+  /** Yang cukup dibaca sekali (nama tabel yang menyesatkan, pasangannya di tempat lain). */
+  catatan?: string;
+}
+
+/**
+ * Asal-usul tiap baris tabel `template`: dari tabel Khanza mana pemicunya
+ * dibaca, dan kapan ia berbunyi.
+ *
+ * Ada di sini, berdampingan dengan `TRIGGER_LABEL`, dan bukan di berkas
+ * tersendiri: keduanya sama-sama keterangan STATIS berkunci kode pemicu, jadi
+ * menaruhnya berjauhan berarti pemicu berikutnya punya dua tempat yang harus
+ * diingat -- dan yang lupa diisi tidak menghasilkan satu pun galat, cuma baris
+ * tabel yang diam-diam kehilangan keterangannya. `labels.test.ts` menjaga
+ * daftar ini tetap MEMBAGI HABIS baris `template` yang benar-benar dimigrasikan.
+ *
+ * Sengaja HANYA memuat baris `template`. Pemicu lain (`FARMASI_*`, `BPJS_*`,
+ * `ADMINISTRASI`, `SURAT_SAKIT`) punya halamannya sendiri berikut keterangannya
+ * sendiri di sana; mencantumkannya di sini akan menjanjikan baris yang tidak
+ * pernah muncul di halaman Template.
+ */
+export const TRIGGER_SOURCE: Record<string, TriggerSource> = {
+  QUEUE_REG: {
+    tabel: ['reg_periksa'],
+    kapan: 'Begitu pendaftaran pasien disimpan dan nomor registrasinya terisi.',
+  },
+  BOOK_CONFIRM: {
+    tabel: ['booking_registrasi'],
+    kapan: 'Begitu booking baru terbaca, selama statusnya masih “Belum”.',
+  },
+  BOOK_CANCEL: {
+    tabel: ['booking_registrasi'],
+    kapan: 'Saat status booking berubah jadi “Batal” atau “Dokter Berhalangan”.',
+    catatan:
+      'Tabel dan pembacaan yang sama dengan Konfirmasi booking — yang membedakan keduanya hanya status barisnya, bukan sumbernya.',
+  },
+  BOOK_REMIND: {
+    tabel: ['booking_registrasi'],
+    kapan: 'Sehari sebelum tanggal periksa, pada jam yang disetel di Pengaturan.',
+  },
+  RESULT_READY: {
+    tabel: ['periksa_lab', 'periksa_radiologi'],
+    kapan: 'Saat hasil pemeriksaan tersimpan.',
+    catatan:
+      'Satu pesan per kunjungan, bukan per item: panel darah lengkap menghasilkan belasan baris di Khanza dan tetap jadi satu pesan. Lab dan radiologi berbagi jenis pesan ini — yang membedakan isinya adalah variabel {jenis_layanan}.',
+  },
+  LAB_REQUEST: {
+    tabel: ['permintaan_lab'],
+    kapan: 'Saat dokter memesan pemeriksaan laboratorium — bukan saat hasilnya keluar.',
+    catatan: 'Pasangan “Hasil penunjang” dari ujung yang lain: yang ini memberi tahu ada pemeriksaan yang harus dijalani.',
+  },
+  RAD_REQUEST: {
+    tabel: ['permintaan_radiologi'],
+    kapan: 'Saat dokter memesan pemeriksaan radiologi — bukan saat hasilnya keluar.',
+    catatan:
+      'Dipisah dari Permintaan lab supaya tujuan tambahannya bisa berbeda: grup Laboratorium dan grup Radiologi tidak perlu menerima pekerjaan satu sama lain.',
+  },
+  PHARMACY_READY: {
+    tabel: ['resep_obat'],
+    kapan: 'Saat apotek mengisi tanggal penyerahan resep.',
+  },
+  BILLING_READY: {
+    tabel: ['nota_jalan', 'nota_inap'],
+    kapan: 'Saat nota rawat jalan atau rawat inap terbit.',
+  },
+  KONTROL_TERBIT: {
+    tabel: ['skdp_bpjs'],
+    kapan: 'Begitu surat kontrolnya disimpan di Khanza.',
+    catatan:
+      'Sumbernya menu “Surat Kontrol”. Akhiran _bpjs pada nama tabelnya peninggalan sejarah (SKDP) dan menyesatkan — isinya dipakai untuk pasien mana pun, termasuk non-BPJS. Surat kontrol lewat bridging VClaim tabelnya lain dan diurus di halaman BPJS, bukan di sini.',
+  },
+  KONTROL_ULANG: {
+    tabel: ['skdp_bpjs'],
+    kapan: 'Beberapa hari sebelum tanggal kontrol di surat; selisih hari dan jam kirimnya disetel di Pengaturan.',
+    catatan:
+      'Menu dan tabel yang sama dengan “Surat kontrol dibuat” — yang itu berbunyi saat suratnya disimpan, yang ini menjelang tanggal kontrolnya.',
+  },
+};
+
+export function triggerSource(code: string): TriggerSource | undefined {
+  return TRIGGER_SOURCE[code];
+}
+
 export const WA_STATUS_LABEL: Record<WaSessionStatus, string> = {
   disconnected: 'Terputus',
   qr_pending: 'Menunggu pindai QR',

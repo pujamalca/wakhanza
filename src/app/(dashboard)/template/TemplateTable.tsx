@@ -12,6 +12,7 @@ import {
   EmptyState,
   IconFileText,
   triggerLabel,
+  triggerSource,
   tableWrapperClass,
   theadClass,
   rowClass,
@@ -98,12 +99,26 @@ export function TriggerTemplateTable({
           <tbody>
             {rows.map((t) => {
               const tujuan = ringkasTujuan(t);
+              const sumber = triggerSource(t.triggerCode);
               return (
                 <tr key={t.triggerCode} className={rowClass}>
                   {/* Label manusia di depan, kode pemicu tetap tersedia lewat
-                      tooltip -- baris log dan tiket dukungan memakai kodenya. */}
+                      tooltip -- baris log dan tiket dukungan memakai kodenya.
+
+                      Sub-barisnya menjawab pertanyaan yang selama ini hanya
+                      terjawab dengan membaca kode: dari mana pemicu ini
+                      berasal, dan kapan ia berbunyi. Ditaruh MENEMPEL pada nama
+                      pemicunya, bukan jadi kolom tersendiri -- kolom keenam
+                      akan tersembunyi di bawah `xl` persis seperti yang terjadi
+                      pada centang tujuan di /farmasi, sehingga keterangan yang
+                      sengaja ditambahkan berakhir tak pernah terlihat. */}
                   <td className={`${cellClass} font-medium`} title={t.triggerCode}>
                     {triggerLabel(t.triggerCode)}
+                    {sumber && (
+                      <span className="mt-0.5 block max-w-[22rem] text-xs font-normal leading-snug text-muted-foreground">
+                        <span className="font-mono">{sumber.tabel.join(' + ')}</span> — {sumber.kapan}
+                      </span>
+                    )}
                   </td>
                   <td className={`${cellClass} hidden sm:table-cell`}>{t.label}</td>
                   <td className={`${cellClass} hidden max-w-md truncate text-muted-foreground lg:table-cell`} title={t.body}>
@@ -169,6 +184,7 @@ function TriggerTemplateModal({
     },
     {},
   );
+  const sumber = triggerSource(row.triggerCode);
 
   return (
     <Modal
@@ -178,6 +194,31 @@ function TriggerTemplateModal({
       title={triggerLabel(row.triggerCode)}
       description={`Dipakai otomatis oleh worker saat kejadiannya terdeteksi di Khanza. Kode pemicu: ${row.triggerCode}`}
     >
+      {/* Keterangan asal-usulnya diulang di sini -- bukan cuma di tabel --
+          karena inilah layar tempat kalimatnya benar-benar disusun, dan
+          "kapan pesan ini berbunyi" menentukan hampir seluruh isinya:
+          pemberitahuan yang datang saat pemeriksaan DIMINTA tidak boleh
+          berbunyi seolah hasilnya sudah ada. `catatan` sengaja hanya di sini,
+          tidak di tabel: ia bahan baca-sekali, dan mengulangnya di sebelas
+          baris tabel akan menenggelamkan kolom yang lain. */}
+      {sumber && (
+        <div className="mb-3 rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Dibaca dari:</span>{' '}
+            {sumber.tabel.map((t, i) => (
+              <span key={t}>
+                {i > 0 && ' + '}
+                <span className="font-mono">{t}</span>
+              </span>
+            ))}{' '}
+            di database Khanza.
+          </p>
+          <p className="mt-1">
+            <span className="font-medium text-foreground">Kapan dikirim:</span> {sumber.kapan}
+          </p>
+          {sumber.catatan && <p className="mt-1">{sumber.catatan}</p>}
+        </div>
+      )}
       <form action={formAction} className="space-y-3">
         <label className="block space-y-1">
           <span className="block text-xs font-medium">Judul</span>

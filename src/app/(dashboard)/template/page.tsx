@@ -60,8 +60,10 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
       <h2 className="mb-1 font-medium">Template pemicu otomatis</h2>
       <p className="mb-3 text-xs text-muted-foreground">
         Template di bawah dipakai <span className="font-medium">otomatis oleh worker</span> saat kejadiannya terdeteksi di
-        Khanza (pasien dapat antrian, pemeriksaan lab diminta, hasilnya siap, obat siap, dan seterusnya). Staf tidak pernah
-        memilihnya — satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru.
+        Khanza. Staf tidak pernah memilihnya — satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru.
+        Di bawah tiap nama tertulis <span className="font-medium">tabel Khanza yang dibaca</span> dan{' '}
+        <span className="font-medium">kapan pesannya berbunyi</span>; keterangan lengkapnya muncul saat tombol Ubah ditekan.
+        Sistem ini hanya <span className="font-medium">membaca</span> — tidak pernah menulis apa pun ke database Khanza.
       </p>
       <p className="mb-3 text-xs text-muted-foreground">
         Tombol <span className="font-medium">Tujuan</span> mengatur ke mana pesannya dikirim. Bawaannya hanya ke nomor pasien

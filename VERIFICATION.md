@@ -1151,3 +1151,147 @@ bisa berubah tanpa tanda apa pun di sisi ini.
 Pelajarannya bukan tentang booking: **konfigurasi klien Khanza tidak bisa
 disimpulkan dari folder sumber mana pun yang kebetulan ada di mesin ini.** Yang
 menjawabnya cuma akibatnya di database.
+
+## Tiga tabel template yang sengaja TIDAK digabung
+
+Verifikasi 8 Agustus 2026, bagian "Tiap baris pemicu menyebut TABEL Khanza
+asalnya". Nama pasien, nomor telepon, nama dokter, dan nama rumah sakit
+sungguhan TIDAK disalin ke berkas ini (preseden commit `1cb8e92`).
+
+### Peta sumbernya diambil dari query pollernya, bukan dari nama pemicunya
+
+Sebelas baris `template` ditelusuri ke klausa `FROM` masing-masing:
+
+```
+$ grep -n "FROM " src/khanza/{antrian,booking,penunjang,permintaanPenunjang,farmasi,billing,kontrolUlang}.ts
+antrian.ts:37             FROM reg_periksa r
+booking.ts:49             FROM booking_registrasi b
+penunjang.ts:55           FROM ${table}          -> periksa_lab | periksa_radiologi
+permintaanPenunjang:108   FROM ${induk}          -> permintaan_lab | permintaan_radiologi
+farmasi.ts:33             FROM resep_obat ro
+billing.ts:46,50          FROM nota_jalan  UNION ALL  FROM nota_inap
+kontrolUlang.ts:164       FROM skdp_bpjs s       (dipakai bersama kontrolTerbit.ts)
+```
+
+| Baris `template` | Tabel Khanza | Kolom yang menentukan kapan berbunyi |
+|---|---|---|
+| QUEUE_REG | `reg_periksa` | `no_reg` terisi + `TIMESTAMP(tgl_registrasi, jam_reg)` |
+| BOOK_CONFIRM | `booking_registrasi` | `status = 'Belum'` |
+| BOOK_CANCEL | `booking_registrasi` | `status` = 'Batal' / 'Dokter Berhalangan' |
+| BOOK_REMIND | `booking_registrasi` | `tanggal_periksa` = besok |
+| RESULT_READY | `periksa_lab` + `periksa_radiologi` | digabung per (`no_rawat`, `tgl_periksa`) |
+| LAB_REQUEST | `permintaan_lab` | `TIMESTAMP(tgl_permintaan, jam_permintaan)` |
+| RAD_REQUEST | `permintaan_radiologi` | idem |
+| PHARMACY_READY | `resep_obat` | `tgl_penyerahan <> '0000-00-00'` |
+| BILLING_READY | `nota_jalan` + `nota_inap` | `TIMESTAMP(tanggal, jam)` |
+| KONTROL_TERBIT | `skdp_bpjs` | jendela `tanggal_rujukan` (tanggal surat) |
+| KONTROL_ULANG | `skdp_bpjs` | `tanggal_datang` H-N, `status = 'Menunggu'` |
+
+BOOK_CONFIRM dan BOOK_CANCEL memang SATU query dan satu siklus
+(`pollerBooking.ts:48,52`) -- yang membedakannya status barisnya, dan itulah yang
+ditulis sebagai `catatan` pada BOOK_CANCEL alih-alih dibiarkan tampak seperti dua
+sumber berbeda.
+
+### Gerbangnya BENAR-BENAR menggigit, dua arah
+
+Daftar acuannya diurai dari `INSERT INTO template` di `migrations/*.sql`, bukan
+disalin jadi daftar ketiga. Dibuktikan dengan merusaknya sengaja -- satu kunci
+`QUEUE_REG` diganti `PEMICU_KARANGAN`, yang sekaligus menciptakan kedua cacat:
+
+```
+$ npx jest src/components/ui/labels.test.ts
+  × setiap baris template yang dimigrasikan punya keterangan sumbernya
+    - Array []
+    + Array [ "QUEUE_REG",
+  × tidak menjelaskan pemicu yang bukan baris template
+    - Array []
+    + Array [ "PEMICU_KARANGAN",
+Tests: 2 failed, 4 passed, 6 total
+```
+
+Sesudah dikembalikan:
+
+```
+$ npx jest src/components/ui/labels.test.ts
+  √ migrasinya benar-benar terbaca (kalau nol, parsernya yang rusak, bukan produknya)
+  √ setiap baris template yang dimigrasikan punya keterangan sumbernya
+  √ setiap baris template yang dimigrasikan punya label manusianya
+  √ tidak menjelaskan pemicu yang bukan baris template
+  √ menyebut tabel dan kapan berbunyinya, bukan sekadar ada
+  √ kode tak dikenal tidak dipaksakan jadi keterangan karangan
+Tests: 6 passed
+```
+
+Uji pertama ("migrasinya benar-benar terbaca") ada karena parser yang rusak
+menghasilkan larik KOSONG, dan larik kosong membuat kedua pemeriksaan pembagi-habis
+lolos tanpa memeriksa apa pun -- gerbang yang mati diam.
+
+### Seluruh suite
+
+```
+$ npm run typecheck   # tsc --noEmit, bersih
+$ npx jest
+Test Suites: 32 passed, 32 total
+Tests:       551 passed, 551 total
+$ npm run lint        # bersih
+$ npm run build       # /template ƒ (Dynamic)
+```
+
+### Verifikasi HTTP -- lewat instance PM2 (port 3100), 37 pemeriksaan
+
+Akun admin sementara dibuat dan **dihapus di alur yang sama** (`npm run users --
+delete`, dikonfirmasi lewat `users -- list`: tinggal satu akun milik pemilik
+sistem). Pagar anti-build-lama aktif: penanda fitur baru tidak ada -> `exit 2`.
+
+```
+[ok]  /template HTTP 200
+[ok]  QUEUE_REG: sumbernya reg_periksa            [ok]  QUEUE_REG: kapan berbunyinya
+[ok]  BOOK_CONFIRM: sumbernya booking_registrasi  [ok]  BOOK_CONFIRM: kapan berbunyinya
+[ok]  BOOK_CANCEL: sumbernya booking_registrasi   [ok]  BOOK_CANCEL: kapan berbunyinya
+[ok]  BOOK_REMIND: sumbernya booking_registrasi   [ok]  BOOK_REMIND: kapan berbunyinya
+[ok]  RESULT_READY: periksa_lab + periksa_radiologi  [ok]  RESULT_READY: kapan berbunyinya
+[ok]  LAB_REQUEST: sumbernya permintaan_lab       [ok]  LAB_REQUEST: kapan berbunyinya
+[ok]  RAD_REQUEST: sumbernya permintaan_radiologi [ok]  RAD_REQUEST: kapan berbunyinya
+[ok]  PHARMACY_READY: sumbernya resep_obat        [ok]  PHARMACY_READY: kapan berbunyinya
+[ok]  BILLING_READY: nota_jalan + nota_inap       [ok]  BILLING_READY: kapan berbunyinya
+[ok]  KONTROL_TERBIT: sumbernya skdp_bpjs         [ok]  KONTROL_TERBIT: kapan berbunyinya
+[ok]  KONTROL_ULANG: sumbernya skdp_bpjs          [ok]  KONTROL_ULANG: kapan berbunyinya
+[ok]  pengantar menyebut tabel yang dibaca
+[ok]  pengantar menegaskan hanya membaca
+[ok]  catatan "akhiran _bpjs menyesatkan" tidak membanjiri tabel
+[ok]  catatan "satu pesan per kunjungan" tidak membanjiri tabel
+[ok]  tidak menawarkan variabel klinis {diagnosa}/{terapi}/{rtl1}/{alasan1}
+[ok]  /ringkasan, /antrean, /bpjs, /farmasi, /balasan-otomatis masih HTTP 200
+
+SEMUA LOLOS
+```
+
+Kedua pemeriksaan `catatan` sengaja BERPOLARITAS TERBALIK: yang dibuktikan bukan
+teksnya ada, melainkan teksnya **tidak** ikut ke sebelas baris tabel. Tanpa
+asersi itu, "catatan hanya di modal" cuma niat di komentar.
+
+### Modal: catatannya memang muncul di sana
+
+Diuji lewat peramban terkendali (Puppeteer, `userDataDir` sendiri di direktori
+sementara -- TIDAK PERNAH `.wwebjs_auth`). Tombol Ubah dicari **di dalam baris
+RESULT_READY**, bukan lewat teks global: halaman ini punya sebelas tombol
+berlabel sama persis. Kondisi tunggunya dibatasi ke `dialog[open]`, bukan
+`<body>` -- pelajaran jebakan verifikasi kelima di `/farmasi`.
+
+```
+[ok]  halaman Template terbuka -- http://127.0.0.1:3100/template
+[ok]  tombol Ubah pada baris Hasil penunjang ditemukan
+[ok]  modal menyebut tabel sumbernya            (periksa_lab + periksa_radiologi)
+[ok]  modal menyebut kapan berbunyinya
+[ok]  modal memuat catatan yang TIDAK ada di tabel
+[ok]  kode pemicunya tetap terbaca              (RESULT_READY)
+[ok]  kotak isi pesan tetap ada
+
+SEMUA LOLOS
+```
+
+### Kebersihan
+
+Tidak ada migrasi, tidak ada perubahan skema, tidak ada sakelar kebijakan yang
+disentuh: perubahannya murni keterangan di layar plus satu uji. `template.is_active`
+seluruh baris tidak diubah, dan tidak satu pun pesan dikirim selama verifikasi.
