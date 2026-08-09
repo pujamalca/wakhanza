@@ -1,8 +1,9 @@
 import { auth } from '@/auth';
-import { WaSession, getSettingBool } from '@/models';
+import { WaSession, getSettingBool, getSetting } from '@/models';
 import { resendOutboxAction } from '../antrean/actions';
 import { SystemStatus } from './SystemStatus';
 import { InboundStatus } from './InboundStatus';
+import { AlertConfigWarning } from './AlertConfigWarning';
 import { VolumeChart } from './VolumeChart';
 import {
   startOfDay,
@@ -48,16 +49,18 @@ export default async function RingkasanPage() {
   const session = await auth();
   const isAdmin = session?.user.role === 'admin';
 
-  const [waSession, queue, weekCounts, daily, triggers, problems, inbound, autoReplyEnabled] = await Promise.all([
-    WaSession.findByPk(1),
-    fetchQueueDepth(),
-    fetchStatusCounts(startOfDay(REVIEW_WINDOW_DAYS - 1)),
-    fetchDailyVolume(CHART_DAYS),
-    fetchTriggerBreakdown(startOfDay(CHART_DAYS - 1)),
-    fetchRecentProblems(5),
-    fetchInboundActivity(),
-    getSettingBool('autoreply.enabled', false),
-  ]);
+  const [waSession, queue, weekCounts, daily, triggers, problems, inbound, autoReplyEnabled, alertWebhookUrl] =
+    await Promise.all([
+      WaSession.findByPk(1),
+      fetchQueueDepth(),
+      fetchStatusCounts(startOfDay(REVIEW_WINDOW_DAYS - 1)),
+      fetchDailyVolume(CHART_DAYS),
+      fetchTriggerBreakdown(startOfDay(CHART_DAYS - 1)),
+      fetchRecentProblems(5),
+      fetchInboundActivity(),
+      getSettingBool('autoreply.enabled', false),
+      getSetting('alert.webhook_url'),
+    ]);
 
   const today = daily[daily.length - 1]!;
   const yesterday = daily[daily.length - 2];
@@ -104,6 +107,12 @@ export default async function RingkasanPage() {
           itulah kenapa bug LID bisa berjam-jam tanpa satu pun indikator
           berubah. */}
       <InboundStatus inbound={inbound} autoReplyEnabled={autoReplyEnabled} />
+
+      {/* Operator tidak punya akses ke /pengaturan (admin-only), jadi
+          menampilkannya kepada mereka cuma menunjuk masalah yang tidak bisa
+          mereka selesaikan -- pola yang sama dengan tombol Kirim broadcast
+          di atas. */}
+      {isAdmin && <AlertConfigWarning webhookConfigured={Boolean(alertWebhookUrl)} />}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
