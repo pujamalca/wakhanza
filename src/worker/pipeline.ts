@@ -11,6 +11,7 @@ import {
 } from '@/models';
 import type { OutboxStatus, TujuanMode } from '@/models';
 import { turunkanKunciTujuan } from '@/core/idempotency';
+import { kunciYangDitulis, sasaranPemicuPasien } from '@/core/tujuanPemicu';
 import { isChatIdValid } from '@/core/farmasiTarget';
 import { getHospitalIdentity, type HospitalIdentity } from '@/khanza/common';
 import { renderTemplate, type TemplateVariable } from '@/core/template';
@@ -484,8 +485,10 @@ export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineCont
     return;
   }
 
-  const kePasien = sebar.mode !== 'tujuan';
-  const keTujuan = sebar.mode !== 'pasien';
+  // Lewat penurunan BERSAMA dengan `saringKunciBaruPemicuPasien()`. Dua tempat
+  // yang menghitung sendiri "ke mana pemicu ini pergi" adalah persis bagaimana
+  // penyaringnya sempat memeriksa kunci yang tidak pernah ditulis di sini.
+  const { kePasien, keTujuan } = sasaranPemicuPasien(sebar.mode);
 
   /**
    * Mode 'tujuan' tanpa satu pun tujuan aktif berarti pesannya TIDAK PERGI KE
@@ -559,4 +562,77 @@ export async function saringKunciBaru<T>(rows: T[], kunci: (row: T) => string): 
   });
   const sudah = new Set(existing.map((o) => o.idempotencyKey));
   return rows.filter((row) => !sudah.has(kunci(row)));
+}
+
+/**
+ * SELURUH kunci yang benar-benar akan ditulis `enqueuePemicuPasien()` untuk satu
+ * kunci dasar -- yang jumlahnya bergantung pada `tujuan_mode` dan berapa tujuan
+ * aktif yang terpasang.
+ *
+ * Ada karena `saringKunciBaru()` di atasnya memeriksa kunci DASAR, dan itu
+ * DIAM-DIAM SALAH untuk pemicu pasien bermode `tujuan`: pada mode itu kunci
+ * dasarnya tidak pernah tertulis ke `outbox` sama sekali -- yang tertulis hanya
+ * turunannya per alamat (`turunkanKunciTujuan`). Penyaringnya karena itu tidak
+ * pernah menyaring apa pun, dan akibatnya berlapis, semuanya tanpa satu galat:
+ *
+ *   1. Jendela pindainya diproses ULANG seutuhnya tiap siklus, selamanya.
+ *   2. Kuota per siklus dimakan baris yang sudah dikabarkan kemarin, sehingga
+ *      yang baru tidak pernah kebagian -- yaitu PERSIS kegagalan yang komentar
+ *      "dedup dulu, kuota belakangan" di runner-nya ada untuk mencegah.
+ *   3. Angka `baru`/`terkirim` di log menghitung pesan yang tidak pernah dibuat,
+ *      sehingga log membantah `outbox` dan tidak ada yang bisa dipercaya.
+ *
+ * Ditemukan dari log produksi: siklus KONTROL_TERBIT melaporkan `baru:1,
+ * terkirim:1` tiap 60 detik selama berjam-jam sementara `outbox` berisi tepat 2
+ * baris sejak sehari sebelumnya.
+ */
+function kunciYangDitulisUntuk(kunciDasar: string, ctx: PipelineContext): string[] {
+  const sebar = ctx.pemicuPasien;
+  // Konteks tanpa `pemicuPasien` = pemicu yang memang tidak punya tujuan
+  // tambahan; `enqueuePemicuPasien()` meneruskannya apa adanya ke
+  // `enqueueMessage()`, jadi yang tertulis tepat satu kunci dasar.
+  if (!sebar) return [kunciDasar];
+  return kunciYangDitulis(
+    kunciDasar,
+    sebar.mode,
+    sebar.targets.map((t) => t.chatId),
+  );
+}
+
+/**
+ * Padanan `saringKunciBaru()` untuk pemicu pasien -- satu-satunya yang benar
+ * bila `enqueuePemicuPasien()` yang dipakai untuk mengirimnya.
+ *
+ * Sebuah baris DIPERTAHANKAN bila MASIH ADA satu saja kunci yang belum tertulis,
+ * bukan hanya bila seluruhnya belum. Bedanya menggigit tepat saat staf menambah
+ * tujuan baru: seluruh baris di jendela sudah punya kunci untuk grup lama, dan
+ * membuang barisnya karena "sudah pernah" berarti grup yang baru saja dipasang
+ * tidak pernah menerima apa pun. `uq_idem` tetap yang menolak salinan yang
+ * memang sudah ada, jadi mempertahankannya tidak menghasilkan pesan ganda.
+ *
+ * Mode `tujuan` TANPA tujuan aktif menghasilkan nol kunci. Barisnya sengaja
+ * TETAP diteruskan, supaya keadaan itu sampai ke `enqueuePemicuPasien()` yang
+ * mencatatnya sebagai ERROR -- membuangnya di sini akan mengubah salah setel
+ * yang berisik menjadi pemicu yang diam-diam tidak mengirim ke mana pun.
+ */
+export async function saringKunciBaruPemicuPasien<T>(
+  rows: T[],
+  kunci: (row: T) => string,
+  ctx: PipelineContext,
+): Promise<T[]> {
+  if (rows.length === 0) return rows;
+
+  const perBaris = rows.map((row) => kunciYangDitulisUntuk(kunci(row), ctx));
+  const semua = perBaris.flat();
+  if (semua.length === 0) return rows;
+
+  const existing = await Outbox.findAll({
+    where: { idempotencyKey: { [Op.in]: semua } },
+    attributes: ['idempotencyKey'],
+  });
+  const sudah = new Set(existing.map((o) => o.idempotencyKey));
+  return rows.filter((_row, i) => {
+    const kunciBaris = perBaris[i] ?? [];
+    return kunciBaris.length === 0 || kunciBaris.some((k) => !sudah.has(k));
+  });
 }

@@ -1,5 +1,6 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes } from 'sequelize';
 import { db } from '@/db/wakhanza';
+import type { ModeTujuan } from '@/core/tujuanPemicu';
 
 /**
  * Ke mana pesan sebuah pemicu dikirim (migrations/018).
@@ -7,8 +8,14 @@ import { db } from '@/db/wakhanza';
  * `pasien` adalah default dan berarti persis perilaku sebelum tujuan tambahan
  * ada -- satu kejadian, satu pasien, satu nomor dari `sik`. Dua nilai lainnya
  * baru berlaku bila pemicunya punya baris `template_target` yang aktif.
+ *
+ * Union-nya DIAMBIL dari `core/tujuanPemicu.ts`, bukan dideklarasikan lagi di
+ * sini: aturan penyebarannya (siapa dapat apa, kunci idempoten mana yang
+ * tertulis) tinggal di sana dan diuji unit, jadi dua deklarasi yang bisa
+ * menyimpang adalah persis yang tidak boleh ada. Arah impornya aman -- `core/`
+ * tidak pernah mengimpor `models/`.
  */
-export type TujuanMode = 'pasien' | 'pasien_dan_tujuan' | 'tujuan';
+export type TujuanMode = ModeTujuan;
 
 export class Template extends Model<InferAttributes<Template>, InferCreationAttributes<Template>> {
   declare triggerCode: string;

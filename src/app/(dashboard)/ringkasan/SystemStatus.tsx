@@ -26,21 +26,43 @@ export function SystemStatus({
   const stale = heartbeatStale(heartbeatAt);
   const healthy = status === 'ready' && !stale;
 
-  // Worker diam padahal status masih tertulis 'ready' -- keadaan yang paling
-  // mudah terlewat, jadi diberi kalimatnya sendiri alih-alih ikut kalimat status.
+  /**
+   * TIGA keadaan, bukan dua, dan denyut basi MENANG atas status apa pun.
+   *
+   * Sejak denyutnya ditulis tanpa syarat (worker/index.ts), umur denyut menjawab
+   * "apakah ada proses worker yang hidup" sementara `status` menjawab "bagaimana
+   * keadaan sesi saat baris ini terakhir ditulis". Begitu denyutnya basi, status
+   * di baris itu adalah PENINGGALAN proses yang sudah mati -- membacanya sebagai
+   * keadaan sekarang menghasilkan diagnosis yang salah, dan salahnya mengarahkan
+   * orang ke tindakan yang keliru: `disconnected` + denyut basi akan menyuruh
+   * petugas menautkan ulang sesi lewat /koneksi, padahal tidak ada proses yang
+   * bisa menerima perintah itu sama sekali.
+   *
+   * Pembedaannya menentukan siapa yang harus bertindak:
+   *   denyut basi              -> prosesnya tidak jalan; PM2/layanan yang diperiksa
+   *   denyut hidup, sesi bermasalah -> watchdog memulihkan sendiri <=15 menit
+   */
+  const workerMati = stale;
+
   const message = healthy
     ? WA_STATUS_HELP.ready
-    : status === 'ready'
-      ? 'Sesi tercatat tersambung, tapi worker berhenti melapor lebih dari 2 menit. Prosesnya kemungkinan macet -- selama ini berlangsung, tidak ada pesan yang benar-benar terkirim.'
+    : workerMati
+      ? 'Worker tidak melapor lebih dari 2 menit, jadi prosesnya kemungkinan besar tidak berjalan. Status sesi di bawah adalah catatan TERAKHIR sebelum ia berhenti, bukan keadaan sekarang. Selama ini berlangsung tidak ada pesan yang terkirim maupun diterima, dan menautkan ulang sesi tidak akan menolong -- yang perlu diperiksa adalah prosesnya sendiri.'
       : WA_STATUS_HELP[status];
 
   const tone = healthy
     ? 'border-success/30 bg-success/5'
-    : status === 'qr_pending' || status === 'authenticating' || (status === 'ready' && stale)
-      ? 'border-warning/40 bg-warning/5'
-      : 'border-destructive/40 bg-destructive/5';
+    : workerMati
+      ? 'border-destructive/40 bg-destructive/5'
+      : status === 'qr_pending' || status === 'authenticating'
+        ? 'border-warning/40 bg-warning/5'
+        : 'border-destructive/40 bg-destructive/5';
 
-  const iconTone = healthy ? 'bg-success/15 text-success' : status === 'ready' || status === 'qr_pending' || status === 'authenticating' ? 'bg-warning/15 text-warning' : 'bg-destructive/15 text-destructive';
+  const iconTone = healthy
+    ? 'bg-success/15 text-success'
+    : !workerMati && (status === 'qr_pending' || status === 'authenticating')
+      ? 'bg-warning/15 text-warning'
+      : 'bg-destructive/15 text-destructive';
 
   return (
     // Di bawah sm tombolnya turun ke baris sendiri selebar panel. Dengan
@@ -55,7 +77,11 @@ export function SystemStatus({
 
         <div className="min-w-0">
           <p className="font-medium">
-            {healthy ? 'Sistem berjalan normal' : `Sesi WhatsApp: ${WA_STATUS_LABEL[status]}`}
+            {healthy
+              ? 'Sistem berjalan normal'
+              : workerMati
+                ? 'Worker tidak berjalan'
+                : `Sesi WhatsApp: ${WA_STATUS_LABEL[status]}`}
           </p>
           <p className="mt-0.5 text-sm text-muted-foreground">{message}</p>
 
@@ -85,7 +111,10 @@ export function SystemStatus({
         size="md"
         className="w-full shrink-0 justify-center sm:w-auto"
       >
-        {healthy ? 'Lihat koneksi' : 'Perbaiki sekarang'}
+        {/* "Perbaiki sekarang" menjanjikan halaman itu bisa menyelesaikannya, dan
+            untuk worker yang mati janji itu keliru -- tidak ada proses yang bisa
+            menerima perintah apa pun dari sana. */}
+        {healthy ? 'Lihat koneksi' : workerMati ? 'Lihat detail' : 'Perbaiki sekarang'}
       </LinkButton>
     </section>
   );

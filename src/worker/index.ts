@@ -21,7 +21,7 @@ import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
-import { initWaClient, isWaReady, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
+import { initWaClient, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
 import { sendAlert } from './alert';
@@ -31,14 +31,38 @@ import { randomDelayMs } from '@/core/retry';
 let running = true;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Berapa siklus yang sedang BERADA DI DALAM `fn()` saat ini.
+ *
+ * Ada supaya `shutdown()` bisa menunggu mereka selesai sebelum menutup kolam
+ * database. Tanpa itu penutupannya membalap siklus yang masih berjalan, dan
+ * yang muncul di log adalah `ConnectionManager.getConnection was called after
+ * the connection manager was closed!` -- terlihat pada loop `heartbeat` dan
+ * `poller:sisip` di produksi 2026-08-09.
+ *
+ * Yang membuatnya lebih dari sekadar berisik: galat itu lahir DI TENGAH sebuah
+ * siklus, jadi pekerjaan yang setengah jalan ditinggalkan pada titik sembarang.
+ * Untuk pemicu kelas sisip, watermark-nya sudah mungkin termajukan sementara
+ * pesannya belum sempat masuk `outbox` -- baris yang lompat itu tidak akan
+ * pernah dibaca lagi, tanpa satu pun tanda.
+ */
+let siklusBerjalan = 0;
+
+async function jalankanSiklus(name: string, fn: () => Promise<void>): Promise<void> {
+  siklusBerjalan++;
+  try {
+    await fn();
+  } catch (err) {
+    logger.error({ loop: name, ...safeError(err) }, 'loop error tak tertangani');
+  } finally {
+    siklusBerjalan--;
+  }
+}
+
 async function loop(name: string, fn: () => Promise<void>, intervalMs: number): Promise<void> {
   while (running) {
     const startedAt = Date.now();
-    try {
-      await fn();
-    } catch (err) {
-      logger.error({ loop: name, ...safeError(err) }, 'loop error tak tertangani');
-    }
+    await jalankanSiklus(name, fn);
     const elapsed = Date.now() - startedAt;
     await sleep(Math.max(intervalMs - elapsed, 0));
   }
@@ -49,14 +73,36 @@ async function dispatcherLoop(): Promise<void> {
   const maxDelay = Number(process.env.WA_SEND_MAX_DELAY_MS ?? '8000');
   while (running) {
     let didWork = false;
-    try {
+    // Ikut dihitung `siklusBerjalan`: justru inilah loop yang paling mahal
+    // dipotong di tengah, karena titik yang tidak bisa kita ketahui hasilnya
+    // (`sending` sudah ditulis, pesannya mungkin sudah sampai ke WhatsApp) ada
+    // di dalamnya -- lihat recoverInterruptedSends().
+    await jalankanSiklus('dispatcher', async () => {
       didWork = await dispatchTick();
-    } catch (err) {
-      logger.error({ loop: 'dispatcher', ...safeError(err) }, 'dispatcher tick error');
-    }
+    });
     // F5.2: jeda acak 3-8 detik HANYA setelah percobaan kirim sungguhan, supaya
     // pengiriman beruntun cepat (pola pemicu deteksi spam WhatsApp) tidak terjadi.
     await sleep(didWork ? randomDelayMs(minDelay, maxDelay) : 5000);
+  }
+}
+
+/**
+ * Menunggu siklus yang sedang berjalan selesai, dengan anggaran.
+ *
+ * Anggarannya WAJIB ada dan wajib lebih pendek dari `kill_timeout` PM2 (20
+ * detik): sebagian pemanggil `shutdown()` keluar JUSTRU karena ada yang
+ * menggantung, dan menunggu tanpa batas berarti proses yang seharusnya
+ * disupervisi ulang malah berhenti di tempat -- persis kegagalan yang sedang
+ * dipulihkan. Lewat anggaran, kolam tetap ditutup: satu galat koneksi pada
+ * siklus yang memang sudah macet lebih murah daripada tidak pernah keluar.
+ */
+async function tungguSiklusSelesai(budgetMs = 8_000): Promise<void> {
+  const batas = Date.now() + budgetMs;
+  while (siklusBerjalan > 0 && Date.now() < batas) {
+    await sleep(100);
+  }
+  if (siklusBerjalan > 0) {
+    logger.warn({ siklusBerjalan }, 'siklus masih berjalan saat kolam database ditutup -- galat koneksi mungkin menyusul');
   }
 }
 
@@ -107,6 +153,11 @@ async function shutdown(alasan: string, exitCode = 0): Promise<void> {
     // merusak sesi untuk start berikutnya, jadi ia tidak boleh diam-diam.
     logger.warn(safeError(err), 'sesi WhatsApp tidak bisa ditutup rapi');
   }
+  // `running = false` di atas hanya menghentikan siklus BERIKUTNYA; yang sedang
+  // berada di dalam `fn()` tidak terpengaruh sama sekali. Menutup kolam di sini
+  // tanpa menunggu adalah yang menghasilkan `ConnectionManager ... closed` di
+  // tengah siklus, berikut pekerjaan setengah jalan yang ditinggalkannya.
+  await tungguSiklusSelesai();
   await sik.close();
   await db.close();
   // Dilepas SESUDAH sesi ditutup: pengganti yang sedang menunggu tidak boleh
@@ -419,13 +470,43 @@ async function main(): Promise<void> {
    */
   void loop('pemesanan', runPemesananCycle, scanIntervalMs);
   void dispatcherLoop();
-  void loop(
-    'heartbeat',
-    async () => {
-      if (await isWaReady()) await updateHeartbeat();
-    },
-    30_000,
-  );
+  /**
+   * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan
+   * gerbang itu membuat `heartbeat_at` menjawab pertanyaan yang salah.
+   *
+   * Umur denyut adalah SATU-SATUNYA hal yang bisa menjawab "apakah ada proses
+   * worker yang hidup sekarang" -- `status` tidak bisa, karena baris itu ditulis
+   * proses yang mungkin sudah mati dan tidak ada yang membatalkannya. Digerbangi
+   * kesiapan sesi, denyutnya ikut membeku saat sesi terputus PADAHAL prosesnya
+   * sehat, sehingga dua keadaan yang butuh tindakan berbeda menjadi tidak bisa
+   * dibedakan dari luar:
+   *
+   *   worker mati            -> PM2/layanannya yang harus diperiksa
+   *   worker hidup, sesi mati -> watchdog memulihkannya sendiri dalam <=15 menit
+   *
+   * Sesudah gerbangnya dicabut, denyut basi berarti PROSESNYA yang tidak ada --
+   * tidak ada tafsir kedua.
+   *
+   * Konsekuensi yang disengaja: `heartbeatStale()` di dashboard berhenti berarti
+   * "sesi bermasalah" dan mulai berarti "worker tidak hidup". SystemStatus ikut
+   * diperbarui supaya kalimatnya tidak menjanjikan diagnosis yang salah.
+   *
+   * ==========================================================================
+   * CARA MEMERIKSANYA LEWAT `mysql` -- dan jebakan yang menelan satu diagnosis
+   * ==========================================================================
+   *
+   * `heartbeat_at` ditulis Sequelize yang memakai `timezone: '+00:00'`, jadi
+   * isinya UTC; `NOW()` di MariaDB mengembalikan waktu WIB. `TIMESTAMPDIFF(...,
+   * heartbeat_at, NOW())` karena itu SELALU melebih-lebihkan umurnya tepat 25.200
+   * detik (7 jam), dan hasilnya terbaca persis seperti worker yang mati semalaman
+   * padahal denyutnya baru beberapa detik. Sudah benar-benar menyesatkan sekali.
+   *
+   *   SELECT TIMESTAMPDIFF(SECOND, CONVERT_TZ(heartbeat_at,'+00:00','+07:00'), NOW())
+   *
+   * Lewat Sequelize (dan karena itu lewat dashboard) tidak ada masalah sama
+   * sekali -- tulis dan baca memakai konversi yang sepasang.
+   */
+  void loop('heartbeat', updateHeartbeat, 30_000);
   void loop('session-command', processSessionCommand, 5_000);
   void loop('session-watchdog', sessionWatchdog, 60_000);
 
@@ -443,6 +524,35 @@ process.on('message', (msg) => {
 });
 
 main().catch((err) => {
+  /**
+   * SAAT worker sedang berhenti, kegagalan `main()` adalah AKIBAT penutupan itu
+   * sendiri -- bukan sebab tersendiri, dan bukan alasan untuk memilih kode
+   * keluar.
+   *
+   * `shutdown()` memanggil `getClient().destroy()`, yang menutup Chromium DI
+   * BAWAH `initWaClient()` yang mungkin masih ditunggu `main()`. Yang menyusul
+   * adalah `Protocol error (Runtime.callFunctionOn): Target closed`, ditangkap
+   * di sini, lalu `process.exit(1)` -- MENIMPA kode keluar yang sudah dipilih
+   * `shutdown()`.
+   *
+   * Akibatnya fatal dan tidak kelihatan: kode 75 (KODE_KELUAR_DIGANTIKAN) ada di
+   * `stop_exit_codes` PM2 supaya instance yang diminta mundur TIDAK dinyalakan
+   * ulang; kode 1 tidak. Jadi tiap pemegang yang mundur justru dilahirkan
+   * kembali, mengusir penggantinya, lalu mundur lagi -- loop yang tidak pernah
+   * konvergen. Terlihat langsung pada 2026-08-09: instance baru tiap ~7,5 detik,
+   * masing-masing menuliskan "berhenti..." (exitCode 75) yang diikuti "worker
+   * gagal memulai" pada pid yang sama tujuh milidetik kemudian.
+   *
+   * Ini BUKAN bug yang sama dengan yang sudah tercatat di singleInstance.ts.
+   * Yang di sana tentang exit 0 yang memberi makan `autorestart`; perbaikannya
+   * (kode keluar 75 + `stop_exit_codes`) benar dan tetap berlaku -- ia cuma
+   * tidak pernah sempat dipakai, karena kode keluarnya ditimpa di sini sebelum
+   * PM2 sempat melihatnya.
+   */
+  if (sedangBerhenti) {
+    logger.warn(safeError(err), 'main() gagal karena worker sedang berhenti -- kode keluar shutdown() dipertahankan');
+    return;
+  }
   logger.fatal(safeError(err), 'worker gagal memulai');
   process.exit(1);
 });

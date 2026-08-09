@@ -4,7 +4,7 @@ import { hitungJendelaPindai } from '@/core/jendelaPindai';
 import { tanggalLokal } from '@/core/bpjs';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import type { TemplateVariable } from '@/core/template';
-import { loadPipelineContext, enqueuePemicuPasien, saringKunciBaru } from './pipeline';
+import { loadPipelineContext, enqueuePemicuPasien, saringKunciBaruPemicuPasien } from './pipeline';
 import { logger, safeError } from '@/lib/logger';
 
 /**
@@ -134,8 +134,16 @@ export async function runKontrolTerbitCycle(now: Date = new Date()): Promise<voi
    * kemarin dan yang baru tidak pernah kebagian -- kegagalan yang tidak
    * meninggalkan satu pun galat. Pelajaran yang sama sudah dibayar di
    * `suratRunner.ts` dan `pemesananRunner.ts`.
+   *
+   * Lewat `saringKunciBaruPemicuPasien()`, BUKAN `saringKunciBaru()` biasa, dan
+   * itu bukan kerapian: pemicu ini dikirim lewat `enqueuePemicuPasien()`, yang
+   * pada `tujuan_mode = 'tujuan'` hanya menulis kunci TURUNAN per alamat. Kunci
+   * dasar yang diperiksa penyaring biasa karena itu tidak pernah ada di
+   * `outbox`, sehingga ia tidak menyaring apa pun dan justru MENGHIDUPKAN
+   * kegagalan yang dijelaskan alinea di atas. Terjadi sungguhan di produksi --
+   * lihat kunciYangDitulis() di pipeline.ts.
    */
-  const belum = await saringKunciBaru(rows, kunciTerbit);
+  const belum = await saringKunciBaruPemicuPasien(rows, kunciTerbit, ctx);
   if (belum.length === 0) return;
 
   const dikerjakan = belum.slice(0, Math.max(0, kuota));
