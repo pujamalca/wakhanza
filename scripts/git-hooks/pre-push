@@ -1,0 +1,37 @@
+#!/bin/sh
+# Pre-push: typecheck + lint + test, SEBELUM kode meninggalkan mesin ini.
+#
+# Rekomendasi teknis 9 Agustus 2026 (R6): tidak ada CI, tidak ada git hook --
+# 606 uji yang selesai dalam 1,72 detik tidak dijalankan siapa pun kecuali
+# diingat. Sengaja HANYA tiga langkah ini, dan ketiganya tidak butuh database
+# hidup: verify:db/verify:plans SENGAJA TIDAK ikut, karena keduanya menuntut
+# MariaDB hidup + kredensial .env -- sesuatu yang tidak semua clone repo ini
+# punya. Jalankan keduanya terjadwal di server produksi (lihat CLAUDE.md),
+# bukan di sini.
+#
+# Dipasang lewat scripts/install-git-hooks.ps1 -- .git/hooks/ tidak ikut git,
+# jadi berkas ini adalah SUMBERnya, bukan hook yang benar-benar git baca.
+
+echo "[pre-push] typecheck ..."
+npm run typecheck
+if [ $? -ne 0 ]; then
+  echo "[pre-push] typecheck GAGAL -- push dibatalkan."
+  exit 1
+fi
+
+echo "[pre-push] lint ..."
+npm run lint
+if [ $? -ne 0 ]; then
+  echo "[pre-push] lint GAGAL -- push dibatalkan."
+  exit 1
+fi
+
+echo "[pre-push] test ..."
+npx jest --silent
+if [ $? -ne 0 ]; then
+  echo "[pre-push] test GAGAL -- push dibatalkan."
+  exit 1
+fi
+
+echo "[pre-push] typecheck + lint + test lolos."
+exit 0
