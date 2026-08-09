@@ -126,6 +126,7 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
           body: t.body,
           isActive: t.isActive,
           tujuanMode: t.tujuanMode,
+          batasPasienHarian: t.batasPasienHarian,
           targets: (targetPerPemicu.get(t.triggerCode) ?? []).map((x) => ({
             id: x.id,
             jenis: x.jenis,

@@ -21,6 +21,7 @@ export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = {
   failed_permanent: 'Gagal permanen',
   skipped_no_contact: 'Tanpa nomor',
   skipped_opt_out: 'Berhenti otomatis',
+  skipped_uji_terbatas: 'Tertahan jatah uji',
   expired: 'Kedaluwarsa',
 };
 
@@ -38,6 +39,8 @@ export const OUTBOX_STATUS_HELP: Record<OutboxStatus, string> = {
   skipped_no_contact: 'Pasien tidak punya nomor yang bisa dipakai. Perbaiki lewat halaman Nomor bermasalah.',
   skipped_opt_out:
     'Pasien meminta berhenti menerima pemberitahuan otomatis, jadi jenis pesan ini sengaja tidak dikirimi. Pengumuman broadcast dan balasan otomatis tidak terpengaruh.',
+  skipped_uji_terbatas:
+    'Pemicu ini sedang dibatasi mode uji terbatas dan jatah pasien hari ini sudah habis, jadi pesannya tidak dikirim. Naikkan batasnya di halaman Template bila memang sudah siap melayani lebih banyak. Pesan yang tertahan TIDAK dikirim susulan -- kejadiannya sudah lewat.',
   expired: 'Kejadiannya sudah terlalu lama saat giliran kirim tiba, jadi dibatalkan agar pasien tidak menerima kabar basi.',
 };
 

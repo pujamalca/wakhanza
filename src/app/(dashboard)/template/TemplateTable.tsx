@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from 'react';
 import { TRIGGER_TEMPLATE_VARIABLES, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
+import { BATAS_MAKSIMAL } from '@/core/ujiTerbatas';
 import {
   Input,
   MessageEditor,
@@ -35,6 +36,8 @@ export interface TriggerTemplateRow {
   body: string;
   isActive: boolean;
   tujuanMode: TujuanMode;
+  /** migrations/036 -- 0 = tanpa batas. */
+  batasPasienHarian: number;
   targets: TargetPemicuRow[];
 }
 
@@ -129,6 +132,21 @@ export function TriggerTemplateTable({
                   </td>
                   <td className={cellClass}>
                     <Badge variant={t.isActive ? 'success' : 'neutral'}>{t.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
+                    {/* Mode uji terbatas harus terlihat TANPA membuka modal.
+                        Batas yang dipasang lalu terlupakan berarti pemicu yang
+                        tampak "Aktif" diam-diam cuma melayani sebagian pasien --
+                        dan yang terlihat di Antrean cuma baris tertahan yang
+                        sebabnya tidak terjelaskan dari halaman ini. Ditempelkan
+                        ke sel Status, bukan jadi kolom baru: tabel ini sudah
+                        menyembunyikan kolom di bawah md. */}
+                    {t.isActive && t.batasPasienHarian > 0 && (
+                      <span
+                        className="mt-1 block text-xs text-warning"
+                        title={`Paling banyak ${t.batasPasienHarian} pasien per hari menerima pesan ini; sisanya tertahan. Ubah lewat tombol Ubah.`}
+                      >
+                        Uji terbatas: {t.batasPasienHarian}/hari
+                      </span>
+                    )}
                   </td>
                   <td className={cellClass}>
                     <div className="flex justify-end gap-1">
@@ -238,6 +256,32 @@ function TriggerTemplateModal({
           <label className="flex items-center gap-1.5 text-xs">
             <input type="checkbox" name="isActive" defaultChecked={row.isActive} className="accent-primary" />
             Aktif — kalau dimatikan, jenis pesan ini berhenti dikirim sama sekali
+          </label>
+        )}
+        {/* MODE UJI TERBATAS. Ditaruh berdampingan dengan sakelar Aktif karena
+            keduanya menjawab pertanyaan yang sama dari dua sisi: "berbunyi atau
+            tidak" dan "berbunyi untuk berapa orang". Yang paling gampang salah
+            baca adalah angka 0, jadi artinya ditulis di layar alih-alih
+            diserahkan ke tebakan. */}
+        {!readOnly && (
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium">Batas pasien per hari</span>
+            <Input
+              name="batasPasienHarian"
+              type="number"
+              min={0}
+              max={BATAS_MAKSIMAL}
+              step={1}
+              defaultValue={row.batasPasienHarian}
+              className="w-28"
+              fieldSize="sm"
+            />
+            <span className="block text-xs text-muted-foreground">
+              <strong>0 = tanpa batas.</strong> Isi angka untuk mencoba ke sebagian pasien dulu — mis. 5 berarti
+              paling banyak 5 pasien menerima jenis pesan ini per hari, sisanya tertahan dan tampil di Antrean
+              sebagai &ldquo;Tertahan jatah uji&rdquo;. Salinan ke grup tidak ikut dihitung, dan pesan yang
+              tertahan tidak dikirim susulan.
+            </span>
           </label>
         )}
         {state.error && <p className="text-xs text-destructive">{state.error}</p>}

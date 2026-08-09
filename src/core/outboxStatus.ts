@@ -22,6 +22,23 @@ export const OUTBOX_STATUSES = [
   'failed_permanent',
   'skipped_no_contact',
   'skipped_opt_out',
+  /**
+   * Jatah harian mode uji terbatas sudah habis untuk pemicu ini
+   * (`template.batas_pasien_harian`, migrations/036).
+   *
+   * Ditulis sebagai BARIS, bukan dilewati diam-diam, dan itu keputusan yang
+   * paling penting di fitur itu: baris yang tidak pernah dibuat tidak muncul di
+   * Antrean mana pun, sehingga "pemicunya rusak" dan "jatahnya habis" terlihat
+   * persis sama. Dengan barisnya ada, staf bisa melihat berapa yang tertahan
+   * hari itu dan memutuskan menaikkan batasnya.
+   *
+   * Efek samping yang justru diinginkan: kunci idempotennya ikut tertulis, jadi
+   * kejadian yang sama tidak dipertimbangkan lagi pada siklus berikutnya.
+   * Menaikkan batas TIDAK membangkitkan pesan yang sudah tertahan -- dan itu
+   * benar, karena nomor antrian atau pengingat kemarin tidak ada gunanya lagi
+   * hari ini.
+   */
+  'skipped_uji_terbatas',
   'expired',
 ] as const;
 
@@ -52,6 +69,9 @@ export const TERMINAL_OUTBOX_STATUSES = [
   'failed_permanent',
   'skipped_no_contact',
   'skipped_opt_out',
+  // Terminal: jatah yang habis hari ini tidak pulih besok untuk baris INI.
+  // Kejadiannya sudah lewat, dan pesan kejadian kemarin tidak berguna hari ini.
+  'skipped_uji_terbatas',
   'expired',
 ] as const satisfies readonly OutboxStatus[];
 

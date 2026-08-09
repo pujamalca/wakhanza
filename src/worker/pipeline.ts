@@ -12,6 +12,7 @@ import {
 import type { OutboxStatus, TujuanMode } from '@/models';
 import { turunkanKunciTujuan } from '@/core/idempotency';
 import { kunciYangDitulis, sasaranPemicuPasien } from '@/core/tujuanPemicu';
+import { bolehKirimKePasien } from '@/core/ujiTerbatas';
 import { isChatIdValid } from '@/core/farmasiTarget';
 import { getHospitalIdentity, type HospitalIdentity } from '@/khanza/common';
 import { renderTemplate, type TemplateVariable } from '@/core/template';
@@ -54,6 +55,18 @@ export interface PipelineContext {
   pemicuPasien?: {
     mode: TujuanMode;
     targets: TujuanTambahan[];
+    /** `template.batas_pasien_harian` (migrations/036). 0 = tanpa batas. */
+    batasHarian: number;
+    /**
+     * Jatah yang sudah terpakai hari ini. Dibaca sekali saat konteks dimuat,
+     * lalu DINAIKKAN SENDIRI oleh `enqueueMessage` selama siklus berjalan.
+     *
+     * Sengaja bisa berubah (bukan `readonly`): tanpa itu, seluruh baris dalam
+     * satu siklus membaca angka yang sama dan batas 5 meloloskan berapa pun
+     * baris yang kebetulan ada di siklus itu. Aman karena konteksnya dibuat
+     * ulang tiap siklus dan worker dijamin instance tunggal.
+     */
+    terpakaiHariIni: number;
   };
 }
 
@@ -126,8 +139,48 @@ export async function loadPipelineContext(triggerCode: string): Promise<Pipeline
     sensitivePoli: shared.sensitivePoli,
     sensitiveExam: shared.sensitiveExam,
     uniqueCodeTemplate: shared.uniqueCodeTemplate,
-    pemicuPasien: { mode: template.tujuanMode, targets },
+    pemicuPasien: {
+      mode: template.tujuanMode,
+      targets,
+      batasHarian: template.batasPasienHarian,
+      terpakaiHariIni: await hitungTerpakaiHariIni(triggerCode, template.batasPasienHarian),
+    },
   };
+}
+
+/**
+ * Berapa pesan yang SUDAH masuk antrean untuk pasien hari ini pada pemicu ini.
+ *
+ * Dibaca sekali per SIKLUS lalu ditambah di memori selama siklus berjalan
+ * (`enqueueMessage`), bukan di-query per baris: satu siklus pagi sibuk bisa
+ * berisi puluhan baris, dan angkanya cuma bergerak karena kita sendiri.
+ *
+ * TANPA batas = TANPA query. Ini bukan penghematan mikro melainkan syarat
+ * supaya migrations/036 benar-benar nol-perubahan-perilaku: seluruh baris
+ * `template` bawaannya 0, jadi tanpa cabang ini setiap siklus setiap pemicu
+ * mendapat satu query tambahan yang hasilnya tidak pernah dipakai.
+ *
+ * Yang dihitung hanya baris yang BENAR-BENAR menuju pasien: `chat_id IS NULL`
+ * membuang salinan ke grup, dan status yang dihitung hanya yang terkirim atau
+ * masih akan terkirim. Baris `skipped_*` sengaja TIDAK dihitung -- pesan yang
+ * gagal karena nomornya tidak terpakai tidak memapar seorang pasien pun, jadi
+ * memasukkannya ke jatah berarti jatah habis tanpa satu orang pun menerima
+ * apa-apa. Pelajaran yang sama dengan urutan pemeriksaan di core/suratOtomatis.ts.
+ */
+async function hitungTerpakaiHariIni(triggerCode: string, batas: number): Promise<number> {
+  if (batas <= 0) return 0;
+
+  const awalHari = new Date();
+  awalHari.setHours(0, 0, 0, 0);
+
+  return Outbox.count({
+    where: {
+      triggerCode,
+      chatId: null,
+      status: { [Op.in]: ['pending', 'sending', 'sent'] },
+      createdAt: { [Op.gte]: awalHari },
+    },
+  });
 }
 
 /**
@@ -411,6 +464,41 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
     // sesudahnya: untuk BROADCAST ke ratusan penerima, itu menghemat satu
     // query per baris yang hasilnya toh tidak dipakai.
     status = 'skipped_opt_out';
+  }
+
+  /**
+   * MODE UJI TERBATAS (migrations/036) -- diperiksa PALING AKHIR, dan urutannya
+   * yang menentukan kebenarannya.
+   *
+   * Pesan yang toh tidak akan terkirim -- nomornya tidak terpakai, atau
+   * pasiennya sudah minta berhenti -- TIDAK boleh memakan jatah. Terbalik, satu
+   * pasien tanpa nomor di awal antrean cukup untuk menahan pesan pasien lain
+   * tanpa sebab yang bisa dilihat siapa pun. Pelajaran yang sama sudah dibayar
+   * pada urutan pemeriksaan di `core/suratOtomatis.ts`.
+   *
+   * `!input.chatId` membuang salinan ke grup dengan sendirinya: yang dibatasi
+   * adalah paparan ke PASIEN, bukan lalu lintas pesan. Pemicu bermode `tujuan`
+   * karena itu tidak pernah menyentuh jatah ini sama sekali -- benar, karena ia
+   * memang tidak mengirim apa pun ke pasien mana pun.
+   */
+  const uji = ctx.pemicuPasien;
+  if (status === 'pending' && !input.chatId && uji) {
+    const keputusan = bolehKirimKePasien(uji.batasHarian, uji.terpakaiHariIni);
+    if (!keputusan.boleh) {
+      status = 'skipped_uji_terbatas';
+      logger.warn(
+        { triggerCode: ctx.triggerCode, batasHarian: uji.batasHarian, noRkmMedis: input.noRkmMedis },
+        'jatah uji terbatas hari ini habis -- pesan pasien ditahan',
+      );
+    } else {
+      uji.terpakaiHariIni++;
+      if (keputusan.sisa !== null && keputusan.sisa <= 3) {
+        logger.info(
+          { triggerCode: ctx.triggerCode, sisa: keputusan.sisa },
+          'jatah uji terbatas hampir habis',
+        );
+      }
+    }
   }
 
   try {

@@ -23,6 +23,14 @@ export class Template extends Model<InferAttributes<Template>, InferCreationAttr
   declare body: string;
   declare isActive: CreationOptional<boolean>;
   declare tujuanMode: CreationOptional<TujuanMode>;
+  /**
+   * Batas berapa PASIEN yang boleh menerima pemicu ini dalam sehari
+   * (migrations/036). **0 = tanpa batas**, dan itu bawaan seluruh baris lama --
+   * menafsirkannya sebagai "nol pesan" akan mematikan setiap pemicu yang sedang
+   * berjalan. Penafsirannya dipegang `bolehKirimKePasien()` di
+   * core/ujiTerbatas.ts, bukan diulang di tiap pembacanya.
+   */
+  declare batasPasienHarian: CreationOptional<number>;
   declare updatedAt: CreationOptional<Date>;
   declare updatedBy: string | null;
 }
@@ -38,6 +46,12 @@ Template.init(
       allowNull: false,
       defaultValue: 'pasien',
       field: 'tujuan_mode',
+    },
+    batasPasienHarian: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: 'batas_pasien_harian',
     },
     updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },
