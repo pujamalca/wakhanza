@@ -1536,3 +1536,272 @@ Yang terbukti: bentuk SQL-nya identik dengan yang lab (satu
 `buildResultReadySql()` yang cuma berganti nama tabel), EXPLAIN-nya lolos, dan
 worker menjalankan siklusnya. Yang TIDAK terbukti: bahwa barisnya terbaca.
 Periksa lewat `npm run poll:dryrun` sebelum menyalakan templatenya.
+
+
+## Dedup pemicu pasien, dan dua cacat daur hidup worker
+
+Diverifikasi 2026-08-09 terhadap database produksi (`wakhanza` + `alca`) dan
+instance PM2 yang sesungguhnya.
+
+### Bug dedup: kunci yang tidak pernah ditulis
+
+Log worker sebelum perbaikan, siklus `KONTROL_TERBIT` berulang tiap 60 detik:
+
+```
+09:00:17  {"dari":"2026-08-08","sampai":"2026-08-12","terbaca":1,"baru":1,"terkirim":1,"tujuan":1}
+09:01:17  {"dari":"2026-08-08","sampai":"2026-08-12","terbaca":1,"baru":1,"terkirim":1,"tujuan":1}
+```
+
+Jumlah baris semacam itu di seluruh log: **1.043**. Isi `outbox` yang sebenarnya:
+
+```
+SELECT COUNT(*) FROM outbox WHERE trigger_code='KONTROL_TERBIT';  -> 2
+```
+
+Kedua baris itu bertanggal 2026-08-08, keduanya ber-`chat_id` grup. Jadi 1.043
+laporan "terkirim" menghasilkan 2 pesan.
+
+Sebabnya dibuktikan langsung dengan menghitung kedua bentuk kunci untuk baris
+yang sama, terhadap database produksi:
+
+```
+tujuan_mode = tujuan, jumlah tujuan aktif = 1
+jendela 2026-08-08..2026-08-12 -> 1 baris
+
+surat 2026-000001 (kontrol 2026-08-09)
+  kunci DASAR   e70bd70476ab848e  ada di outbox? TIDAK
+  kunci DITULIS e3f61eec833fbe50  ada di outbox? YA
+
+penyaring LAMA  (kunci dasar)   -> 1 baris dianggap BARU
+penyaring BARU  (kunci ditulis) -> 0 baris dianggap BARU
+```
+
+`e3f61eec833fbe50...` cocok dengan `idempotency_key` baris `outbox` nomor 31675.
+Kunci dasarnya memang tidak pernah ada.
+
+Sesudah perbaikan diterapkan dan worker dimulai ulang, baris
+`siklus surat kontrol terbit selesai` **berhenti muncul sama sekali** -- runner
+kembali lebih awal karena `belum.length === 0`.
+
+Uji unit `core/tujuanPemicu.test.ts` (9 kasus) memaku aturannya, termasuk asersi
+`expect(kunci).not.toContain(DASAR)` untuk mode `tujuan` -- yaitu pernyataan
+langsung atas bug ini.
+
+### Loop restart: kode keluar yang ditimpa
+
+Log saat `pm2 restart` dijalankan sebelum perbaikan, satu pid, selisih 7 ms:
+
+```
+09:17:29 pid 8064  "wakhanza-worker berhenti..."   exitCode 75
+09:17:29 pid 8064  "worker gagal memulai"  Protocol error (Runtime.callFunctionOn): Target closed
+```
+
+Instance baru lahir tiap ~7,5 detik tanpa henti. Sesudah `main().catch()` diberi
+penjaga `sedangBerhenti`, baris penggantinya muncul dan kode keluarnya bertahan:
+
+```
+09:38:36  "main() gagal karena worker sedang berhenti -- kode keluar shutdown() dipertahankan"
+09:38:37  "sesi WhatsApp ditutup rapi"
+```
+
+**Itu belum cukup, dan sebabnya terpisah.** `stop_exit_codes` ternyata TIDAK ADA
+di proses yang berjalan walau tertulis di `ecosystem.config.js`:
+
+```
+$j = pm2 prettylist; if ($j -match "stop_exit_codes") {...}
+-> "stop_exit_codes TIDAK ADA di proses berjalan"
+```
+
+Konsekuensi langsung dari aturan yang sudah tercatat: `pm2 restart` tidak membaca
+ulang berkas konfigurasi. Sesudah `pm2 delete` + `pm2 start ecosystem.config.js
+--only wakhanza-worker` dari PowerShell:
+
+```
+-> "OK: stop_exit_codes kini ADA"
+pm2 list -> wakhanza-worker  online  uptime 22s  restarts 0
+pm2 save -> Successfully saved in C:\ProgramData\pm2\home\dump.pm2
+```
+
+Pelajaran yang ikut terbayar: **menyalakan ulang worker dua kali berdekatan**
+(09:47 dan 09:50) menjatuhkannya kembali ke loop, persis seperti yang sudah
+tertulis di CLAUDE.md. Pemulihannya mengikuti urutan yang terdokumentasi --
+`pm2 stop`, matikan Chromium yang menyaring `wwebjs_auth` (9 proses; 13 proses
+`chrome.exe` milik pemakai TIDAK tersentuh), pastikan port kunci 3101 tanpa
+LISTENING (13 sisa hanya TIME_WAIT), lalu `pm2 start`.
+
+### Kolam database ditutup di tengah siklus
+
+Sebelum perbaikan, pada penutupan:
+
+```
+{"loop":"heartbeat","message":"ConnectionManager.getConnection was called after the connection manager was closed!"}
+{"loop":"poller:sisip","message":"ConnectionManager.getConnection was called after the connection manager was closed!"}
+```
+
+Sesudah `tungguSiklusSelesai()` dipasang, galat itu tidak muncul lagi pada
+penutupan mana pun sesudahnya.
+
+### Jebakan pengukuran denyut
+
+Diagnosis awal sesi ini menyatakan worker mati 7 jam. **Itu keliru**, dan
+sebabnya jebakan yang sudah tertulis di CLAUDE.md:
+
+```
+status  tersimpan_utc        wib                  umur_benar  umur_salah
+ready   2026-08-09 02:20:24  2026-08-09 09:20:24  8 detik     25.208 detik
+```
+
+Selisihnya tepat 25.200 detik (7 jam). `heartbeat_at` ditulis Sequelize ber-
+`timezone: '+00:00'` sementara `NOW()` mengembalikan WIB. Nol baris `outbox`
+hari itu juga bukan gejala: hari Minggu, tidak ada pelayanan.
+
+## Konfirmasi terkirim (`migrations/035`) -- dan kenapa BELUM terbukti
+
+Skema diterapkan dan diperiksa:
+
+```
+[migrate] jalankan 035_konfirmasi_terkirim.sql ... selesai
+```
+
+`core/waAck.test.ts` -- 14 kasus lolos, termasuk yang memaku ketiga keputusan
+sulitnya: tingkat hanya boleh maju, `ACK_ERROR` boleh menimpa dari bawah, dan
+label grup berbeda dari perorangan.
+
+**Yang TIDAK terbukti: penautan id.** Lima kiriman uji sungguhan ke nomor RS
+sendiri (obrolan dengan diri sendiri, tidak mengganggu siapa pun) semuanya
+berakhir `sent` dengan `wa_message_id` tetap NULL:
+
+```
+34815  sent  NULL  -
+34820  sent  NULL  -
+34821  sent  NULL  -
+```
+
+Sebab pertamanya ditemukan lewat diagnostik yang ditambahkan khusus:
+
+```
+{"kunciPesan":"undefined","bentukId":"undefined","msg":"id pesan keluar tidak bisa diturunkan"}
+```
+
+Bukan `id`-nya yang hilang melainkan SELURUH objeknya. Dibuktikan di sumber
+pustaka yang terpasang:
+
+```
+whatsapp-web.js 1.34.7
+    return sentMsg ? new Message(this, sentMsg) : undefined;
+```
+
+`sentMsg` berasal dari `page.evaluate(...)` yang di mesin ini menjawab
+`undefined`. Pesannya tetap terkirim -- `send_log` mencatat `sent`, dan
+kirimannya benar-benar sampai.
+
+Jalur pengganti lewat event `message_create` sudah dipasang tapi **belum terbukti
+menautkan**: nol baris ber-`wa_message_id` sesudah percobaan berikutnya, dan nol
+galat. Penelusuran dihentikan sadar-sadar karena tiap iterasi menuntut satu
+restart worker lagi pada proses produksi, dan cadangan restart hari itu sudah
+jauh terlampaui. Sebagai gantinya, ketiga sebab kegagalan yang mungkin kini
+DIBEDAKAN di log pada level `warn` (id tidak terbaca / isi kosong / tidak ada
+baris cocok, berikut jumlah kandidat), supaya jawabannya didapat pada restart
+berikutnya tanpa mengulang seluruh percobaan.
+
+Selama belum tertaut, fiturnya merosot persis seperti rancangannya: kolom kosong
+dan UI berbunyi "Belum ada kabar" -- yang memang bukti POSITIF, bukan negatif.
+Tidak ada yang menyesatkan dan tidak ada yang rusak.
+
+Baris uji dibersihkan (`DELETE ... WHERE body LIKE '%uji konfirmasi terkirim%'`,
+5 baris) dan skrip sementaranya dihapus.
+
+## Mode uji terbatas (`migrations/036`) -- supaya mode pasien tidak harus taruhan penuh
+
+Skema diterapkan, dan nol-perubahan-perilaku dibuktikan pada baris yang sudah ada:
+
+```
+[migrate] jalankan 036_uji_terbatas.sql ... selesai
+
+BILLING_READY  pasien  0
+BOOK_CANCEL    pasien  0
+BOOK_CONFIRM   pasien  0
+BOOK_REMIND    tujuan  0
+
+enum('pending','sending','sent','failed','failed_permanent',
+     'skipped_no_contact','skipped_opt_out','skipped_uji_terbatas','expired')
+```
+
+Seluruh baris mendapat 0 = tanpa batas, jadi tidak satu pun pemicu berubah
+perilaku. `core/ujiTerbatas.test.ts` (9 kasus) memaku penafsiran itu lebih dulu,
+termasuk asersi bahwa `bolehKirimKePasien(0, 9999)` tetap `{boleh:true}`.
+
+Gerbang pembagi-habis `core/outboxStatus.test.ts` tetap lolos dengan status baru,
+dan `tsc` MENOLAK build sampai `OUTBOX_STATUS_LABEL`/`OUTBOX_STATUS_HELP` diisi:
+
+```
+labels.ts(16,14): error TS2741: Property 'skipped_uji_terbatas' is missing
+labels.ts(28,14): error TS2741: Property 'skipped_uji_terbatas' is missing
+```
+
+Itu gerbangnya bekerja -- status baru tidak bisa lolos tanpa keterangannya.
+
+Kehadirannya di build produksi dibuktikan tanpa membuat akun admin sementara:
+
+```
+4 berkas  <- "Batas pasien per hari"
+2 berkas  <- "Uji terbatas:"
+16 berkas <- "Tertahan jatah uji"
+```
+
+## Panel pertanyaan tak terjawab (`/balasan-otomatis`)
+
+Angka yang melahirkannya, diukur atas 30 hari produksi:
+
+```
+SELECT dibalas, COUNT(*) FROM inbound_message WHERE created_at >= NOW() - INTERVAL 30 DAY GROUP BY 1;
+0  207
+1   11
+```
+
+`core/pertanyaanTakTerjawab.test.ts` -- 14 kasus lolos.
+
+Dijalankan atas data produksi sungguhan, hasil SEBELUM penyaring kebisingan
+ditambahkan:
+
+```
+pesan perorangan tak terjawab 30 hari : 84 (berteks: 24)
+kata kunci aturan terpasang           : 19
+
+    3x apotik      3x harga       2x 40y4th4    2x abaikan
+    2x adalah      2x ado         2x alca       2x batusangkar
+    2x bayar       2x bit         2x buka       2x cd260781880
+    2x https       2x hubungi     2x invoice
+```
+
+Dua hal yang terlihat dari situ dan langsung diperbaiki: token bercampur
+huruf-angka (`40y4th4`, `cd260781880` -- kode promo dan id transaksi dari pesan
+promosi) serta potongan tautan (`https`, `bit`) mendominasi dan tidak akan pernah
+jadi aturan; dan angka 84 membohongi dasar analisisnya karena hanya **24** pesan
+yang benar-benar berteks. Keduanya dipatok uji tersendiri yang komentarnya
+menyebut nilai yang benar-benar ditemukan.
+
+Yang tersisa sesudah penyaringan adalah yang memang berguna: `apotik` dan `harga`,
+masing-masing 3 pesan berbeda -- pertanyaan apotek yang nyata dan belum punya
+aturan.
+
+Kehadirannya di build produksi:
+
+```
+2 berkas  <- "Kata yang sering ditanya tapi belum punya aturan"
+2 berkas  <- "Belum bisa dianalisis"
+```
+
+## Pemeriksaan menyeluruh sesudah keempatnya
+
+```
+npm run typecheck   bersih
+npm run lint        bersih
+npx jest            36 suite, 606 uji lolos   (dari 553 sebelum sesi ini)
+npm run build       Compiled successfully in 6.0s
+npm run migrate     035 dan 036 diterapkan
+```
+
+Keadaan akhir worker: `wa_session.status = ready`, denyut 16 detik (diukur lewat
+`CONVERT_TZ`), satu pid, siklus berjalan normal, nol galat sejak instance
+terakhir. `wakhanza-web` menjawab HTTP 200 pada `/login`.
