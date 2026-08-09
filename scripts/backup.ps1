@@ -34,6 +34,66 @@ function Get-EnvFileValue {
     return ($line -split '=', 2)[1]
 }
 
+# Rekomendasi teknis 9 Agustus 2026 (R9): cadangan berjalan tiap hari dan
+# TIDAK ADA yang pernah memeriksanya. Ukurannya terbukti berayun 14,53 MB ->
+# 56,87 MB dalam satu minggu produksi tanpa satu orang pun melihat -- bisa
+# jadi wajar (lonjakan kunjungan pasien), bisa juga tanda dump gagal sebagian
+# atau sesi WhatsApp membengkak tak wajar. Skrip ini hanya bisa MENANDAI
+# penyimpangan, bukan MEMUTUSKAN mana yang wajar -- itu tetap pekerjaan
+# manusia, dan fungsi ini cuma memastikan ada manusia yang diberi tahu.
+#
+# TIDAK PERNAH melempar -- prinsip yang sama dengan worker/alert.ts's
+# sendAlert(): kegagalan mengirim peringatan tidak boleh membuat backup.ps1
+# sendiri gagal, itu menukar satu masalah (ukuran mencurigakan) dengan dua
+# (cadangan hari ini pun tidak pernah tersimpan).
+function Send-BackupAlert {
+    param([string]$Message)
+    try {
+        $dbHost = Get-EnvFileValue "WA_DB_HOST"
+        $dbPort = Get-EnvFileValue "WA_DB_PORT"
+        if (-not $dbPort) { $dbPort = "3306" }
+        $dbName = Get-EnvFileValue "WA_DB_NAME"
+        $dbUser = Get-EnvFileValue "WA_DB_USER"
+        $dbPass = Get-EnvFileValue "WA_DB_PASS"
+        if (-not $dbHost -or -not $dbUser -or -not $dbName) {
+            Write-Output "    (peringatan dilewati -- kredensial WA_DB_* tidak lengkap di .env)"
+            return
+        }
+
+        # alert.webhook_url hidup di tabel app_setting (dashboard), bukan
+        # .env -- dibaca lewat `mysql` langsung karena skrip ini PowerShell
+        # murni, tidak mengimpor kode Node/Sequelize milik aplikasi.
+        if ($dbPass) { $env:MYSQL_PWD = $dbPass }
+        try {
+            $mentah = & mysql -h $dbHost -P $dbPort -u $dbUser -N -e "SELECT v FROM app_setting WHERE k='alert.webhook_url'" $dbName 2>$null
+        } finally {
+            Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+        }
+        $url = ($mentah | Out-String).Trim()
+        if (-not $url -or $url -notmatch '^https?://') {
+            Write-Output "    (peringatan dilewati -- alert.webhook_url belum diisi)"
+            return
+        }
+
+        # Bentuk payload SAMA PERSIS dengan worker/alert.ts's sendAlert():
+        # `text` di depan supaya Slack/Discord/Telegram memakainya apa
+        # adanya tanpa adaptor kedua hanya karena sumbernya PowerShell.
+        $payload = @{
+            text    = "[wakhanza/$env:COMPUTERNAME] $Message"
+            kind    = "backup_size_anomaly"
+            message = $Message
+            detail  = $null
+            host    = $env:COMPUTERNAME
+            at      = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        } | ConvertTo-Json
+
+        Invoke-RestMethod -Uri $url -Method Post -Body $payload -ContentType "application/json" -TimeoutSec 10 | Out-Null
+        Write-Output "    (peringatan terkirim ke alert.webhook_url)"
+    } catch {
+        Write-Output "    (peringatan GAGAL terkirim -- $($_.Exception.Message) -- backup ini TETAP dianggap berhasil)"
+    }
+}
+
 # Env var lebih dulu (pemakaian manual), lalu .env sebagai cadangan.
 # Jalur .env yang membuat penjadwalan mungkin sama sekali: Task Scheduler
 # menjalankan skrip ini tanpa sesi interaktif, jadi tidak ada tempat untuk
@@ -168,6 +228,33 @@ try {
     $outStream.Close()
 
     Write-Output "[ok] cadangan tersimpan: $outFile ($([math]::Round((Get-Item $outFile).Length / 1MB, 2)) MB)"
+
+    # --- R9: bandingkan ukuran dengan cadangan sebelumnya, tandai bila
+    # selisihnya di luar wajar. Dijalankan SETELAH cadangan baru tersimpan
+    # (angkanya perlu ada), TAPI SEBELUM pemangkasan (supaya cadangan
+    # "sebelumnya" yang dibandingkan tidak mungkin baru saja dihapus).
+    $AMBANG_PERSEN_SELISIH = 40
+    $backupSebelumnya = Get-ChildItem -Path $OutputDir -Filter "wakhanza-backup-*.enc" |
+        Where-Object { $_.FullName -ne $outFile } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($backupSebelumnya -and $backupSebelumnya.Length -gt 0) {
+        $ukuranBaru = (Get-Item $outFile).Length
+        $ukuranLama = $backupSebelumnya.Length
+        $persenSelisih = [math]::Round((($ukuranBaru - $ukuranLama) / $ukuranLama) * 100, 1)
+        if ([math]::Abs($persenSelisih) -gt $AMBANG_PERSEN_SELISIH) {
+            $arah = if ($persenSelisih -gt 0) { "naik" } else { "turun" }
+            $pesan = "Ukuran cadangan wakhanza $arah $([math]::Abs($persenSelisih))% dari hari sebelumnya " +
+                "($([math]::Round($ukuranLama/1MB,2)) MB -> $([math]::Round($ukuranBaru/1MB,2)) MB). " +
+                "Bukan otomatis berarti gagal -- tapi layak diperiksa manusia."
+            Write-Output "[peringatan] $pesan"
+            Send-BackupAlert -Message $pesan
+        } else {
+            Write-Output "    (selisih ukuran vs cadangan sebelumnya: $persenSelisih%, dalam batas wajar)"
+        }
+    } else {
+        Write-Output "    (tidak ada cadangan sebelumnya untuk dibandingkan -- ini yang pertama)"
+    }
 
     # Pemangkasan dijalankan SETELAH cadangan baru berhasil ditulis, tidak
     # pernah sebelumnya: kalau dump gagal, skrip sudah melempar di atas dan

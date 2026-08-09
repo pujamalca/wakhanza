@@ -34,6 +34,15 @@ export type AlertKind =
   | 'startup_failed'
   /** Dua worker hidup sekaligus -- satu di antaranya lepas dari kendali PM2. */
   | 'duplicate_worker'
+  /**
+   * BUKAN dikirim dari sini -- `scripts/backup.ps1` mem-POST langsung ke
+   * `alert.webhook_url` dengan bentuk payload yang SAMA PERSIS (lihat
+   * `Send-BackupAlert` di sana), karena skrip cadangan PowerShell tidak
+   * mengimpor kode Node/TS aplikasi ini. Tetap didaftarkan di sini supaya
+   * daftar jenis peringatan yang bisa tiba di webhook tetap lengkap satu
+   * tempat, bukan sebagian bersembunyi di berkas lain.
+   */
+  | 'backup_size_anomaly'
   | 'test';
 
 /**
