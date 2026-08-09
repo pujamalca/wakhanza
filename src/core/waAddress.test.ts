@@ -7,6 +7,7 @@ import {
   isPhoneLike,
   phoneFromAddress,
   kunciPesanMasuk,
+  idPesanKeluar,
 } from './waAddress';
 
 /** LID sungguhan yang ditangkap dari sesi produksi saat bug ini ditemukan. */
@@ -134,5 +135,48 @@ describe('kunciPesanMasuk', () => {
     // Kunci kosong akan membuat UNIQUE KEY menolak baris kedua mana pun dan
     // seluruh pencatatan berhenti diam-diam.
     expect(kunciPesanMasuk({ from: '12036@g.us' })).toBe('12036@g.us:0');
+  });
+});
+
+describe('idPesanKeluar', () => {
+  it('memakai _serialized bila ada', () => {
+    expect(idPesanKeluar({ id: { _serialized: 'true_628@c.us_ABC' } })).toBe('true_628@c.us_ABC');
+  });
+
+  /**
+   * Jebakan yang TERBUKTI, bukan diperkirakan: `_serialized` adalah getter pada
+   * prototipe MsgKey dan tidak ikut menyeberang lewat serialisasi puppeteer.
+   * Percobaan pertama fitur konfirmasi memakai `_serialized` saja, dan
+   * `wa_message_id` NULL pada setiap kiriman.
+   */
+  it('merakit ulang saat _serialized hilang', () => {
+    expect(idPesanKeluar({ id: { fromMe: true, remote: '628123@c.us', id: 'ABC' } })).toBe('true_628123@c.us_ABC');
+  });
+
+  it('menerima remote berupa objek Wid ber-_serialized', () => {
+    expect(idPesanKeluar({ id: { fromMe: true, remote: { _serialized: '628@c.us' }, id: 'X' } })).toBe('true_628@c.us_X');
+  });
+
+  it('merakit remote dari user+server saat _serialized-nya pun luruh', () => {
+    expect(idPesanKeluar({ id: { fromMe: true, remote: { user: '628', server: 'c.us' }, id: 'X' } })).toBe(
+      'true_628@c.us_X',
+    );
+  });
+
+  it('fromMe false ikut terbaca', () => {
+    expect(idPesanKeluar({ id: { fromMe: false, remote: '628@c.us', id: 'X' } })).toBe('false_628@c.us_X');
+  });
+
+  it('null saat tidak ada yang bisa diturunkan -- BUKAN kegagalan kirim', () => {
+    expect(idPesanKeluar(null)).toBeNull();
+    expect(idPesanKeluar({})).toBeNull();
+    expect(idPesanKeluar({ id: { fromMe: true } })).toBeNull();
+    expect(idPesanKeluar({ id: { remote: '628@c.us' } })).toBeNull();
+  });
+
+  it('perakitannya deterministik -- pengirim dan pendengar ack wajib sepakat', () => {
+    const a = idPesanKeluar({ id: { fromMe: true, remote: { user: '628', server: 'c.us' }, id: 'X' } });
+    const b = idPesanKeluar({ id: { fromMe: true, remote: '628@c.us', id: 'X' } });
+    expect(a).toBe(b);
   });
 });

@@ -137,3 +137,60 @@ export interface PesanMasukBerkunci {
 export function kunciPesanMasuk(pesan: PesanMasukBerkunci): string {
   return pesan.id?._serialized ?? `${pesan.from}:${pesan.timestamp ?? 0}`;
 }
+
+/** Bentuk `MsgKey` sebagaimana ia menyeberang dari Chromium -- tiap bagiannya mungkin hilang. */
+export interface PesanKeluarBerid {
+  id?: {
+    _serialized?: string;
+    fromMe?: boolean;
+    remote?: string | { _serialized?: string; user?: string; server?: string } | null;
+    id?: string;
+  } | null;
+}
+
+/**
+ * Id stabil untuk satu pesan KELUAR, dipakai mencocokkan event `message_ack`
+ * dengan baris `outbox` yang melahirkannya (migrations/035).
+ *
+ * Masalahnya sama persis dengan `kunciPesanMasuk()` di atas dan JEBAKANNYA
+ * TERBUKTI: `_serialized` adalah getter pada prototipe `MsgKey`, dan getter
+ * prototipe tidak ikut menyeberang lewat serialisasi puppeteer. Percobaan
+ * pertama fitur ini memakai `id._serialized` saja, pesannya terkirim normal, dan
+ * `wa_message_id` tetap NULL pada setiap kiriman -- konfirmasi tidak pernah bisa
+ * dicocokkan dengan apa pun.
+ *
+ * Cadangannya MERAKIT ULANG dari bagian-bagian MsgKey yang memang bertahan,
+ * mengikuti bentuk yang dipakai WhatsApp sendiri: `<fromMe>_<remote>_<id>`.
+ * `remote` sengaja diterima dalam dua bentuk -- string, atau objek `Wid` yang
+ * `_serialized`-nya ikut hilang -- karena keduanya benar-benar muncul tergantung
+ * jalur serialisasinya, dan merakit dari `user`+`server` adalah satu-satunya
+ * jalan saat keduanya luruh.
+ *
+ * WAJIB dipakai bersama oleh yang MENGIRIM (menyimpan id) dan yang MENDENGAR
+ * ack (mencari id). Dua perakitan yang berbeda sedikit saja berarti keduanya
+ * tidak pernah cocok, dan yang terlihat cuma kolom konfirmasi yang selamanya
+ * kosong -- tanpa satu pun galat. Itulah alasan fungsi ini tinggal di `core/`
+ * alih-alih di dalam wa-client.ts.
+ *
+ * `null` berarti id-nya tidak bisa diturunkan sama sekali. Itu BUKAN kegagalan
+ * kirim: pesannya sudah terkirim, yang hilang cuma kemampuan melacak
+ * konfirmasinya.
+ */
+export function idPesanKeluar(pesan: PesanKeluarBerid | null | undefined): string | null {
+  const id = pesan?.id;
+  if (!id) return null;
+
+  if (typeof id._serialized === 'string' && id._serialized.length > 0) return id._serialized;
+
+  const remote =
+    typeof id.remote === 'string'
+      ? id.remote
+      : typeof id.remote?._serialized === 'string' && id.remote._serialized.length > 0
+        ? id.remote._serialized
+        : id.remote?.user && id.remote?.server
+          ? `${id.remote.user}@${id.remote.server}`
+          : null;
+
+  if (!remote || typeof id.id !== 'string' || id.id.length === 0) return null;
+  return `${id.fromMe ? 'true' : 'false'}_${remote}_${id.id}`;
+}

@@ -1,18 +1,83 @@
 import { redirect } from 'next/navigation';
 import { Op, fn, col } from 'sequelize';
 import { auth } from '@/auth';
-import { AutoReplyRule, AutoReplyLog, parseKeywords, getSettingBool, getSettingNumber, getSetting } from '@/models';
+import {
+  AutoReplyRule,
+  AutoReplyLog,
+  InboundMessage,
+  parseKeywords,
+  getSettingBool,
+  getSettingNumber,
+  getSetting,
+} from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
+import { hitungKataTakTerjawab } from '@/core/pertanyaanTakTerjawab';
 import { PageHeader, Card, Pagination } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
 import { RuleTable } from './RuleTable';
+import { KataTakTerjawab } from './KataTakTerjawab';
 
 // Angka ringkasan dan sakelar dibaca tiap kali halaman dibuka -- tidak boleh
 // tersaji dari cache build.
 export const dynamic = 'force-dynamic';
 
 const HARI_RINGKASAN = 7;
+
+/**
+ * Rentang yang LEBIH PANJANG daripada angka ringkasan di atasnya, dan itu
+ * disengaja: yang dicari di sini POLA, bukan keadaan terkini. Tujuh hari di
+ * rumah sakit sekecil ini sering cuma menyisakan beberapa pesan tak terjawab --
+ * terlalu sedikit untuk membedakan pertanyaan berulang dari kebetulan.
+ */
+const HARI_KATA = 30;
+
+/**
+ * Kata tersering di pesan yang TIDAK terjawab, dikurangi kata yang sudah dipakai
+ * aturan mana pun.
+ *
+ * Dibaca dari `inbound_message`, BUKAN `auto_reply_log`, dan bedanya menentukan:
+ * `auto_reply_log` hanya ditulis saat `autoreply.enabled` menyala dan tidak
+ * pernah memuat pesan grup maupun pesan yang jatuh di penyaring lebih awal.
+ * Yang dicari di sini justru pertanyaan yang tidak pernah sampai ke pencocokan
+ * aturan sama sekali.
+ *
+ * Hanya `perorangan`: pesan grup memang sengaja tidak pernah dibalas aturan
+ * (lihat wa-client.ts), jadi memasukkannya berarti daftar ini dikuasai obrolan
+ * internal staf yang tidak seorang pun berniat membalasnya.
+ */
+async function kataTakTerjawab() {
+  const sejak = new Date(Date.now() - HARI_KATA * 24 * 60 * 60 * 1000);
+  const [pesan, aturan] = await Promise.all([
+    InboundMessage.findAll({
+      attributes: ['teks'],
+      where: { dibalas: false, jenis: 'perorangan', createdAt: { [Op.gte]: sejak } },
+      raw: true,
+    }),
+    // SELURUH aturan, aktif maupun tidak. Aturan yang sedang dimatikan tetap
+    // berarti kata itu sudah pernah dipikirkan seseorang; menampilkannya lagi
+    // sebagai "belum punya aturan" mengirim staf mengerjakan yang sudah ada.
+    AutoReplyRule.findAll({ attributes: ['keywords'], raw: true }),
+  ]);
+
+  const kunci = aturan.flatMap((r) => parseKeywords(r.keywords));
+  return {
+    kata: hitungKataTakTerjawab(
+      pesan.map((p) => p.teks),
+      kunci,
+    ),
+    /**
+     * Yang dilaporkan cuma pesan yang BENAR-BENAR berteks, bukan seluruh baris.
+     *
+     * Terukur saat panel ini dibuat: dari 84 pesan tak terjawab, hanya 24 punya
+     * teks -- sisanya stiker, gambar, atau pesan yang datang sebelum penyimpanan
+     * teks dinyalakan. Menyebut 84 membuat kalimat "dihitung dari 84 pesan"
+     * berbohong tentang dasar analisisnya, dan staf akan menyimpulkan kata-kata
+     * di bawahnya lebih jarang daripada yang sebenarnya.
+     */
+    jumlahPesan: pesan.filter((p) => (p.teks ?? '').trim().length > 0).length,
+  };
+}
 
 /**
  * Sengaja memakai `outcome`, bukan menghitung baris outbox: yang perlu dilihat
@@ -69,7 +134,7 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
   const { page: pageParam } = await searchParams;
   const p = hitungPaginasi(bacaHalaman(pageParam), await AutoReplyRule.count(), UKURAN_HALAMAN.konfigurasi);
 
-  const [enabled, rules, stat, pakai, maxPerJam, fallbackBody, simpanTeks] = await Promise.all([
+  const [enabled, rules, stat, pakai, maxPerJam, fallbackBody, simpanTeks, simpanInbox, kata] = await Promise.all([
     getSettingBool('autoreply.enabled', false),
     // Urutan `priority, id` adalah urutan yang MENENTUKAN aturan mana yang
     // menang -- jadi ia juga urutan halamannya. Aturan berprioritas tertinggi
@@ -84,6 +149,17 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
     getSettingNumber('autoreply.max_per_number_per_hour', 5),
     getSetting('autoreply.fallback_body', ''),
     getSettingBool('autoreply.log_inbound_text', false),
+    /**
+     * SAKELAR YANG BERBEDA dari baris di atasnya, dan gampang tertukar.
+     *
+     * `autoreply.log_inbound_text` (mati) mengatur kolom `inbound_preview` di
+     * `auto_reply_log`; `inbox.simpan_teks` (MENYALA) mengatur `teks` di
+     * `inbound_message`. Panel kata membaca yang KEDUA. Menyebut yang pertama
+     * akan menyuruh staf menyalakan sakelar yang tidak ada hubungannya, lalu
+     * daftarnya tetap kosong tanpa ada yang tahu kenapa.
+     */
+    getSettingBool('inbox.simpan_teks', true),
+    kataTakTerjawab(),
   ]);
 
   const adaFallback = Boolean(fallbackBody?.trim());
@@ -119,6 +195,19 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
           label="Pesan berulang"
           nilai={stat.duplicate}
           help="Pesan yang sama diserahkan ulang oleh WhatsApp (lazim setelah sesi tersambung kembali) dan sengaja tidak dibalas dua kali."
+        />
+      </div>
+
+      {/* Ditaruh TEPAT di bawah deretan angka, sebelum "Cara kerjanya".
+          Angka "Tidak ada aturan yang cocok" di atas menunjukkan masalahnya;
+          panel ini yang mengatakan apa yang harus dikerjakan karenanya, jadi
+          keduanya harus terbaca berurutan alih-alih terpisah satu blok. */}
+      <div className="mb-6">
+        <KataTakTerjawab
+          kata={kata.kata}
+          jumlahPesan={kata.jumlahPesan}
+          hari={HARI_KATA}
+          simpanTeks={simpanInbox}
         />
       </div>
 

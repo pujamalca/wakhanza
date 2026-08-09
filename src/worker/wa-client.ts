@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Op } from 'sequelize';
 import { Client, LocalAuth, MessageMedia, type Message } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
@@ -14,7 +15,9 @@ import {
   isLidAddress,
   isPhoneLike,
   kunciPesanMasuk,
+  idPesanKeluar,
   phoneFromAddress,
+  type PesanKeluarBerid,
 } from '@/core/waAddress';
 import { catatPesanMasuk } from './inboundLog';
 import { ackBolehMenimpa, isTingkatAck, labelAck } from '@/core/waAck';
@@ -511,6 +514,26 @@ export async function initWaClient(): Promise<Client> {
    * pustaka, dan kegagalan mencatat satu ack tidak boleh berakibat apa pun pada
    * pengiriman. `catatAck()` sendiri yang menjamin tidak pernah melempar.
    */
+  /**
+   * ID pesan keluar diambil dari `message_create`, BUKAN dari nilai kembalian
+   * `sendMessage()` -- dan itu bukan pilihan gaya melainkan keharusan yang
+   * terbukti di mesin ini.
+   *
+   * whatsapp-web.js 1.34.7 menutup `sendMessage()` dengan
+   * `return sentMsg ? new Message(this, sentMsg) : undefined`, dan `sentMsg`
+   * berasal dari `page.evaluate(...)` yang di sini mengembalikan `undefined`.
+   * Pesannya BENAR-BENAR terkirim -- terbukti sampai, dan `send_log` mencatatnya
+   * `sent` -- tapi modelnya tidak pernah menyeberang, jadi tidak ada id yang
+   * bisa disimpan. Diagnostiknya berbunyi `kunciPesan: "undefined"`: bukan
+   * `id`-nya yang hilang, melainkan seluruh objeknya.
+   *
+   * `message_create` menyala untuk setiap pesan yang dibuat termasuk yang keluar,
+   * dan objeknya dibangun lewat jalur yang berbeda sehingga id-nya utuh.
+   */
+  client.on('message_create', (pesan) => {
+    void catatIdPesanKeluar(pesan);
+  });
+
   client.on('message_ack', (pesan, ack) => {
     void catatAck(pesan, ack);
   });
@@ -538,6 +561,85 @@ export async function initWaClient(): Promise<Client> {
  *   2. Ack yang lebih rendah dari yang sudah tersimpan -- dijelaskan di
  *      `ackBolehMenimpa()`.
  */
+/**
+ * Menautkan pesan keluar yang baru dibuat dengan baris `outbox` yang
+ * melahirkannya, supaya event `message_ack` berikutnya punya sesuatu untuk
+ * dicocokkan.
+ *
+ * Penautannya lewat ISI PESAN yang sama persis, dan itu tepat -- bukan
+ * perkiraan -- karena setiap pesan keluar diakhiri KODE PENGIRIMAN unik yang
+ * diturunkan dari kunci idempotennya (`core/uniqueCode.ts`). Dua baris `outbox`
+ * karena itu tidak pernah berisi teks yang identik.
+ *
+ * Tujuannya ikut diperiksa sebagai pengaman kedua, dan bentuknya berbeda untuk
+ * dua jenis baris: baris bertujuan grup/petugas menyimpan alamat lengkap di
+ * `chat_id`, sementara baris pasien hanya menyimpan nomornya dan alamatnya baru
+ * dirakit dispatcher. Karena itu keduanya dibandingkan dengan cara masing-masing
+ * alih-alih satu kolom.
+ *
+ * TIDAK menyaring `status`: event ini bisa menyala SEBELUM dispatcher sempat
+ * menuliskan `sent`, jadi menuntut status tertentu berarti kehilangan penautan
+ * justru pada pesan yang paling cepat sampai.
+ */
+async function catatIdPesanKeluar(pesan: Message): Promise<void> {
+  try {
+    if (!pesan.fromMe) return;
+    const id = idPesanKeluar(pesan as unknown as PesanKeluarBerid);
+    const body = pesan.body ?? '';
+    if (!id || !body) {
+      // Ketiga sebab kegagalan penautan dibedakan di log, karena dari luar
+      // ketiganya menghasilkan gejala yang sama persis: kolom kosong.
+      logger.warn(
+        { adaId: !!id, panjangTeks: body.length },
+        'pesan keluar terdeteksi tapi id atau isinya tidak terbaca -- konfirmasi tidak akan tercatat',
+      );
+      return;
+    }
+
+    const tujuan = pesan.to ?? '';
+    const kandidat = await Outbox.findAll({
+      where: {
+        waMessageId: null,
+        body,
+        // Jendela sempit: yang dicari pesan yang BARU SAJA dikirim. Tanpa batas
+        // waktu, baris lama beridentik teks (mungkin dari sebelum kode
+        // pengiriman dinyalakan) bisa ikut tertaut.
+        createdAt: { [Op.gte]: new Date(Date.now() - 30 * 60 * 1000) },
+      },
+      order: [['id', 'DESC']],
+      limit: 10,
+    });
+
+    const cocok = kandidat.find((r) => (r.chatId ? r.chatId === tujuan : `${r.phoneE164}@c.us` === tujuan));
+    if (!cocok) {
+      /**
+       * `warn`, dan sengaja MEMBAWA sebabnya.
+       *
+       * Penautan yang gagal bergejala persis sama dengan penautan yang tidak
+       * pernah dicoba: kolom konfirmasi kosong, tanpa galat. Percobaan pertama
+       * fitur ini kehilangan berjam-jam justru karena itu -- tidak ada satu pun
+       * cara membedakan "event tidak menyala", "id tidak terbaca", dan "tidak
+       * ada baris yang cocok" dari luar.
+       *
+       * Yang dicatat bentuk dan jumlahnya, TIDAK pernah isi pesannya (§9.7);
+       * tujuannya disamarkan seperti di tempat lain.
+       */
+      logger.warn(
+        { tujuan: jejakId(tujuan), kandidat: kandidat.length, panjangTeks: body.length },
+        'pesan keluar tidak bisa ditautkan ke baris outbox -- konfirmasi terkirim tidak akan tercatat',
+      );
+      return;
+    }
+
+    await cocok.update({ waMessageId: id });
+    logger.info({ outboxId: cocok.id, triggerCode: cocok.triggerCode }, 'id pesan keluar tertaut ke baris outbox');
+  } catch (err) {
+    // Tidak pernah melempar: dipanggil dari pendengar event, dan kegagalan
+    // menautkan satu id tidak boleh berakibat apa pun pada pengiriman.
+    logger.error(safeError(err), 'gagal menautkan id pesan keluar');
+  }
+}
+
 async function catatAck(pesan: Message, ack: unknown): Promise<void> {
   try {
     const id = idPesanTerkirim(pesan);
@@ -698,19 +800,29 @@ export async function sendWhatsAppMessage(
 }
 
 /**
- * Id pesan yang BARU SAJA dikirim, untuk dicocokkan dengan event `message_ack`
- * yang datang belakangan (migrations/035).
+ * Id pesan keluar, lewat penurunan BERSAMA di `core/waAddress.ts`.
  *
- * Mengembalikan null bila tidak ada -- dan itu keadaan yang harus ditoleransi,
- * bukan dianggap kegagalan kirim. `Message.id._serialized` adalah getter pada
- * PROTOTIPE, dan objeknya menyeberang dari Chromium ke Node lewat serialisasi
- * puppeteer yang tidak membawa getter prototipe -- pelajaran yang sudah dibayar
- * di `kunciPesanMasuk()` untuk arah masuk. Pesannya SUDAH terkirim; yang hilang
- * cuma kemampuan melacak konfirmasinya.
+ * Sengaja tidak diturunkan di sini: fungsi yang sama harus dipakai saat MENGIRIM
+ * (menyimpan id) dan saat MENDENGAR ack (mencarinya). Dua perakitan yang berbeda
+ * sedikit saja membuat keduanya tidak pernah cocok, dan yang terlihat cuma kolom
+ * konfirmasi yang selamanya kosong tanpa satu pun galat.
  */
 function idPesanTerkirim(pesan: unknown): string | null {
-  const id = (pesan as { id?: { _serialized?: unknown } } | null | undefined)?.id?._serialized;
-  return typeof id === 'string' && id.length > 0 ? id : null;
+  const id = idPesanKeluar(pesan as PesanKeluarBerid | null | undefined);
+  if (!id) {
+    /**
+     * `debug`, BUKAN `warn`, dan itu keputusan yang diambil setelah diukur:
+     * di mesin ini `sendMessage()` mengembalikan `undefined` pada SETIAP
+     * kiriman (lihat komentar pendengar `message_create`), jadi peringatan di
+     * sini akan menyala tiap pesan dan menenggelamkan yang sungguhan -- persis
+     * alasan level log pesan bukan-perorangan dipisah.
+     *
+     * Jalur yang sebenarnya menautkan id adalah `message_create`. Ketiadaan di
+     * sini bukan kegagalan apa pun.
+     */
+    logger.debug('id pesan keluar tidak ada di nilai kembalian sendMessage -- ditangani lewat message_create');
+  }
+  return id;
 }
 
 /** F5.4: bedakan nomor tak terdaftar (permanen) dari kegagalan sementara SEBELUM mencoba kirim. */
