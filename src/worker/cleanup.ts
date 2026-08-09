@@ -1,6 +1,6 @@
 import * as cron from 'node-cron';
 import { Op, QueryTypes } from 'sequelize';
-import { Outbox, SendLog, PatientContact, AutoReplyLog, InboundMessage, getSettingNumber } from '@/models';
+import { Outbox, SendLog, PatientContact, AutoReplyLog, InboundMessage, WaSessionEvent, getSettingNumber } from '@/models';
 import { sik } from '@/db/sik';
 import { TERMINAL_OUTBOX_STATUSES } from '@/core/outboxStatus';
 import { normalizePhone } from '@/core/phone';
@@ -44,6 +44,10 @@ async function cleanupOldRecords(): Promise<void> {
   // rumah sakit sama sekali, beda dari tabel lain di sini. Ikut dipangkas
   // dengan masa simpan yang sama.
   const deletedAutoReply = await AutoReplyLog.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
+  // wa_session_event (migrations/037): masa simpan yang sama sudah mencakup
+  // satu kuartal penuh -- cukup untuk membandingkan uptime sebelum/sesudah
+  // sebuah perbaikan, yaitu tujuan tabel ini ada.
+  const deletedSessionEvents = await WaSessionEvent.destroy({ where: { createdAt: { [Op.lt]: cutoff } } });
 
   /**
    * `inbound_message` punya masa simpannya SENDIRI, dan sengaja lebih pendek
@@ -61,8 +65,8 @@ async function cleanupOldRecords(): Promise<void> {
   const deletedInbound = await InboundMessage.destroy({ where: { createdAt: { [Op.lt]: cutoffInbox } } });
 
   logger.info(
-    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, hariInbox },
-    'pembersihan berkala: outbox, send_log, auto_reply_log & inbound_message lama dihapus',
+    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, deletedSessionEvents, hariInbox },
+    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message & wa_session_event lama dihapus',
   );
 
   await cleanupOrphanMedia();

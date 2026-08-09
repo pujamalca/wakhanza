@@ -1,4 +1,5 @@
 import { WaSession, WaGroup } from '@/models';
+import { catatTransisiStatus } from './sessionHistory';
 import { getClient, lepasPerangkat, bersihkanDirektoriSesi } from './wa-client';
 import { logger, safeError } from '@/lib/logger';
 
@@ -163,10 +164,7 @@ export async function processSessionCommand(): Promise<void> {
       // dikoreksi lebih dulu; menunggu berkasnya bersih berarti membiarkan
       // halaman Koneksi menampilkan sesi yang sudah tidak ada selama itu.
       const { direktoriTerkunci } = await lepasPerangkat();
-      await WaSession.update(
-        { status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null },
-        { where: { id: 1 } },
-      );
+      await catatTransisiStatus({ status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null });
 
       if (direktoriTerkunci && !(await bersihkanDirektoriSesi())) {
         // Keterangan, BUKAN laporan kegagalan logout: perangkatnya memang

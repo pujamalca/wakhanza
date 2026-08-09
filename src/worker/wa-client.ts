@@ -4,6 +4,7 @@ import { Op } from 'sequelize';
 import { Client, LocalAuth, MessageMedia, type Message } from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { WaSession, OptOut, Outbox, type WaSessionStatus } from '@/models';
+import { catatTransisiStatus } from './sessionHistory';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 import { handleInboundMessageSafely } from './autoReply';
 import { cobaBalasPersediaanDariGrup } from './stokReply';
@@ -318,13 +319,13 @@ export async function initWaClient(): Promise<Client> {
   client.on('qr', (qr) => {
     logger.info('QR baru terbit');
     QRCode.toDataURL(qr)
-      .then((dataUrl) => WaSession.upsert({ id: 1, status: 'qr_pending', qrData: dataUrl, qrIssuedAt: new Date() }))
+      .then((dataUrl) => catatTransisiStatus({ status: 'qr_pending', qrData: dataUrl, qrIssuedAt: new Date() }))
       .catch((err) => logger.error(safeError(err), 'gagal membuat gambar QR'));
   });
 
   client.on('authenticated', () => {
     logger.info('WhatsApp terautentikasi, menunggu ready');
-    WaSession.upsert({ id: 1, status: 'authenticating' }).catch((err) =>
+    catatTransisiStatus({ status: 'authenticating' }).catch((err) =>
       logger.error(safeError(err), 'gagal update wa_session (authenticated)'),
     );
   });
@@ -332,8 +333,7 @@ export async function initWaClient(): Promise<Client> {
   client.on('ready', () => {
     const phoneNumber = client?.info?.wid?.user ?? null;
     logger.info({ phoneNumber }, 'WhatsApp siap');
-    WaSession.upsert({
-      id: 1,
+    catatTransisiStatus({
       status: 'ready',
       qrData: null,
       qrIssuedAt: null,
@@ -345,14 +345,14 @@ export async function initWaClient(): Promise<Client> {
 
   client.on('disconnected', (reason) => {
     logger.warn({ reason: String(reason) }, 'WhatsApp terputus');
-    WaSession.upsert({ id: 1, status: 'disconnected', lastError: String(reason) }).catch((err) =>
+    catatTransisiStatus({ status: 'disconnected', lastError: String(reason) }).catch((err) =>
       logger.error(safeError(err), 'gagal update wa_session (disconnected)'),
     );
   });
 
   client.on('auth_failure', (message) => {
     logger.error({ message }, 'autentikasi WhatsApp gagal');
-    WaSession.upsert({ id: 1, status: 'failed', lastError: message }).catch((err) =>
+    catatTransisiStatus({ status: 'failed', lastError: message }).catch((err) =>
       logger.error(safeError(err), 'gagal update wa_session (auth_failure)'),
     );
   });

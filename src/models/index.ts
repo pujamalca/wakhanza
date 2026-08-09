@@ -4,6 +4,7 @@ export { Template, type TujuanMode } from './Template';
 export { PatientContact, type ContactSource, type ContactRejectReason } from './PatientContact';
 export { OptOut } from './OptOut';
 export { WaSession, type WaSessionStatus, type WaSessionCommand } from './WaSession';
+export { WaSessionEvent } from './WaSessionEvent';
 export { SendLog } from './SendLog';
 export { AppUser, type AppUserRole } from './AppUser';
 export { AuditLog, logAudit } from './AuditLog';
