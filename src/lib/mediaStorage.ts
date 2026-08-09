@@ -86,6 +86,11 @@ export async function simpanBerkasLampiran(berkas: File): Promise<BerkasTersimpa
 export async function simpanPdfSurat(pdf: Buffer): Promise<string> {
   // Nama di disk selalu acak, tidak pernah diturunkan dari nama pasien -- nama
   // yang dilihat pasien disimpan terpisah di `outbox.media_name`.
+  //
+  // Ekstensinya `.pdf` mati di kode, dan itu bukan sekadar kerapian:
+  // `MessageMedia.fromFilePath()` milik whatsapp-web.js menurunkan MIME
+  // kiriman dari ekstensi berkas di disk, jadi ekstensi yang salah sampai ke
+  // pasien sebagai berkas yang ditolak pembacanya tanpa satu pun keterangan.
   const nama = `${randomBytes(8).toString('hex')}.pdf`;
   await mkdir(DIR_MEDIA, { recursive: true });
   await writeFile(path.join(DIR_MEDIA, nama), pdf);

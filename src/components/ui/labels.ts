@@ -184,13 +184,13 @@ export const TRIGGER_SOURCE: Record<string, TriggerSource> = {
     tabel: ['periksa_lab'],
     kapan: 'Saat hasil pemeriksaan laboratorium tersimpan.',
     catatan:
-      'Satu pesan per kunjungan, bukan per item: panel darah lengkap menghasilkan belasan baris di Khanza dan tetap jadi satu pesan. Pasangan “Permintaan lab” dari ujung yang lain.',
+      'Satu pesan per kunjungan, bukan per item: panel darah lengkap menghasilkan belasan baris di Khanza dan tetap jadi satu pesan. Pasangan “Permintaan lab” dari ujung yang lain. Isinya bisa ikut dilampirkan sebagai berkas PDF — diatur di halaman Administrasi, tab “Hasil & tagihan”.',
   },
   RAD_RESULT: {
     tabel: ['periksa_radiologi'],
     kapan: 'Saat hasil pemeriksaan radiologi tersimpan.',
     catatan:
-      'Dipisah dari Hasil lab supaya isi pesan, sakelar aktif, dan tujuan tambahannya bisa berbeda — grup Laboratorium dan grup Radiologi tidak perlu menerima hasil satu sama lain.',
+      'Dipisah dari Hasil lab supaya isi pesan, sakelar aktif, dan tujuan tambahannya bisa berbeda — grup Laboratorium dan grup Radiologi tidak perlu menerima hasil satu sama lain. Isinya bisa ikut dilampirkan sebagai berkas PDF — diatur di halaman Administrasi, tab “Hasil & tagihan”.',
   },
   LAB_REQUEST: {
     tabel: ['permintaan_lab'],
@@ -210,6 +210,8 @@ export const TRIGGER_SOURCE: Record<string, TriggerSource> = {
   BILLING_READY: {
     tabel: ['nota_jalan', 'nota_inap'],
     kapan: 'Saat nota rawat jalan atau rawat inap terbit.',
+    catatan:
+      'Rincian tagihannya bisa ikut dilampirkan sebagai berkas PDF — diatur di halaman Administrasi, tab “Hasil & tagihan”. Nama obat pada nota punya sakelarnya sendiri di sana.',
   },
   KONTROL_TERBIT: {
     tabel: ['skdp_bpjs'],

@@ -570,6 +570,122 @@ describe('enqueuePemicuPasien: tujuan_mode (migrations/018)', () => {
     expect((await ambil(turunkanKunciTujuan(k, GRUP_UJI_B)))!.chatId).toBe(GRUP_UJI_B);
   });
 
+  /**
+   * LAMPIRAN DOKUMEN HASIL (migrations/038).
+   *
+   * Aturan yang dijaga di sini satu-satunya di `enqueuePemicuPasien` yang TIDAK
+   * terjadi sendirinya: `...input` dengan senang hati menyalin `media` ke tiap
+   * grup, dan sejak dokumen hasil ada, berkas itu bisa berupa hasil
+   * laboratorium seorang pasien lengkap dengan angkanya. Satu centang di
+   * /template tidak boleh bisa mengubahnya jadi berkas yang diterima setiap
+   * anggota sebuah grup WhatsApp.
+   */
+  describe('lampiranPasien: berkas TIDAK PERNAH ikut ke salinan grup', () => {
+    const MEDIA = { path: 'uji-dokumen.pdf', mime: 'application/pdf', name: 'Contoh.pdf' };
+
+    it("mode 'pasien_dan_tujuan': pasien dapat berkas + pesan pengantar, grup dapat teks template apa adanya", async () => {
+      const k = kunci('lampiran-tidak-ke-grup');
+      await enqueuePemicuPasien(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+          lampiranPasien: { media: MEDIA, body: 'PENGANTAR BERLAMPIRAN untuk {nama_pasien}' },
+        },
+        ctxTujuan('pasien_dan_tujuan'),
+      );
+
+      const kePasien = await ambil(k);
+      const keGrup = await ambil(turunkanKunciTujuan(k, GRUP_UJI_A));
+
+      expect(kePasien!.mediaPath).toBe(MEDIA.path);
+      expect(kePasien!.body).toContain('PENGANTAR BERLAMPIRAN untuk Budi');
+
+      // Inti pemeriksaannya: grup menerima barisnya, TANPA berkas.
+      expect(keGrup).not.toBeNull();
+      expect(keGrup!.chatId).toBe(GRUP_UJI_A);
+      expect(keGrup!.mediaPath).toBeNull();
+      // ...dan tanpa pesan pengantar yang menjanjikan lampiran yang tidak ada.
+      expect(keGrup!.body).not.toContain('PENGANTAR BERLAMPIRAN');
+    });
+
+    it("mode 'tujuan': berkasnya tidak pergi ke mana pun, karena pasien memang tidak dikirimi", async () => {
+      const k = kunci('lampiran-mode-tujuan');
+      await enqueuePemicuPasien(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+          lampiranPasien: { media: MEDIA, body: 'PENGANTAR BERLAMPIRAN' },
+        },
+        ctxTujuan('tujuan'),
+      );
+
+      expect(await ambil(k)).toBeNull();
+      const keGrup = await ambil(turunkanKunciTujuan(k, GRUP_UJI_A));
+      expect(keGrup!.mediaPath).toBeNull();
+      expect(keGrup!.body).not.toContain('PENGANTAR BERLAMPIRAN');
+    });
+
+    /**
+     * Jalur KEDUA menuju kebocoran yang sama, dan ia yang menuntut `media:
+     * null` ditulis eksplisit.
+     *
+     * `lampiranPasien` memang sudah aman dengan sendirinya -- berkasnya cuma
+     * ditempel ke salinan input milik pasien. Tapi `EnqueueInput.media` masih
+     * ada dan masih dipakai jalur lain (broadcast, administrasi), jadi
+     * pemanggil pemicu pasien BERIKUTNYA bisa saja mengisinya langsung karena
+     * itu medan yang paling jelas namanya. Tanpa `media: null`, `...input`
+     * menyalinnya ke tiap grup tanpa satu pun galat.
+     *
+     * Uji ini yang membuat baris itu MENGGIGIT: dihapus, ia gagal.
+     */
+    it('`media` yang diisi langsung pada input pun tidak bocor ke salinan grup', async () => {
+      const k = kunci('media-langsung-tidak-ke-grup');
+      await enqueuePemicuPasien(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+          media: MEDIA,
+        },
+        ctxTujuan('pasien_dan_tujuan'),
+      );
+
+      expect((await ambil(k))!.mediaPath).toBe(MEDIA.path);
+      expect((await ambil(turunkanKunciTujuan(k, GRUP_UJI_A)))!.mediaPath).toBeNull();
+    });
+
+    it("mode 'pasien' tanpa tujuan: pengantar dan berkasnya tetap terpasang", async () => {
+      const k = kunci('lampiran-mode-pasien');
+      await enqueuePemicuPasien(
+        {
+          idempotencyKey: k,
+          noRkmMedis: null,
+          rawPhone: null,
+          phoneOverride: NOMOR_UJI,
+          eventAt: new Date(),
+          vars: { nama_pasien: 'Budi' },
+          lampiranPasien: { media: MEDIA, body: 'PENGANTAR BERLAMPIRAN untuk {nama_pasien}' },
+        },
+        ctxTujuan('pasien'),
+      );
+
+      const kePasien = await ambil(k);
+      expect(kePasien!.mediaPath).toBe(MEDIA.path);
+      expect(kePasien!.body).toContain('PENGANTAR BERLAMPIRAN untuk Budi');
+    });
+  });
+
   describe("saringKunciBaruPemicuPasien: regresi 'kunci dasar tak pernah ditulis' (ditemukan dari log produksi 9 Agustus 2026)", () => {
     it("mode 'tujuan': baris yang seluruh kuncinya SUDAH ada di outbox DIBUANG", async () => {
       const k = kunci('saring-tujuan-sudah-ada');

@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react';
 import { renderTemplate, BROADCAST_TEMPLATE_VARIABLES, type TemplateVariable } from '@/core/template';
 import { Input, MessageEditor, WaPreview, Select, Button, cardClassName } from '@/components/ui';
 import { createScheduleAction } from './actions';
-import type { BroadcastTemplateOption } from '../broadcast/ComposeForm';
+import { HintVariabelBroadcast, type BroadcastTemplateOption } from '../broadcast/ComposeForm';
 
 const DEFAULT_BODY =
   'Bpk/Ibu {nama_pasien}, kami dari {nama_rs} ingin menyampaikan informasi terkait kunjungan Anda sebelumnya. Silakan hubungi {kontak_rs} bila ada pertanyaan.';
@@ -84,6 +84,7 @@ export function ScheduleForm({
           variables={BROADCAST_TEMPLATE_VARIABLES}
           rows={4}
           showPreview={false}
+          hint={<HintVariabelBroadcast />}
         />
       </div>
 

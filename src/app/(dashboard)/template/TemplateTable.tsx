@@ -22,6 +22,7 @@ import {
 import { updateTemplateAction } from './actions';
 import { createBroadcastTemplateAction, updateBroadcastTemplateAction, deleteBroadcastTemplateAction } from './broadcastActions';
 import { TargetPemicuModal, type TargetPemicuRow, type GrupRow } from './TargetPemicuModal';
+import { HintVariabelBroadcast } from '../broadcast/ComposeForm';
 import type { TujuanMode } from '@/models';
 
 
@@ -452,9 +453,16 @@ function BroadcastTemplateModal({
             rows={7}
             placeholder="Bpk/Ibu {nama_pasien}, ..."
             hint={
-              <span className="block text-xs text-muted-foreground">
-                Variabelnya lebih sedikit dari template pemicu karena satu broadcast bisa merentang banyak kunjungan.
-              </span>
+              <>
+                <span className="block text-xs text-muted-foreground">
+                  Variabelnya lebih sedikit dari template pemicu karena satu broadcast bisa merentang banyak kunjungan.
+                </span>
+                {/* Halaman ini pintu KETIGA menuju daftar variabel yang sama.
+                    Peringatan kosongnya diimpor, bukan ditulis ulang -- kalimat
+                    yang menjelaskan satu aturan di tiga tempat adalah kalimat
+                    yang cepat atau lambat berbeda di salah satunya. */}
+                <HintVariabelBroadcast />
+              </>
             }
           />
         </div>

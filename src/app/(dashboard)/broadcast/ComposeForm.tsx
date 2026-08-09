@@ -22,6 +22,31 @@ export interface BroadcastTemplateOption {
 const DEFAULT_BODY =
   'Bpk/Ibu {nama_pasien}, kami dari {nama_rs} ingin menyampaikan informasi terkait kunjungan Anda sebelumnya. Silakan hubungi {kontak_rs} bila ada pertanyaan.';
 
+/**
+ * Keterangan variabel, dipakai BERSAMA /broadcast dan /broadcast-terjadwal.
+ *
+ * Ditulis sekali karena kedua halaman menawarkan daftar yang sama persis
+ * (BROADCAST_TEMPLATE_VARIABLES) -- dua salinan kalimat yang menjelaskan satu
+ * aturan adalah dua salinan yang cepat atau lambat berbeda, dan yang tertinggal
+ * biasanya halaman yang lebih jarang disentuh.
+ *
+ * Yang WAJIB disebut adalah kemungkinan KOSONGNYA. Variabel yang dirender kosong
+ * tidak menghasilkan galat apa pun; yang muncul cuma kalimat menggantung
+ * ("Warga ,") di pesan yang sudah terkirim ke ratusan orang -- pelajaran yang
+ * sama sudah dibayar pada sakelar nilai hibah dan `{nama_poli}` di KONTROL_TERBIT.
+ */
+export function HintVariabelBroadcast() {
+  return (
+    <span className="block text-xs text-muted-foreground">
+      Tersedia juga <span className="font-mono">{'{tanggal_kunjungan}'}</span> dan wilayah pasien (
+      <span className="font-mono">{'{kelurahan}'}</span> <span className="font-mono">{'{kecamatan}'}</span>{' '}
+      <span className="font-mono">{'{kabupaten}'}</span>). Keempatnya bisa <strong>kosong</strong> — Khanza sering
+      membiarkan wilayah pasien tidak terisi. Periksa pratinjau di bawah, dan hindari kalimat yang jadi rusak kalau
+      variabelnya kosong (mis. &ldquo;Warga {'{kecamatan}'},&rdquo;).
+    </span>
+  );
+}
+
 export function ComposeForm({
   hiddenFilters,
   sampleVars,
@@ -104,6 +129,7 @@ export function ComposeForm({
         variables={BROADCAST_TEMPLATE_VARIABLES}
         rows={4}
         showPreview={false}
+        hint={<HintVariabelBroadcast />}
       />
 
       {preview && (

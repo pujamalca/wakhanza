@@ -3,7 +3,8 @@ import { BroadcastSchedule, BroadcastCampaign, getSettingNumber, logAudit } from
 import { fetchPatientSegment, type PatientSegmentRow } from '@/khanza/pasienSegment';
 import { scheduleFiltersToSegment, isFollowupSchedule, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
-import { loadBroadcastContext, enqueueMessage, identityVars, saringKunciBaru } from './pipeline';
+import { loadBroadcastContext, enqueueMessage, saringKunciBaru } from './pipeline';
+import { broadcastVars } from '@/core/broadcastVars';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { computeNextRunAt } from '@/core/schedule';
 import { logger, safeError } from '@/lib/logger';
@@ -124,7 +125,7 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
           rawPhone: row.no_tlp,
           eventAt: now,
           kdPoli: row.kd_poli,
-          vars: { ...identityVars(identity), nama_pasien: row.nm_pasien ?? '', no_rm: row.no_rkm_medis },
+          vars: broadcastVars(row, identity),
           campaignId: campaign.id,
         },
         ctx,

@@ -21,3 +21,4 @@ export * from './kontrolUlang';
 export * from './kontrolTerbit';
 export * from './permintaanPenunjang';
 export * from './suratPasien';
+export * from './dokumenHasil';

@@ -28,6 +28,26 @@ import {
 } from '@/lib/surat';
 import { htmlKePdf } from '@/lib/pdf';
 import { renderTemplate, findUnknownVariables } from '@/core/template';
+import type { JenisDokumen } from '@/core/dokumenDoc';
+import {
+  SETTING_AKTIF as SETTING_DOKUMEN_AKTIF,
+  SETTING_PESAN as SETTING_PESAN_DOKUMEN,
+  SETTING_RINCIAN_OBAT,
+  SETTING_CATATAN_KAKI as SETTING_CATATAN_KAKI_DOKUMEN,
+} from '@/lib/dokumen';
+
+/**
+ * Label yang dibaca staf, dan sengaja BUKAN kode jenisnya.
+ *
+ * Dipakai pesan sukses server action maupun pesan galat validasi -- staf yang
+ * membaca "Pesan radiologi: ..." tahu kotak mana yang dimaksud, sementara
+ * "Pesan rad: ..." memaksa menebak.
+ */
+const LABEL_DOKUMEN: Record<JenisDokumen, string> = {
+  lab: 'Hasil laboratorium',
+  radiologi: 'Hasil radiologi',
+  nota: 'Rincian tagihan',
+};
 
 export interface HasilForm {
   error?: string;
@@ -351,4 +371,111 @@ export async function kirimSuratAction(jenis: JenisSurat, kunci: string): Promis
 
   segarkan();
   return { sukses: `Surat untuk ${isi.namaPasien} dimasukkan ke antrean kirim.` };
+}
+
+// ---------------------------------------------------------------------------
+// Dokumen hasil lab / radiologi / nota (migrations/038)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sakelar per jenis dokumen, dicatat `audit_log` sebagai peristiwanya SENDIRI
+ * dan menyebut jenisnya -- pola yang sama dengan `administrasi_toggle`.
+ *
+ * Bukan kerapian. Inilah momen data medis mulai beredar sebagai berkas: angka
+ * hasil laboratorium, narasi bacaan radiologi, daftar rinci layanan berikut
+ * nama obat. Menenggelamkannya jadi satu nama kunci di dalam `settings_update`
+ * membuat perubahan paling berkonsekuensi di seluruh halaman ini jadi yang
+ * paling sulit ditelusuri -- dan pertanyaan "sejak kapan hasil lab ikut
+ * terkirim" adalah pertanyaan yang harus bisa dijawab tanpa membaca diff.
+ */
+export async function toggleDokumenAction(jenis: JenisDokumen, aktif: boolean): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  await setSetting(SETTING_DOKUMEN_AKTIF[jenis], aktif ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'dokumen_toggle',
+    SETTING_DOKUMEN_AKTIF[jenis],
+    `${jenis}=${aktif ? 'nyala' : 'mati'}`,
+  );
+  segarkan();
+  return {
+    sukses: aktif
+      ? `${LABEL_DOKUMEN[jenis]} akan ikut dilampirkan sebagai PDF.`
+      : `${LABEL_DOKUMEN[jenis]} tidak lagi dilampirkan.`,
+  };
+}
+
+/**
+ * Rincian nama obat pada nota -- sakelar tersendiri, dicatat tersendiri.
+ *
+ * Alasannya sama dengan `administrasi_diagnosa_toggle`: ini setelan yang
+ * mengubah APA yang tercetak di dalam berkas, bukan apakah berkasnya boleh
+ * dikirim. Daftar obat seseorang mengatakan penyakitnya dengan cukup jelas, dan
+ * `FARMASI_TEMPLATE_VARIABLES` sampai sekarang tidak punya variabelnya justru
+ * karena itu.
+ */
+export async function toggleRincianObatAction(aktif: boolean): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  await setSetting(SETTING_RINCIAN_OBAT, aktif ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'dokumen_rincian_obat_toggle',
+    SETTING_RINCIAN_OBAT,
+    aktif ? 'nyala' : 'mati',
+  );
+  segarkan();
+  return {
+    sukses: aktif
+      ? 'Nama obat akan tercetak satu per satu di nota.'
+      : 'Nama obat diringkas jadi satu subtotal di nota.',
+  };
+}
+
+export async function simpanTeksDokumenAction(_prev: HasilForm, form: FormData): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  const teks: Record<JenisDokumen, string> = {
+    lab: String(form.get('pesan_lab') ?? '').trim(),
+    radiologi: String(form.get('pesan_rad') ?? '').trim(),
+    nota: String(form.get('pesan_nota') ?? '').trim(),
+  };
+  const catatanKaki = String(form.get('catatan_kaki_dokumen') ?? '').trim();
+
+  for (const jenis of ['lab', 'radiologi', 'nota'] as const) {
+    const tidakDikenal = findUnknownVariables(teks[jenis], VARIABEL_PESAN);
+    if (tidakDikenal.length) {
+      return {
+        error: `Pesan ${LABEL_DOKUMEN[jenis]}: variabel tidak dikenal ${tidakDikenal.join(', ')}. Yang tersedia: ${VARS_HINT}`,
+      };
+    }
+    /**
+     * Batas 1.024 karakter diperiksa DI SINI, bukan saat kirim.
+     *
+     * Pesan yang membawa lampiran menjadi *caption* dan tunduk pada batas jauh
+     * lebih pendek daripada pesan teks biasa. Kalau baru ketahuan saat kirim,
+     * gejalanya adalah lampiran yang diam-diam tidak pernah ikut -- pasien
+     * menerima pesannya, tanpa berkasnya, tanpa satu pun galat di layar
+     * siapa pun. Cadangan panjang untuk baris kode pengiriman ikut dihitung.
+     */
+    const cek = periksaPanjangKeterangan(teks[jenis], 64);
+    if (!cek.ok) return { error: `Pesan ${LABEL_DOKUMEN[jenis]}: ${cek.error}` };
+  }
+
+  await setSetting(SETTING_PESAN_DOKUMEN.lab, teks.lab);
+  await setSetting(SETTING_PESAN_DOKUMEN.radiologi, teks.radiologi);
+  await setSetting(SETTING_PESAN_DOKUMEN.nota, teks.nota);
+  await setSetting(SETTING_CATATAN_KAKI_DOKUMEN, catatanKaki);
+  await logAudit(
+    session!.user.username,
+    'dokumen_teks_update',
+    'dokumen.pesan',
+    `lab=${teks.lab.length} rad=${teks.radiologi.length} nota=${teks.nota.length} catatan_kaki=${catatanKaki ? 'diisi' : 'kosong'}`,
+  );
+  segarkan();
+  return { sukses: 'Teks dokumen disimpan.' };
 }

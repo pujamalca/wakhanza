@@ -8,7 +8,8 @@ import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
 import { buildIdempotencyKey } from '@/core/idempotency';
-import { loadBroadcastContext, enqueueMessage, identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
+import { loadBroadcastContext, enqueueMessage, previewUniqueCodeFooter } from '@/worker/pipeline';
+import { broadcastVars } from '@/core/broadcastVars';
 import { periksaBerkasLampiran, periksaPanjangKeterangan, MAX_LAMPIRAN_MB } from '@/core/media';
 import { simpanBerkasLampiran } from '@/lib/mediaStorage';
 import { BroadcastCampaign, getSettingNumber, logAudit } from '@/models';
@@ -120,7 +121,7 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
         rawPhone: row.no_tlp,
         eventAt: now,
         kdPoli: row.kd_poli,
-        vars: { ...identityVars(identity), nama_pasien: row.nm_pasien ?? '', no_rm: row.no_rkm_medis },
+        vars: broadcastVars(row, identity),
         campaignId: campaign.id,
         media,
       },

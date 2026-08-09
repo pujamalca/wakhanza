@@ -57,10 +57,9 @@ export const TRIGGER_TEMPLATE_VARIABLES = [
 
 /**
  * BROADCAST tidak terikat satu kunjungan -- {no_antrian}/{nama_poli}/
- * {nama_dokter}/{tanggal}/{jam}/{jenis_layanan}/{cara_bayar} mengacu ke SATU
- * kejadian spesifik yang tidak well-defined untuk segmen pasien merentang
- * banyak kunjungan. Subset ini sengaja lebih sempit dari
- * TRIGGER_TEMPLATE_VARIABLES.
+ * {nama_dokter}/{jenis_layanan}/{cara_bayar} mengacu ke SATU kejadian spesifik
+ * yang tidak well-defined untuk segmen pasien merentang banyak kunjungan.
+ * Subset ini sengaja lebih sempit dari TRIGGER_TEMPLATE_VARIABLES.
  *
  * {cara_bayar} termasuk yang dikecualikan walau segmennya PUNYA png_jawab
  * (khanza/pasienSegment.ts mengambilnya untuk kolom tabel pratinjau): yang
@@ -69,8 +68,44 @@ export const TRIGGER_TEMPLATE_VARIABLES = [
  * lalu dan umum minggu ini. Menyebutnya di dalam pengumuman berarti
  * menegaskan sesuatu yang kebetulan benar untuk satu baris, bukan untuk
  * orangnya -- persis alasan {nama_poli} juga tidak ada di sini.
+ *
+ * EMPAT yang BOLEH, dan garis pemisahnya bukan "berasal dari satu kunjungan"
+ * melainkan APA YANG DIJANJIKAN NAMANYA:
+ *
+ *   {tanggal_kunjungan}                     kunjungan yang jadi dasar segmen
+ *   {kelurahan} {kecamatan} {kabupaten}     wilayah pasien
+ *
+ * Ketiga wilayah itu melekat pada PASIEN (`pasien.kd_kab` dsb.), bukan pada
+ * kunjungan, jadi keberatan di atas tidak berlaku sama sekali. `{tanggal_kunjungan}`
+ * memang berasal dari satu kunjungan terpilih -- tapi ia tidak mengaku sebagai
+ * sifat orangnya, ia mengaku sebagai tanggal sebuah kunjungan, dan itu memang
+ * persis yang dikandungnya. Bandingkan `{cara_bayar}`, yang dibaca pasien
+ * sebagai "cara bayar SAYA" padahal isinya cara bayar satu kunjungan. Keempatnya
+ * sudah lebih dulu terbaca staf di kolom tabel pratinjau segmen, jadi tidak satu
+ * pun kolom `sik` baru diambil untuk ini.
+ *
+ * {tanggal}/{jam} SENGAJA TETAP TIDAK ADA, dan ini yang paling menggoda
+ * ditambahkan karena kedua nama itu sudah dipakai konteks lain. Pada BROADCAST
+ * artinya mau tak mau "kapan pesan ini dikirim", dan jam tenang bisa menahan
+ * satu kiriman dari pukul 22.00 sampai 07.00 keesokan harinya -- pesan yang
+ * menyebut tanggalnya sendiri lalu menyebut tanggal KEMARIN, ke seluruh
+ * penerima sekaligus, tanpa satu pun galat. Alasan yang sama membuat `{waktu}`
+ * pada baris kode pengiriman diisi `scheduled_at` dan bukan waktu enqueue.
+ * Staf yang menyusun broadcast sudah tahu tanggal yang dimaksudnya dan bisa
+ * mengetiknya; variabel yang diam-diam salah sembilan jam sehari lebih buruk
+ * daripada variabel yang tidak ada.
  */
-export const BROADCAST_TEMPLATE_VARIABLES = ['nama_pasien', 'no_rm', 'nama_rs', 'alamat_rs', 'kontak_rs'] as const;
+export const BROADCAST_TEMPLATE_VARIABLES = [
+  'nama_pasien',
+  'no_rm',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+  'tanggal_kunjungan',
+  'kelurahan',
+  'kecamatan',
+  'kabupaten',
+] as const;
 
 /**
  * BALASAN OTOMATIS berjalan ke arah sebaliknya: dipicu pesan MASUK dari nomor

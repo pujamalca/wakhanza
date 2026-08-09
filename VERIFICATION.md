@@ -754,6 +754,234 @@ sebagaimana mereka setel sendiri, dan `farmasi.hibah_nilai` dikembalikan ke `1` 
 dimatikan. `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`,
 umur heartbeat 27 detik).
 
+## Kelas keempat belas: DOKUMEN HASIL (`migrations/038`) -- ISI pemeriksaan, bukan kabar tentangnya
+
+Dijalankan 9 Agustus 2026 terhadap database produksi (`alca`) dan `wakhanza` sungguhan.
+
+### Bentuk data Khanza yang menentukan seluruh rancangannya
+
+Laju kejadian -- yang menentukan kuota per siklus:
+
+```
+nota_jalan/hari (30 hr terakhir)   21.87
+nota_jalan puncak/hari             46.00
+periksa_lab kunjungan/hari          0.13
+billing baris/nota rata2           20.60
+billing baris/nota max             41.00
+```
+
+Ketersediaan tabel:
+
+```
+detail_periksa_lab   alca 73    sik 6106
+periksa_lab          alca 74    sik 4588
+periksa_radiologi    alca 0     sik 0
+hasil_radiologi      alca 0     sik 0
+nota_jalan           alca 12142 sik 32471
+nota_inap            alca 0     sik 0
+```
+
+Kelengkapan kolom hasil lab (menentukan mana yang boleh dihilangkan saat kosong):
+
+```
+alca.detail_periksa_lab: total 73, nilai kosong 6, nilai_rujukan kosong 0, keterangan kosong 69
+sik.detail_periksa_lab : total 6106, nilai kosong 27, nilai_rujukan kosong 3
+```
+
+**Peran ketiga kolom teks `billing`** -- diukur, bukan disimpulkan dari namanya:
+
+```
+Ttl* dengan totalbiaya<>0                          0
+baris item (pemisah=':') dengan `no` tidak kosong  0
+baris no='' & pemisah='' & status<>'-'         23727   (TtlObat 11585, Dokter 12142)
+...yang totalbiaya<>0                              0
+```
+
+Nol pada baris pertama itulah yang membuat `SUM(totalbiaya)` aman dipakai sebagai total; nol pada baris kedua yang membuat `no` bisa dipercaya sebagai label kelompok.
+
+**Total yang dihitung sendiri, diperiksa silang terhadap Khanza:**
+
+```
+nota_diperiksa  cocok  beda
+8642            8630   12
+```
+
+(`SUM(billing.totalbiaya)` vs `SUM(detail_nota_jalan.besar_bayar)`, selisih < 0,5.) 12 baris yang berbeda itulah alasan bagian PEMBAYARAN tetap ditampilkan apa adanya dari Khanza alih-alih diganti angka hitungan sendiri.
+
+### Bug yang ditemukan pratinjau, bukan pembacaan skema
+
+Percobaan pertama memetakan `nm_perawatan` sebagai label kelompok. Keluaran `npm run dryrun:dokumen` atas nota sungguhan:
+
+```
+  dr. Intan Rahma Dewi                                                  Rp0
+  :                                                                Rp10.000
+  :                                                                     Rp0
+    konsultasi dokter umum                         Rp25.000    1     Rp25.000
+  31,655                                                                Rp0
+```
+
+Judul kelompok berbunyi ":" dan subtotalnya jadi baris bernama "31,655" tanpa angka. Sesudah diperbaiki (`no` sebagai label, `Ttl*` dihitung ulang):
+
+```
+    [keterangan] dr. Intan Rahma Dewi
+  [seksi] Registrasi                                                  Rp10.000
+  [seksi] Tindakan
+    [item] konsultasi dokter umum                     Rp25.000    1     Rp25.000
+  [seksi] Obat & BHP
+  [subtotal] Subtotal                                                 Rp31.655
+  [seksi] Tambahan Biaya
+    [item] p                                             Rp345    1        Rp345
+  [seksi] Potongan Biaya
+    [item] konsul                                      Rp5.000    1     -Rp5.000
+  [total] TOTAL                                                       Rp62.000
+pembayaran:
+  A Kas                    Rp62.000
+```
+
+Subtotal hitungan sendiri (`Rp31.655`) cocok persis dengan angka terformat milik Khanza (`31,655`), dan TOTAL (`Rp62.000`) cocok persis dengan baris pembayarannya.
+
+### Sakelar rincian obat: nama disembunyikan, angka TIDAK berubah
+
+Dengan `dokumen.nota_rincian_obat = '1'` (dinyalakan sementara lalu dikembalikan ke `'0'`):
+
+```
+baris    : 17  (rincian obat ditampilkan)
+  [seksi] Obat & BHP
+    [item] Dexaharsen 0,75 mg (Kaplet)                   Rp260   10      Rp2.600
+    [item] Acetylcysteine 200 mg (Kapsul)                Rp845    6      Rp5.070
+    [item] Cefixime 200mg (OGB Dexa) merah (Kapsul)     Rp1.950    6     Rp11.700
+    [item] Omeprazol mega/nova (Kapsul)                  Rp325    6      Rp1.950
+    [item] Livron B.Plex (Tablet)                        Rp507    5      Rp2.535
+    [item] Brochifar Plus Kap (Tablet)                   Rp780   10      Rp7.800
+  [subtotal] Subtotal                                                 Rp31.655
+  [total] TOTAL                                                       Rp62.000
+```
+
+Dengan `'0'`: 11 baris, nol nama obat, **subtotal `Rp31.655` dan TOTAL `Rp62.000` identik**.
+
+### PDF benar-benar terbentuk
+
+```
+Hasil-Laboratorium-31072026.pdf   199.787 byte, magic %PDF-   (alca, data produksi)
+Rincian-Tagihan-08082026.pdf      210.657 byte, magic %PDF-   (alca, data produksi)
+Hasil-Radiologi-18112025.pdf      168.573 byte, magic %PDF-   (database Khanza lain)
+```
+
+Radiologi dibuktikan terhadap database Khanza lain karena `hasil_radiologi` KOSONG di `alca` maupun `sik`. Grant `SELECT` sementara untuk `wakhanza_ro` diberikan lalu **dicabut**; diperiksa sesudahnya: 0 sisa grant.
+
+Struktur HTML yang benar-benar dirender (diperiksa atas keluaran `dokumenKeHtml()` dengan data produksi):
+
+```
+lab  judul "HASIL PEMERIKSAAN LABORATORIUM"
+     kolom [Pemeriksaan, Hasil, Satuan, Nilai Rujukan, Keterangan]   <- sama persis rptPeriksaLab
+     adaQr true  qrSebelumNama true  adaCatatanKaki true  adaLogo true  tagLiar false
+nota judul "RINCIAN TAGIHAN"
+     kolom [Layanan / Barang, Biaya, Jml, Jumlah]
+     adaQr true  qrSebelumNama true  adaCatatanKaki true  adaLogo true  tagLiar false
+```
+
+`qrSebelumNama` menegakkan aturan letak yang dibaca dari koordinat elemen jrxml: QR duduk DI DALAM blok tanda tangan, antara label penanda tangan dan namanya.
+
+### Pemindahan kerangka cetak: NOL perubahan keluaran
+
+`core/cetakHtml.ts` dan `lib/cetak.ts` diekstrak dari `core/suratHtml.ts` dan `lib/surat.ts`. HTML kedua surat (sakit + sehat, dengan dan tanpa QR/catatan kaki) dirender sebelum dan sesudahnya:
+
+```
+sebelum 10.069 byte   sesudah 10.065 byte
+diff  -> HANYA di dalam komentar CSS (prosa yang sengaja digeneralkan
+         dari "Dokter Pemeriksa," jadi "label penanda tangan")
+sama tanpa komentar CSS: True | panjang 6461 6461
+```
+
+### Rencana query: tidak satu pun butuh izin pindai penuh
+
+```
+[ok] DOKUMEN_IDENTITAS         r/pk/p/kel/kec/kab/pj/d  const PRIMARY  rows~1
+[ok] DOKUMEN_HASIL_LAB         d ref PRIMARY  rows~1
+[ok] DOKUMEN_HASIL_LAB         pl/jp/ptg/dr/tl eq_ref PRIMARY  rows~1
+[ok] DOKUMEN_HASIL_RADIOLOGI   h ref PRIMARY  rows~1
+[ok] DOKUMEN_PERIKSA_RADIOLOGI pr ref PRIMARY  rows~1
+[ok] DOKUMEN_NOTA              b ref no_rawat  rows~25  (Using index)
+[ok] DOKUMEN_NOTA_BAYAR_RAJAL  dn ref PRIMARY  rows~1
+[ok] DOKUMEN_NOTA_BAYAR_RANAP  dn index nama_bayar  rows~1
+[ok] DOKUMEN_CONTOH_LAB        pl index kd_jenis_prw  rows~58  (Using index)
+[ok] DOKUMEN_CONTOH_RADIOLOGI  h index PRIMARY  rows~1  (Using index)
+[ok] DOKUMEN_CONTOH_NOTA       n index tanggal  rows~1
+```
+
+**Gerbangnya menangkap satu kesalahan nyata sebelum sempat dipasang.** Versi pertama `DOKUMEN_CONTOH_NOTA` memakai `ORDER BY tanggal DESC, jam DESC`, dan komentarnya mengklaim indeks `tanggal` terpakai. `verify:plans` menjawab:
+
+```
+[GAGAL] DOKUMEN_CONTOH_NOTA  n type=ALL (full scan), key=NULL, rows=10071 melampaui ambang 500
+```
+
+`nota_jalan` tidak punya indeks `(tanggal, jam)`, jadi menambahkan `jam` memaksa pemindaian penuh 10.071 baris untuk mengambil SATU baris contoh. Diperbaiki jadi `ORDER BY tanggal DESC` saja -> `type=index, key=tanggal, rows=1`.
+
+### Pagar "berkas tidak pernah ke grup" -- DIBUKTIKAN MENGGIGIT
+
+`media: null` pada salinan tujuan dihapus sengaja, lalu uji integrasinya dijalankan:
+
+```
+● enqueuePemicuPasien: tujuan_mode (migrations/018)
+  › lampiranPasien: berkas TIDAK PERNAH ikut ke salinan grup
+  › `media` yang diisi langsung pada input pun tidak bocor ke salinan grup
+    Received: "uji-dokumen.pdf"
+Tests: 1 failed, 45 skipped, 46 total
+```
+
+Baris grup menerima berkasnya. Sesudah dipulihkan: lolos.
+
+### Gerbang "migrasi dan kode menyebut kalimat yang sama" -- DIBUKTIKAN MENGGIGIT
+
+Satu frasa di `migrations/038` diubah sengaja (`berikut hasil pemeriksaan laboratorium Anda` -> `berikut hasil lab Anda`):
+
+```
+● PESAN_BAWAAN_DOKUMEN › lab: teks di migrasi sama dengan di kode
+  Expected: "...berikut hasil pemeriksaan laboratorium Anda dari {nama_rs}..."
+  Received: "...berikut hasil lab Anda dari {nama_rs}..."
+Tests: 1 failed, 22 skipped, 2 passed, 25 total
+```
+
+Sesudah dipulihkan: lolos.
+
+### Gerbang penuh
+
+```
+tsc --noEmit          bersih
+eslint .              bersih
+npm test              38 suite, 641 uji lolos   (dari 37/616)
+npm run test:int      3 suite, 46 uji lolos     (dari 3/42)
+npm run verify:plans  lolos (11 pemeriksaan DOKUMEN_* baru)
+npm run verify:db     lolos -- sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK
+npm run build         berhasil
+npm run migrate       038_dokumen_hasil.sql diterapkan
+```
+
+Build memuat perubahannya:
+
+```
+.next/server/.../administrasi/pratinjau-dokumen/route.js   ada
+"Hasil & tagihan"                                          18 berkas
+dokumen.lab_enabled / nota_rincian_obat                     4 berkas
+```
+
+### Pemasangan
+
+`pm2 restart wakhanza-web` -> pid 8688, online, uptime 4 detik, restart counter 6. `wakhanza-worker` **tidak disentuh**: pid 15312, uptime 6 jam, counter tetap 80.
+
+Gerbang autentikasi lewat instance PM2 sungguhan (port 3100):
+
+```
+307 /administrasi?tab=hasil                              -> /login
+307 /administrasi/pratinjau-dokumen?jenis=lab            -> /login
+307 /administrasi/pratinjau-dokumen?jenis=lab&format=pdf -> /login
+200 /login
+```
+
+Sesi WhatsApp sebelum dan sesudah pemasangan: `status=ready`, umur denyut 5 detik (dibaca lewat `CONVERT_TZ(heartbeat_at,'+00:00','+07:00')` -- angka mentahnya UTC dan meleset 7 jam).
+
+**Worker belum dimulai ulang, dan itu disengaja.** Ketiga sakelar mati, jadi perilaku kode lama dan baru identik: `params.lampiran` `undefined` -> `runSisipCycle` tidak menghitung kunci baru dan tidak merender apa pun, dan `media: null` pada salinan tujuan tidak mengubah apa pun karena belum ada pemicu pasien yang mengisi `media`. Restart hari ini berarti mengambil risiko kaskade yang **terjadi sungguhan pada mesin ini hari ini juga** (delapan instance dalam ~45 detik dari satu `pm2 restart`) tanpa imbalan apa pun. Yang WAJIB: worker dimulai ulang sebelum sakelar pertama dinyalakan.
+
 ## PENGINGAT KONTROL non-BPJS (`migrations/032`) -- padanan BPJS_KONTROL dari sisi Khanza sendiri
 
 Verifikasi 8 Agustus 2026. Nama pasien, nomor telepon, dan nama dokter sungguhan
@@ -1912,3 +2140,93 @@ wa_session      : status=ready, denyut 7 detik
 `git status --short`: hanya `src/core/watermark.ts` tersisa tak terlacak
 (sengaja, di luar cakupan sesi ini). Tujuh commit sebelumnya sudah di-push;
 seluruh pekerjaan sesi ini BELUM di-commit pada titik pemeriksaan ini.
+
+## Variabel BROADCAST (`core/broadcastVars.ts`) -- satu pemetaan, dan yang sengaja tetap tidak ada
+
+Dijalankan 9 Agustus 2026, sesudah laporan bahwa "+ Sisipkan variabel" di
+`/broadcast` dan `/broadcast-terjadwal` lebih sempit daripada di
+`/administrasi` dan `/template`.
+
+**Duplikasi yang ditemukan.** Literal pemetaan yang sama persis
+(`{ ...identityVars(identity), nama_pasien: row.nm_pasien ?? '', no_rm: row.no_rkm_medis }`)
+berada di EMPAT berkas sebelum perbaikan:
+
+```
+src/app/(dashboard)/broadcast/actions.ts:123           kirim manual
+src/worker/broadcastScheduleRunner.ts:127              kirim terjadwal
+src/app/(dashboard)/broadcast/page.tsx:57              pratinjau
+src/app/(dashboard)/broadcast-terjadwal/page.tsx:91    pratinjau
+```
+
+Sesudahnya keempatnya memanggil `broadcastVars(row, identity)`. `identityVars()`
+TETAP dipakai tujuh pemanggil lain (`autoReply`, `pollerBooking`, `scheduler`,
+`sisipCycle`, `stokReply`), jadi ia bukan ekspor mati.
+
+**Gerbang, seluruhnya lolos:**
+
+```
+npm run typecheck   -> bersih
+npm run lint        -> bersih
+npx jest            -> 37 suite, 616 uji lolos (sebelumnya 606; +10 dari broadcastVars.test.ts)
+npm run build       -> sukses
+npm run verify:plans-> lolos
+npm run verify:db   -> lolos (sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK)
+```
+
+`verify:plans` dan `verify:db` dijalankan walau tidak ada query yang disentuh --
+keempat kolom yang kini dipakai (`nm_kab`, `nm_kec`, `nm_kel`,
+`tgl_kunjungan_terakhir`) sudah lebih dulu ada di `SELECT_DAN_JOIN` milik
+`khanza/pasienSegment.ts`, jadi **nol kolom `sik` baru diambil**.
+
+**Uji "membagi habis" DIBUKTIKAN MENGGIGIT ke dua arah**, bukan diasumsikan.
+Kedua kerusakan disengaja lalu dikembalikan:
+
+```
+arah 1 -- tambah 'kota' ke BROADCAST_TEMPLATE_VARIABLES saja:
+  Expected - 1 / Received + 0
+  -   "kota"
+  Tests: 1 failed, 9 passed
+
+arah 2 -- tambah nama_poli ke broadcastVars() saja:
+  Expected - 0 / Received + 1
+  +   "nama_poli"
+  Tests: 1 failed, 9 passed
+```
+
+Arah kedua sekaligus membuktikan gerbangnya menjaring `{nama_poli}` yang
+menyelinap ke konteks broadcast -- kebocoran privasi, bukan sekadar kerapian.
+
+**Penanda bawaan Khanza terbukti dibuang.** `nm_kel='KELURAHAN'`,
+`nm_kec='KECAMATAN'`, `nm_kab='KABUPATEN'` ketiganya dirender string kosong
+(dipatok `broadcastVars.test.ts`), bersama penanda umum `'-'`, `null`, dan
+spasi. Tanpa ini 89% pasien di mesin ini menghasilkan "Warga KECAMATAN,".
+`tgl_kunjungan_terakhir='0000-00-00'` -> string kosong, bukan "Invalid Date".
+
+**Build memuat perubahannya**, diperiksa tanpa menyentuh satu pun akun:
+
+```
+tanggal_kunjungan -> 24 berkas di .next/server
+kelurahan         -> 28
+kecamatan         -> 32
+kabupaten         -> 32
+```
+
+**Pemasangan.** `broadcast_schedule` diperiksa lebih dulu dan berisi **0 baris**
+(`SELECT COUNT(*)`, bukan `information_schema.TABLE_ROWS` -- pelajaran 030),
+jadi kode lama di worker tidak punya apa pun untuk dijalankan dan worker
+SENGAJA tidak dimulai ulang. Hanya `wakhanza-web`:
+
+```
+pm2 restart wakhanza-web  -> online, pid 16352, restart_time=5
+wakhanza-worker           -> TIDAK disentuh: pid 15312, uptime 91m, restart_time=80 (tetap)
+curl /broadcast           -> HTTP 307 -> /login   (gerbang auth utuh)
+curl /login               -> HTTP 200
+```
+
+Restart counter worker tetap 80 -- angka yang sama sejak pemulihan kaskade
+restart sesi sebelumnya, jadi tidak ada kaskade baru yang terpicu.
+
+**Yang masih tertunda dan wajib dikerjakan sebelum jadwal broadcast pertama
+dibuat**: `pm2 stop wakhanza-worker` -> pastikan Chromium bersih -> `pm2 start
+wakhanza-worker`. Tanpa itu jadwal yang memakai keempat variabel baru
+mengirimkannya KOSONG tanpa satu pun galat.

@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { scheduleFiltersToSegment, isFollowupSchedule, DEFAULT_FOLLOWUP_OFFSET_DAYS, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
-import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
+import { previewUniqueCodeFooter } from '@/worker/pipeline';
+import { broadcastVars } from '@/core/broadcastVars';
 import { BroadcastSchedule, BroadcastTemplate } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { parseScheduleFilters, DATE_PRESETS, type RawFilterInput } from './filters';
@@ -87,9 +88,10 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
   const summary = await summarizeSegment(recipients);
 
   const firstPreview = summary.preview[0];
-  const sampleVars = firstPreview
-    ? { ...identityVars(identity), nama_pasien: firstPreview.row.nm_pasien ?? '', no_rm: firstPreview.row.no_rkm_medis }
-    : null;
+  // broadcastVars() yang SAMA dipakai runDueBroadcastSchedules() di worker --
+  // di sinilah penyimpangannya paling mahal, karena jadwal berjalan tanpa ada
+  // yang meninjau tiap kali kirim.
+  const sampleVars = firstPreview ? broadcastVars(firstPreview.row, identity) : null;
   // Seed tetap (bukan acak/waktu) supaya kode contoh tidak berubah tiap kali
   // halaman dimuat ulang -- kode SUNGGUHAN diturunkan dari idempotency_key
   // masing-masing pesan saat worker menjalankan jadwalnya.

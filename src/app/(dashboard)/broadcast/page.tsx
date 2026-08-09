@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions, SEGMENT_LIMIT } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
-import { identityVars, previewUniqueCodeFooter } from '@/worker/pipeline';
+import { previewUniqueCodeFooter } from '@/worker/pipeline';
+import { broadcastVars } from '@/core/broadcastVars';
 import { Outbox, BroadcastCampaign, BroadcastTemplate } from '@/models';
 import { parseFilters, DATE_PRESETS, PRESET_SEMUA_WAKTU, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
@@ -53,9 +54,10 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   }
 
   const firstPreview = summary.preview[0];
-  const sampleVars = firstPreview
-    ? { ...identityVars(identity), nama_pasien: firstPreview.row.nm_pasien ?? '', no_rm: firstPreview.row.no_rkm_medis }
-    : null;
+  // broadcastVars() yang SAMA dipakai sendBroadcastAction -- pratinjau yang
+  // memetakan barisnya sendiri adalah pratinjau yang cepat atau lambat
+  // menampilkan pesan berbeda dari yang benar-benar terkirim.
+  const sampleVars = firstPreview ? broadcastVars(firstPreview.row, identity) : null;
   // Seed tetap (bukan acak/waktu) supaya kode contoh tidak berubah tiap kali
   // halaman dimuat ulang -- kode SUNGGUHAN diturunkan dari idempotency_key
   // masing-masing pesan saat enqueue, jadi ini murni contoh bentuknya.

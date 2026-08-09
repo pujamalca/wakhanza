@@ -391,6 +391,30 @@ export interface EnqueueInput {
    * keliru.
    */
   media?: { path: string; mime: string; name: string } | null;
+  /**
+   * Lampiran + pesan pengantarnya yang HANYA berlaku untuk baris PASIEN.
+   *
+   * Dipakai dokumen hasil (migrations/038): hasil lab, hasil radiologi, dan
+   * nota tagihan yang ikut dikirim sebagai berkas PDF pada tiga pemicu yang
+   * sudah ada. Diserahkan lewat medan tersendiri, BUKAN lewat `media` di atas,
+   * dan pemisahan itu memuat dua aturan sekaligus:
+   *
+   * 1. **Salinan ke tujuan tambahan tidak pernah mendapat berkasnya.** Sebuah
+   *    hasil laboratorium adalah data medis paling telanjang di proyek ini, dan
+   *    satu centang di /template tidak boleh bisa mengubahnya menjadi berkas
+   *    yang diterima setiap anggota sebuah grup WhatsApp yang keanggotaannya
+   *    diatur di luar sistem ini. Ditegakkan `enqueuePemicuPasien()`, bukan
+   *    pengaturan -- yang bisa dimatikan bukan pengaman.
+   *
+   * 2. **Pesan pengantarnya ikut berbeda, dan hanya untuk pasien.** Badan
+   *    template ketiga pemicu berbunyi "silakan ambil di bagian terkait" --
+   *    membingungkan bila berkasnya sudah di tangan, tapi tetap BENAR bagi grup
+   *    laboratorium yang memang sedang dikabari ada hasil selesai.
+   *
+   * `enqueueMessage()` sendiri tidak mengenal medan ini: ia primitif
+   * satu-penerima yang tidak tahu apa-apa tentang penyebaran.
+   */
+  lampiranPasien?: { media: { path: string; mime: string; name: string }; body: string } | null;
 }
 
 /**
@@ -537,7 +561,9 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
  * cukup satu yang lupa diperbarui untuk membuat satu pemicu diam-diam
  * berperilaku lain.
  *
- * Empat hal yang menempel di sini, dan semuanya AKIBAT, bukan pilihan bebas:
+ * Lima hal yang menempel di sini. Empat yang pertama AKIBAT, bukan pilihan
+ * bebas; yang kelima justru kebalikannya -- ia satu-satunya aturan di sini yang
+ * ditegakkan sengaja karena tidak akan terjadi sendirinya:
  *
  * 1. **Salinan ke tujuan tidak tunduk pada daftar tolak, dan itu terjadi
  *    sendirinya.** `enqueueMessage` hanya memeriksa `opt_out` bila ada
@@ -562,14 +588,30 @@ export async function enqueueMessage(input: EnqueueInput, ctx: PipelineContext):
  *    halaman Antrean menemukan pesan pasiennya tapi tidak menemukan salinan
  *    yang dikirim ke grup -- dan pertanyaan "ke mana saja pesan ini pergi"
  *    justru itu yang perlu dijawab saat ada yang menelepon.
+ *
+ * 5. **LAMPIRAN TIDAK PERNAH IKUT KE SALINAN GRUP** (`media: null` eksplisit
+ *    pada tiap tujuan). Ketiga hal di atas terjadi sendirinya sebagai akibat
+ *    bentuk `enqueueMessage`; yang ini TIDAK -- `...input` dengan senang hati
+ *    menyalin berkasnya ke tiap grup. Sejak dokumen hasil ada (038), berkas itu
+ *    bisa berupa hasil laboratorium seorang pasien lengkap dengan angkanya.
+ *    Lihat `EnqueueInput.lampiranPasien`.
  */
 export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineContext): Promise<void> {
   const sebar = ctx.pemicuPasien;
 
+  /**
+   * Baris PASIEN: lampiran dan pesan pengantarnya dipasang di sini, dan hanya
+   * di sini. Lihat `EnqueueInput.lampiranPasien` -- kedua hal itu sengaja tidak
+   * bisa sampai ke salinan grup lewat jalan mana pun.
+   */
+  const lampiran = input.lampiranPasien;
+  const inputPasien: EnqueueInput = lampiran ? { ...input, media: lampiran.media } : input;
+  const ctxPasien: PipelineContext = lampiran ? { ...ctx, template: { body: lampiran.body } } : ctx;
+
   // Konteks tanpa `pemicuPasien` berarti pemicu yang memang tidak punya tujuan
   // tambahan. Berperilaku persis seperti sebelum fitur ini ada.
   if (!sebar) {
-    await enqueueMessage(input, ctx);
+    await enqueueMessage(inputPasien, ctxPasien);
     return;
   }
 
@@ -596,7 +638,7 @@ export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineCont
   }
 
   if (kePasien) {
-    await enqueueMessage(input, ctx);
+    await enqueueMessage(inputPasien, ctxPasien);
   }
 
   if (!keTujuan) return;
@@ -605,6 +647,19 @@ export async function enqueuePemicuPasien(input: EnqueueInput, ctx: PipelineCont
     await enqueueMessage(
       {
         ...input,
+        /**
+         * BERKAS TIDAK PERNAH IKUT KE GRUP, dan ini ditulis eksplisit walau
+         * `input.media` pada jalur pemicu pasien sejauh ini memang selalu
+         * kosong.
+         *
+         * `...input` menyalin SELURUH medan, jadi begitu ada satu pemanggil
+         * yang mengisi `media` -- dan dokumen hasil (038) adalah alasan pertama
+         * seseorang akan mencobanya -- lampirannya ikut tersebar ke tiap grup
+         * tanpa satu pun galat. Baris ini yang membuat kebocoran itu mustahil
+         * alih-alih sekadar belum terjadi.
+         */
+        media: null,
+        lampiranPasien: null,
         // Alamat lengkap -> enqueueMessage melewati resolvePhone, daftar tolak,
         // dan pemeriksaan pendaftaran WhatsApp. Lihat EnqueueInput.chatId.
         chatId: target.chatId,

@@ -1,7 +1,5 @@
-import QRCode from 'qrcode';
 import { getSetting, getSettingBool } from '@/models';
-import { getHospitalIdentity, getHospitalLogoDataUri } from '@/khanza/common';
-import { logger } from '@/lib/logger';
+import { bacaKopSurat, rakitCatatanKaki, buatQrAsalUsul } from '@/lib/cetak';
 import type { BarisSuratSakit, BarisSuratSehat } from '@/khanza/suratPasien';
 import {
   type IsiSurat,
@@ -18,7 +16,6 @@ import {
   type JenisSurat,
 } from '@/core/suratDoc';
 import { renderSuratHtml } from '@/core/suratHtml';
-import { sikSelect } from '@/db/sik';
 import { ambilSuratSakit, ambilKunjunganSehat } from '@/khanza/suratPasien';
 
 export type { JenisSurat };
@@ -101,57 +98,15 @@ export async function administrasiAktif(): Promise<boolean> {
 }
 
 /**
- * Kop surat.
- *
- * `getHospitalIdentity()` sudah memberi nama/alamat/kontak dan dipakai seluruh
- * pemicu lain, tapi kop surat butuh dua hal lagi yang tidak ada di sana
- * (kabupaten, propinsi, email) -- Khanza mencetak keempatnya. Dibaca terpisah
- * dari tabel yang sama alih-alih melebarkan `HospitalIdentity`, supaya bentuk
- * yang dipakai sepuluh pemicu lain tidak ikut berubah demi satu halaman.
+ * Kop surat, catatan kaki, dan QR pengesahan pindah ke `lib/cetak.ts` saat
+ * dokumen kedua lahir (hasil lab/radiologi/nota, migrations/038) -- ketiganya
+ * bukan milik surat melainkan milik "berkas resmi yang dikirim rumah sakit
+ * ini". Diekspor ulang di sini supaya pemanggil lama tidak berubah.
  */
-export async function bacaKopSurat(): Promise<KopSurat> {
-  // Ketiganya bebas dari satu sama lain, dan dua di antaranya hampir selalu
-  // dijawab dari cache -- dijalankan berbarengan supaya membuka pratinjau tidak
-  // menunggu tiga perjalanan berurutan ke database.
-  const [identitas, logoDataUri, rows] = await Promise.all([
-    getHospitalIdentity(),
-    getHospitalLogoDataUri(),
-    sikSelect<{ kabupaten: string | null; propinsi: string | null; email: string | null }>(
-      'SELECT kabupaten, propinsi, email FROM setting LIMIT 1',
-    ),
-  ]);
-  const s = rows[0];
-  return {
-    namaRs: identitas.namaRs,
-    alamatRs: identitas.alamatRs,
-    kotaRs: isianSurat(s?.kabupaten),
-    propinsiRs: isianSurat(s?.propinsi),
-    kontakRs: identitas.kontakRs,
-    emailRs: isianSurat(s?.email),
-    logoDataUri,
-  };
-}
-
-/**
- * Catatan asal-usul di kaki surat -- padanan parameter `finger` milik Khanza,
- * yang juga mencetak "Dikeluarkan di ... Ditandatangani secara elektronik
- * oleh ...".
- *
- * BUKAN hiasan. Berkas PDF yang beredar di WhatsApp lepas dari sistem yang
- * membuatnya: tanpa satu baris pun yang menyebut dari mana ia berasal dan
- * bahwa lembar asli bertanda tangan ada di rumah sakit, ia tidak bisa
- * dibedakan dari berkas yang disunting siapa pun. Kalimatnya bisa diubah RS
- * lewat halaman `/administrasi`, tapi bila dikosongkan tetap ada bentuk
- * bawaannya -- ini bagian yang tidak boleh hilang karena kotaknya kosong.
- */
-const CATATAN_KAKI_BAWAAN =
-  'Dokumen ini diterbitkan secara elektronik oleh {nama_rs} dan dikirim melalui WhatsApp resmi rumah sakit. ' +
-  'Lembar asli yang ditandatangani tersedia di rumah sakit. Bila ada keraguan atas keaslian dokumen ini, ' +
-  'hubungi {kontak_rs}.';
+export { bacaKopSurat };
 
 export async function bacaCatatanKaki(kop: KopSurat): Promise<string> {
-  const teks = (await getSetting(SETTING_CATATAN_KAKI))?.trim() || CATATAN_KAKI_BAWAAN;
-  return teks.replace(/\{nama_rs\}/g, kop.namaRs).replace(/\{kontak_rs\}/g, kop.kontakRs);
+  return rakitCatatanKaki(await getSetting(SETTING_CATATAN_KAKI), kop);
 }
 
 /** Baris identitas yang dipakai KEDUA surat, supaya keduanya tidak menyimpang. */
@@ -233,35 +188,6 @@ export function susunSuratSehat(row: BarisSuratSehat): IsiSuratSehat {
     tanggalSurat: formatTanggalSurat(row.tgl_registrasi),
     tanggalRingkas: formatTanggalRingkas(row.tgl_registrasi),
   };
-}
-
-/**
- * QR pengesahan, memakai `qrcode` yang SUDAH jadi dependensi produksi lewat
- * layar Koneksi (QR penautan WhatsApp) -- nol paket baru, prinsip yang sama
- * yang membuat PDF-nya dibuat lewat Chromium bawaan whatsapp-web.js.
- *
- * `errorCorrectionLevel: 'H'` mengikuti Khanza persis. Tingkat itu memang boros
- * (30% isi QR dipakai untuk pemulihan), dan justru itu gunanya: berkas ini
- * dicetak ulang, difoto layar, lalu diteruskan lagi lewat WhatsApp yang
- * memampatkan gambar -- QR yang masih terbaca setelah semua itu adalah
- * satu-satunya QR yang berguna.
- *
- * **Kegagalan TIDAK menjatuhkan suratnya.** Isi QR bisa melampaui daya tampung
- * bila nama rumah sakit dan nama dokter luar biasa panjang, dan menolak
- * menerbitkan surat karena hiasan pengesahannya gagal adalah pertukaran yang
- * salah arah -- yang dibutuhkan pasien adalah suratnya. Yang hilang pun tidak
- * kritis: keterangan asal-usul yang sama tetap tercetak sebagai teks di kaki
- * surat, dan itulah alasan keduanya ada. Dicatat `warn` supaya kegagalannya
- * tetap punya jejak alih-alih hilang diam-diam.
- */
-async function buatQrAsalUsul(teks: string): Promise<string> {
-  if (!teks) return '';
-  try {
-    return await QRCode.toDataURL(teks, { errorCorrectionLevel: 'H', scale: 8 });
-  } catch (err) {
-    logger.warn({ err, panjang: teks.length }, 'QR pengesahan surat gagal dibuat, surat tetap diterbitkan');
-    return '';
-  }
 }
 
 /** Satu jalur dari isi surat ke HTML, dipakai pratinjau MAUPUN pengiriman. */
