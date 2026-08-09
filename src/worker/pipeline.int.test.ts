@@ -2,7 +2,9 @@ import { Op } from 'sequelize';
 import { Outbox, OptOut, AppSetting } from '@/models';
 import { db } from '@/db/wakhanza';
 import { sik } from '@/db/sik';
-import { enqueueMessage, type PipelineContext } from './pipeline';
+import type { TujuanMode } from '@/models';
+import { turunkanKunciTujuan } from '@/core/idempotency';
+import { enqueueMessage, enqueuePemicuPasien, saringKunciBaruPemicuPasien, type PipelineContext, type TujuanTambahan } from './pipeline';
 
 /**
  * Uji integrasi `enqueueMessage()` -- satu-satunya jalur yang dilewati KEEMPAT
@@ -27,6 +29,19 @@ const NOMOR_UJI = '628000000001';
 
 /** Nomor yang dipakai menguji gerbang opt-out. Dibersihkan di afterAll. */
 const NOMOR_OPTOUT = '628000000002';
+
+/**
+ * JID grup uji untuk `enqueuePemicuPasien` (R7). Nol berurut -- jelas fiktif,
+ * tidak pernah dipakai grup sungguhan.
+ *
+ * Dibersihkan lewat `chatId`, BUKAN lewat pola `TANDA|%` pada idempotency_key:
+ * kunci turunan per tujuan di-HASH ULANG (`turunkanKunciTujuan`), bukan
+ * disambung, jadi tidak memuat `TANDA` sama sekali. Baris berkode dasar
+ * `TANDA|...` tetap tersaring seperti biasa; ini menambah jalur kedua khusus
+ * untuk salinannya.
+ */
+const GRUP_UJI_A = '120363000000000001@g.us';
+const GRUP_UJI_B = '120363000000000002@g.us';
 
 function ctx(over: Partial<PipelineContext> = {}): PipelineContext {
   return {
@@ -58,6 +73,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await Outbox.destroy({ where: { idempotencyKey: { [Op.like]: `${TANDA}|%` } } });
+  await Outbox.destroy({ where: { chatId: { [Op.in]: [GRUP_UJI_A, GRUP_UJI_B] } } });
   await OptOut.destroy({ where: { phoneE164: NOMOR_OPTOUT } });
   await db.close();
   await sik.close();
@@ -459,5 +475,161 @@ describe('app_setting: kunci yang dipakai pipeline benar-benar ada', () => {
     ];
     const ada = await AppSetting.findAll({ where: { k: wajib } });
     expect(ada.map((r) => r.k).sort()).toEqual([...wajib].sort());
+  });
+});
+
+/**
+ * Rekomendasi teknis 9 Agustus 2026 (R7): sampai berkas ini ditambahkan, tidak
+ * satu pun uji integrasi menjalankan `enqueuePemicuPasien()` -- fungsi yang
+ * benar-benar menyebar pesan menurut `template.tujuan_mode`, dan tempat bug
+ * dedup ("Dedup pemicu pasien" di CLAUDE.md) hidup selama berhari-hari sebelum
+ * ketahuan dari log produksi. `pipeline.int.test.ts` di atas hanya menguji
+ * `enqueueMessage()`, satu tingkat di BAWAH fungsi ini.
+ */
+describe('enqueuePemicuPasien: tujuan_mode (migrations/018)', () => {
+  function ctxTujuan(mode: TujuanMode, targets: TujuanTambahan[] = [{ chatId: GRUP_UJI_A, label: 'Grup Uji A' }]): PipelineContext {
+    return ctx({ pemicuPasien: { mode, targets, batasHarian: 0, terpakaiHariIni: 0 } });
+  }
+
+  it("mode 'pasien' (bawaan): pasien menerima, TIDAK ADA salinan ke tujuan", async () => {
+    const k = kunci('mode-pasien');
+    await enqueuePemicuPasien(
+      { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+      ctxTujuan('pasien'),
+    );
+
+    expect((await ambil(k))!.status).toBe('pending');
+    expect(await ambil(turunkanKunciTujuan(k, GRUP_UJI_A))).toBeNull();
+  });
+
+  it("mode 'pasien_dan_tujuan': pasien DAN tujuan sama-sama menerima, kunci berbeda", async () => {
+    const k = kunci('mode-pasien-dan-tujuan');
+    await enqueuePemicuPasien(
+      { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+      ctxTujuan('pasien_dan_tujuan'),
+    );
+
+    const kePasien = await ambil(k);
+    const keGrup = await ambil(turunkanKunciTujuan(k, GRUP_UJI_A));
+    expect(kePasien!.status).toBe('pending');
+    expect(kePasien!.chatId).toBeNull();
+    expect(keGrup).not.toBeNull();
+    expect(keGrup!.chatId).toBe(GRUP_UJI_A);
+    expect(keGrup!.idempotencyKey).not.toBe(k); // dihash ulang, bukan disambung
+  });
+
+  it("mode 'tujuan': HANYA tujuan yang menerima -- kunci DASAR tidak pernah masuk outbox", async () => {
+    // Ini persis premis bug 9 Agustus 2026: pada mode ini kunci dasarnya TIDAK
+    // PERNAH ditulis, sehingga penyaring lama (yang memeriksa kunci dasar)
+    // tidak pernah menyaring apa pun.
+    const k = kunci('mode-tujuan');
+    await enqueuePemicuPasien(
+      { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+      ctxTujuan('tujuan'),
+    );
+
+    expect(await ambil(k)).toBeNull();
+    const keGrup = await ambil(turunkanKunciTujuan(k, GRUP_UJI_A));
+    expect(keGrup).not.toBeNull();
+    expect(keGrup!.status).toBe('pending');
+  });
+
+  it("mode 'tujuan' TANPA satu pun tujuan aktif: TIDAK ADA baris outbox sama sekali", async () => {
+    // Pagar yang membuat salah-setel (tujuan terakhir dinonaktifkan, atau
+    // baris template_target rusak) berisik di log alih-alih diam-diam
+    // berhenti mengirim ke siapa pun.
+    const k = kunci('mode-tujuan-kosong');
+    await enqueuePemicuPasien(
+      { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+      ctxTujuan('tujuan', []),
+    );
+
+    // `ambil(k)` cukup dan LENGKAP sebagai bukti: dengan targets=[] dan
+    // kePasien=false, `enqueuePemicuPasien` mengembalikan tanpa masuk cabang
+    // insert mana pun -- satu-satunya baris yang bisa saja tertulis adalah
+    // kunci dasar `k` sendiri (bila kePasien true), dan loop tujuan tidak
+    // pernah berjalan karena arraynya kosong. Memeriksa lewat chatId di sini
+    // akan bercampur dengan baris test LAIN dalam suite ini yang sengaja
+    // memakai GRUP_UJI_A/GRUP_UJI_B yang sama -- database ini juga dipakai
+    // worker produksi yang hidup bersamaan, jadi hitungan global tidak aman.
+    expect(await ambil(k)).toBeNull();
+  });
+
+  it("mode 'pasien_dan_tujuan' dengan DUA tujuan: masing-masing dapat kunci turunannya sendiri", async () => {
+    const k = kunci('mode-dua-tujuan');
+    await enqueuePemicuPasien(
+      { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+      ctxTujuan('pasien_dan_tujuan', [
+        { chatId: GRUP_UJI_A, label: 'Grup A' },
+        { chatId: GRUP_UJI_B, label: 'Grup B' },
+      ]),
+    );
+
+    expect((await ambil(k))!.status).toBe('pending');
+    expect((await ambil(turunkanKunciTujuan(k, GRUP_UJI_A)))!.chatId).toBe(GRUP_UJI_A);
+    expect((await ambil(turunkanKunciTujuan(k, GRUP_UJI_B)))!.chatId).toBe(GRUP_UJI_B);
+  });
+
+  describe("saringKunciBaruPemicuPasien: regresi 'kunci dasar tak pernah ditulis' (ditemukan dari log produksi 9 Agustus 2026)", () => {
+    it("mode 'tujuan': baris yang seluruh kuncinya SUDAH ada di outbox DIBUANG", async () => {
+      const k = kunci('saring-tujuan-sudah-ada');
+      const c = ctxTujuan('tujuan');
+
+      // Simulasi siklus SEBELUMNYA: baris ini sudah terkirim ke GRUP_UJI_A.
+      await enqueuePemicuPasien(
+        { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+        c,
+      );
+
+      // Penyaring LAMA memeriksa kunci DASAR (`k`) -- yang pada mode 'tujuan'
+      // tidak pernah ada di outbox. Bug produksi: 1.043 baris log
+      // "terkirim:1" per siklus sementara outbox cuma berisi 2 baris total,
+      // karena penyaring lama SELALU melihat kunci dasar sebagai "belum ada".
+      const lolos = await saringKunciBaruPemicuPasien([{ id: k }], (r) => r.id, c);
+      expect(lolos).toHaveLength(0);
+    });
+
+    it("mode 'tujuan': baris DIPERTAHANKAN bila tujuan yang BARU DITAMBAHKAN belum punya kuncinya", async () => {
+      const k = kunci('saring-tujuan-baru-ditambah');
+      const lama = ctxTujuan('tujuan', [{ chatId: GRUP_UJI_A, label: 'Grup A' }]);
+
+      // Siklus sebelumnya: sudah terkirim ke GRUP_UJI_A saja.
+      await enqueuePemicuPasien(
+        { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+        lama,
+      );
+
+      // Staf baru saja memasang GRUP_UJI_B sebagai tujuan kedua.
+      const baru = ctxTujuan('tujuan', [
+        { chatId: GRUP_UJI_A, label: 'Grup A' },
+        { chatId: GRUP_UJI_B, label: 'Grup B' },
+      ]);
+
+      // WAJIB dipertahankan: GRUP_UJI_B belum pernah menerima apa pun, walau
+      // GRUP_UJI_A sudah. Membuang baris ini berarti grup yang baru dipasang
+      // tidak pernah kebagian pesan untuk kunjungan lama.
+      const lolos = await saringKunciBaruPemicuPasien([{ id: k }], (r) => r.id, baru);
+      expect(lolos).toHaveLength(1);
+
+      // uq_idem tetap penjaga terakhir: mengirim ulang baris yang lolos ini
+      // TIDAK menghasilkan duplikat untuk GRUP_UJI_A yang sudah terkirim.
+      await enqueuePemicuPasien(
+        { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+        baru,
+      );
+      expect(await Outbox.count({ where: { idempotencyKey: turunkanKunciTujuan(k, GRUP_UJI_A) } })).toBe(1);
+      expect(await Outbox.count({ where: { idempotencyKey: turunkanKunciTujuan(k, GRUP_UJI_B) } })).toBe(1);
+    });
+
+    it('tanpa pemicuPasien di ctx (pemicu biasa): berperilaku identik dengan saringKunciBaru pada kunci dasar', async () => {
+      const k = kunci('saring-tanpa-pemicu-pasien');
+      await enqueueMessage(
+        { idempotencyKey: k, noRkmMedis: null, rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: { nama_pasien: 'Budi' } },
+        ctx(),
+      );
+
+      const lolos = await saringKunciBaruPemicuPasien([{ id: k }], (r) => r.id, ctx());
+      expect(lolos).toHaveLength(0);
+    });
   });
 });
