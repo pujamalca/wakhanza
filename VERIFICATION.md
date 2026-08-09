@@ -1749,6 +1749,84 @@ Kehadirannya di build produksi dibuktikan tanpa membuat akun admin sementara:
 16 berkas <- "Tertahan jatah uji"
 ```
 
+## Riwayat status sesi (`wa_session_event`, `migrations/037`)
+
+Migrasi diterapkan (`npm run migrate`), grant `DELETE` diterapkan manual lewat
+root, lalu dibuktikan EMPIRIS (bukan diasumsikan) dengan koneksi sebagai
+`wakhanza_rw` yang sesungguhnya:
+
+```
+INSERT (wakhanza_rw): OK
+SELECT: OK, n=1
+DELETE (wakhanza_rw): OK, affected=1
+UPDATE (wakhanza_rw): DITOLAK sesuai rancangan -- ER_TABLEACCESS_DENIED_ERROR
+```
+
+`tsc --noEmit` bersih sesudah kelima titik penulisan (`wa-client.ts` x4,
+`sessionCommand.ts` x1) dialihkan lewat `catatTransisiStatus()`. Dibuktikan
+lagi lewat restart worker PRODUKSI sungguhan (bukan simulasi) -- dua transisi
+tercatat persis sesuai urutan yang terlihat di log:
+
+```
+SELECT id, status_lama, status_baru, CONVERT_TZ(created_at,'+00:00','+07:00') FROM wa_session_event ORDER BY id DESC LIMIT 2;
+  2 | ready          | authenticating
+  3 | authenticating | ready
+```
+
+## Sebelas perbaikan operasional dari penilaian teknis 9 Agustus 2026, dan DUA yang sengaja TIDAK dikerjakan
+
+**Git hook `pre-push`.** Dipasang (`install-git-hooks.ps1`) dan dijalankan LANGSUNG lewat `sh .git/hooks/pre-push` (bukan cuma dibaca kodenya) -- lolos, 606 uji, **16,519 detik** total (`typecheck` + `lint` + `test`).
+
+**Uji integrasi `enqueuePemicuPasien()`.** `npm run test:int`: **42 uji lolos** (dari ~30 sebelumnya), termasuk regresi persis skenario bug dedup (baris yang seluruh kuncinya sudah ada di `outbox` pada mode `tujuan` DIBUANG penyaring; baris dengan tujuan baru yang belum terkirim DIPERTAHANKAN). Baris uji dibersihkan lewat DUA jalur (`idempotency_key LIKE 'INTTEST|%'` untuk kunci dasar, `chat_id IN (...)` untuk kunci turunan yang di-hash ulang) -- dibuktikan sisa 0 baris sesudahnya.
+
+**Cadangan direstore SUNGGUHAN.** `restore-backup.ps1 -BackupFile backups\wakhanza-backup-20260809-020947.enc -RestoreDbName wakhanza_restore_test -AdminUser root`:
+
+```
+[ok] dipulihkan ke 'wakhanza_restore_test': 22 tabel.
+  outbox: 420 baris
+  template: 12 baris
+  audit_log: 487 baris
+  patient_contact: 4858 baris
+  app_user: 1 baris
+```
+
+Database uji di-`DROP` sesudah diperiksa. Pemeriksaan selisih ukuran di `backup.ps1` diuji lewat backup SUNGGUHAN kedua di hari yang sama: `wakhanza-backup-20260809-140016.enc` (46,08 MB) dibandingkan dengan yang jam 02:09 (45,33 MB) -> "selisih ukuran vs cadangan sebelumnya: 1.6%, dalam batas wajar" -- jalur `Send-BackupAlert` (query `alert.webhook_url` lewat `mysql` langsung) diverifikasi terpisah menghasilkan string kosong yang benar (URL memang belum diisi).
+
+**Peringatan dasbor webhook kosong.** `tsc --noEmit` dan `eslint` bersih atas `AlertConfigWarning.tsx` + `page.tsx`. Logikanya `webhookConfigured={Boolean(alertWebhookUrl)}` -- diverifikasi lewat pembacaan `getSetting('alert.webhook_url')` yang sama dipakai `worker/alert.ts`, jadi tidak bisa menyimpang dari kebenaran yang dipakai worker.
+
+**Akun admin cadangan.** `npm run users -- add pemulihan "Akun Pemulihan (cadangan)" admin <sandi-acak>` -> `[ok] pengguna 'pemulihan' dibuat sebagai admin.`, dikonfirmasi lewat `npm run users -- list` (2 admin aktif), tercatat `audit_log` (jalur produksi, bukan INSERT manual).
+
+**Investigasi baca-saja poli sensitif.** `SELECT kd_poli, nm_poli, status FROM poliklinik` (26 baris) + pencarian kata kunci PRD F4.3 terhadap `alca` sungguhan -- hasil dan jumlah kunjungan per kandidat tercatat di CLAUDE.md "Yang masih perlu keputusan rumah sakit". Nol baris ditulis ke `app_setting`.
+
+**Draf aturan balasan otomatis.** `AutoReplyRule.create({..., isActive: false})` dua kali, dikonfirmasi lewat `SELECT label, is_active FROM auto_reply_rule`: kedua baris baru (`id=8`, `id=9`) `is_active=0`, empat baris lama tidak tersentuh.
+
+**Pembaruan dependensi.** `postcss` 8.5.25->8.5.26 (dalam rentang semver `^8.5.25` yang sudah ada). `git diff --stat` mengonfirmasi cakupannya sempit (16 baris `package-lock.json`, 2 baris `package.json`); 606 uji + `tsc` + `eslint` + `next build` tetap lolos sesudahnya.
+
+**TIDAK dikerjakan** (`tujuan_mode` ke pasien sungguhan, isi `privacy.sensitive_poli_codes`): dibuktikan negatif -- `SELECT batas_pasien_harian FROM template` seluruhnya `0`, dan `privacy.sensitive_poli_codes` tetap `[]` di akhir sesi (lihat "Pemeriksaan menyeluruh" di bawah).
+
+### Kaskade restart dari SATU `pm2 restart`, dan versi PM2 yang tidak sama
+
+Terjadi LANGSUNG saat mendeploy `wa_session_event` ke produksi -- bukan disimulasikan. Satu `pm2 restart wakhanza-worker` (dikonfirmasi hanya SATU perintah dijalankan) menaikkan `restart_time` dari 65 ke 80 dalam ~45 detik, dengan pola log yang identik berulang (proses baru muncul, minta proses sebelumnya mundur, yang lama keluar `exitCode:75`, jarak antar kemunculan ~5 detik -- sama persis `restart_delay: 5000`). Dibedakan dari kedua mode kegagalan yang sudah tercatat lewat pemeriksaan LANGSUNG:
+
+```
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where CommandLine -like "*wwebjs_auth*"
+jumlah proses chrome.exe terkait wwebjs_auth: 0   <- BUKAN Chromium yatim
+```
+
+Setiap baris log serah-terima menunjukkan `singleInstance.ts` bekerja BENAR (yang kalah minta mundur, yang menang dapat kunci) -- BUKAN dua proses berebut yang salah satunya jadi yatim. Dipulihkan lewat prosedur tiga langkah yang sudah terdokumentasi (`pm2 stop` -> konfirmasi 0 Chromium tersisa -> `pm2 start`): proses akhir (pid 15312) mencapai `ready` dalam **1,5 detik** (`"WhatsApp terautentikasi"` pukul `:35.853` -> `"WhatsApp siap"` pukul `:36.368`) dan bertahan (`restart_time` tetap 80, tidak naik lagi) selama diamati.
+
+### Total memori Chromium sungguhan vs `max_memory_restart`
+
+Diukur langsung pada proses produksi yang sedang hidup, bukan diperkirakan:
+
+```
+PID 11084 (Node, dilacak PM2)              : 178 MB
+10x chrome.exe anak-cucu (turunan Puppeteer): 973,7 MB total
+Ambang max_memory_restart                  : 800 MB (838.860.800 byte)
+```
+
+Kesepuluh proses `chrome.exe` diidentifikasi lewat `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where CommandLine -like "*wwebjs_auth*"` dan dijumlahkan lewat `WorkingSet64` masing-masing. Total 973,7 MB sudah di atas ambang 800 MB, sementara PM2 (yang cuma mengukur `PID 11084`) melaporkan 178 MB -- jauh di bawahnya. `max_memory_restart` karena itu terbukti TIDAK PERNAH bisa terpicu oleh pertumbuhan memori Chromium yang sesungguhnya, terlepas dari topologi peluncuran Node (§ "Enam jebakan Windows" sudah menutup jebakan `tsx` CLI vs `node --import tsx`, tapi itu jebakan yang berbeda).
+
 ## Panel pertanyaan tak terjawab (`/balasan-otomatis`)
 
 Angka yang melahirkannya, diukur atas 30 hari produksi:
@@ -1805,3 +1883,32 @@ npm run migrate     035 dan 036 diterapkan
 Keadaan akhir worker: `wa_session.status = ready`, denyut 16 detik (diukur lewat
 `CONVERT_TZ`), satu pid, siklus berjalan normal, nol galat sejak instance
 terakhir. `wakhanza-web` menjawab HTTP 200 pada `/login`.
+
+## Pemeriksaan menyeluruh sesudah sebelas perbaikan operasional (9 Agustus 2026, lanjutan)
+
+```
+npm run typecheck   bersih
+npm run lint        bersih
+npx jest             36 suite, 606 uji lolos
+npm run test:int     3 suite, 42 uji lolos     (dari ~30 sebelum sesi ini)
+npm run build        Compiled successfully, 25 route
+npm run verify:db    lolos -- sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK, wakhanza 23 tabel
+npm run verify:plans lolos
+npm run migrate      037 diterapkan
+```
+
+Deploy dua tahap: `pm2 restart wakhanza-web` (HTTP 200 di `/login` sesudahnya)
+lalu `pm2 restart wakhanza-worker` -- yang kedua memicu kaskade restart baru
+(lihat "Kaskade restart dari SATU pm2 restart" di atas), dipulihkan lewat
+prosedur tiga langkah terdokumentasi. Keadaan akhir, diukur sesudah proses
+stabil selama 7 menit tanpa restart tambahan:
+
+```
+wakhanza-web    : online, restart_time=4,  uptime 10m, 109,6 MB
+wakhanza-worker : online, restart_time=80, uptime 7m,  168,7 MB
+wa_session      : status=ready, denyut 7 detik
+```
+
+`git status --short`: hanya `src/core/watermark.ts` tersisa tak terlacak
+(sengaja, di luar cakupan sesi ini). Tujuh commit sebelumnya sudah di-push;
+seluruh pekerjaan sesi ini BELUM di-commit pada titik pemeriksaan ini.
