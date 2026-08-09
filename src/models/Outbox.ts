@@ -37,6 +37,20 @@ export class Outbox extends Model<InferAttributes<Outbox>, InferCreationAttribut
   declare eventAt: Date;
   declare scheduledAt: Date;
   declare sentAt: Date | null;
+  /**
+   * Konfirmasi terkirim (migrations/035) -- DIMENSI KEDUA di samping `status`,
+   * bukan kelanjutannya. Sebuah baris tetap `sent` sementara ketiga kolom di
+   * bawah bergerak dari server -> HP penerima -> dibaca.
+   *
+   * `waMessageId` satu-satunya penghubung ke event `message_ack` yang datang
+   * belakangan; `ackLevel` artinya ada di core/waAck.ts.
+   *
+   * KOSONG TIDAK berarti tidak sampai: ack cuma tiba selama sesi yang
+   * mengirimnya masih hidup. Bukti POSITIF, bukan bukti negatif.
+   */
+  declare waMessageId: CreationOptional<string | null>;
+  declare ackLevel: CreationOptional<number | null>;
+  declare ackAt: CreationOptional<Date | null>;
   declare lastError: string | null;
   declare createdAt: CreationOptional<Date>;
 }
@@ -66,6 +80,9 @@ Outbox.init(
     eventAt: { type: DataTypes.DATE, allowNull: false, field: 'event_at' },
     scheduledAt: { type: DataTypes.DATE, allowNull: false, field: 'scheduled_at' },
     sentAt: { type: DataTypes.DATE, allowNull: true, field: 'sent_at' },
+    waMessageId: { type: DataTypes.STRING(64), allowNull: true, field: 'wa_message_id' },
+    ackLevel: { type: DataTypes.TINYINT, allowNull: true, field: 'ack_level' },
+    ackAt: { type: DataTypes.DATE, allowNull: true, field: 'ack_at' },
     lastError: { type: DataTypes.TEXT, allowNull: true, field: 'last_error' },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   },

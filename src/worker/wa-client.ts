@@ -17,6 +17,7 @@ import {
   phoneFromAddress,
 } from '@/core/waAddress';
 import { catatPesanMasuk } from './inboundLog';
+import { ackBolehMenimpa, isTingkatAck, labelAck } from '@/core/waAck';
 import { resolveMediaPath } from '@/lib/mediaStorage';
 
 /**
@@ -502,8 +503,70 @@ export async function initWaClient(): Promise<Client> {
     });
   });
 
+  /**
+   * KONFIRMASI TERKIRIM (migrations/035) -- satu-satunya jalur yang membedakan
+   * "WhatsApp menerima titipannya" dari "penerimanya benar-benar dapat".
+   *
+   * `void` dan bukan `await`: pendengar event tidak boleh menahan antrean event
+   * pustaka, dan kegagalan mencatat satu ack tidak boleh berakibat apa pun pada
+   * pengiriman. `catatAck()` sendiri yang menjamin tidak pernah melempar.
+   */
+  client.on('message_ack', (pesan, ack) => {
+    void catatAck(pesan, ack);
+  });
+
   await client.initialize();
   return client;
+}
+
+/**
+ * Mencatat satu event `message_ack` ke baris `outbox` yang bersangkutan.
+ *
+ * TIDAK PERNAH melempar: dipanggil dari pendengar event, tempat galat yang
+ * lolos menjadi unhandled rejection yang bisa menjatuhkan proses -- dan
+ * menjatuhkan worker demi sebuah kolom keterangan adalah pertukaran yang jelas
+ * salah.
+ *
+ * Dua keadaan yang sengaja DIAM (debug, bukan warn), karena keduanya normal dan
+ * sering:
+ *
+ *   1. Pesan yang tidak punya baris `outbox`. Nomor rumah sakit juga dipakai
+ *      manusia -- tiap pesan yang diketik petugas langsung dari HP menghasilkan
+ *      ack-nya sendiri. Mencatatnya sebagai peringatan akan menenggelamkan yang
+ *      sungguhan, pelajaran yang sama dengan pemisahan level log pada pesan
+ *      masuk bukan-perorangan.
+ *   2. Ack yang lebih rendah dari yang sudah tersimpan -- dijelaskan di
+ *      `ackBolehMenimpa()`.
+ */
+async function catatAck(pesan: Message, ack: unknown): Promise<void> {
+  try {
+    const id = idPesanTerkirim(pesan);
+    if (!id) return;
+
+    if (!isTingkatAck(ack)) {
+      // Tingkat baru dari WhatsApp. Dinaikkan ke warn justru karena inilah satu
+      // -satunya tanda bahwa daftar di core/waAck.ts perlu diperbarui; menyimpan
+      // angkanya apa adanya akan membuat dashboard menampilkan tingkat tanpa
+      // keterangan.
+      logger.warn({ ack }, 'tingkat message_ack tidak dikenal -- diabaikan');
+      return;
+    }
+
+    const row = await Outbox.findOne({ where: { waMessageId: id } });
+    if (!row) {
+      logger.debug({ waMessageId: id, ack }, 'ack untuk pesan di luar outbox -- dilewati');
+      return;
+    }
+    if (!ackBolehMenimpa(ack, row.ackLevel)) return;
+
+    await row.update({ ackLevel: ack, ackAt: new Date() });
+    logger.info(
+      { outboxId: row.id, triggerCode: row.triggerCode, ack, keterangan: labelAck(ack, !!row.chatId) },
+      'konfirmasi pengiriman diterima',
+    );
+  } catch (err) {
+    logger.error(safeError(err), 'gagal mencatat konfirmasi pengiriman');
+  }
 }
 
 /** ARCHITECTURE §10 / Fase 4: pemeriksaan kesehatan -- Chromium yang menggantung tidak terlihat dari status 'ready' semata. */
@@ -605,12 +668,16 @@ export interface LampiranKirim {
  * percakapan yang sama. Dibuktikan end-to-end: balasan atas pesan ber-LID
  * diterima pasien.
  */
-export async function sendWhatsAppMessage(chatId: string, body: string, lampiran?: LampiranKirim | null): Promise<void> {
+export async function sendWhatsAppMessage(
+  chatId: string,
+  body: string,
+  lampiran?: LampiranKirim | null,
+): Promise<string | null> {
   const c = getClient();
 
   if (!lampiran) {
-    await c.sendMessage(chatId, body);
-    return;
+    const terkirim = await c.sendMessage(chatId, body);
+    return idPesanTerkirim(terkirim);
   }
 
   // Lintasan dibangun ulang lewat resolveMediaPath, bukan dipakai apa adanya
@@ -626,7 +693,24 @@ export async function sendWhatsAppMessage(chatId: string, body: string, lampiran
   // daripada pesan teks biasa dan sudah diperiksa saat menyusun
   // (core/media.ts's periksaPanjangKeterangan) -- kalau sampai lolos ke sini
   // dan ditolak WhatsApp, kegagalannya tercatat di send_log seperti biasa.
-  await c.sendMessage(chatId, media, { caption: body });
+  const terkirim = await c.sendMessage(chatId, media, { caption: body });
+  return idPesanTerkirim(terkirim);
+}
+
+/**
+ * Id pesan yang BARU SAJA dikirim, untuk dicocokkan dengan event `message_ack`
+ * yang datang belakangan (migrations/035).
+ *
+ * Mengembalikan null bila tidak ada -- dan itu keadaan yang harus ditoleransi,
+ * bukan dianggap kegagalan kirim. `Message.id._serialized` adalah getter pada
+ * PROTOTIPE, dan objeknya menyeberang dari Chromium ke Node lewat serialisasi
+ * puppeteer yang tidak membawa getter prototipe -- pelajaran yang sudah dibayar
+ * di `kunciPesanMasuk()` untuk arah masuk. Pesannya SUDAH terkirim; yang hilang
+ * cuma kemampuan melacak konfirmasinya.
+ */
+function idPesanTerkirim(pesan: unknown): string | null {
+  const id = (pesan as { id?: { _serialized?: unknown } } | null | undefined)?.id?._serialized;
+  return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
 /** F5.4: bedakan nomor tak terdaftar (permanen) dari kegagalan sementara SEBELUM mencoba kirim. */

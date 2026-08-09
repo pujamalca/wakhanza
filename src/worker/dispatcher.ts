@@ -183,12 +183,24 @@ export async function dispatchTick(): Promise<boolean> {
       }
     }
 
-    await sendWhatsAppMessage(
+    const waMessageId = await sendWhatsAppMessage(
       chatId,
       row.body,
       row.mediaPath ? { path: row.mediaPath, name: row.mediaName ?? '' } : null,
     );
-    await row.update({ status: 'sent', sentAt: new Date(), attempts });
+    /**
+     * `wa_message_id` disimpan BERSAMAAN dengan status `sent`, dalam satu
+     * update, dan itu bukan kerapian: event `message_ack` bisa tiba dalam
+     * hitungan MILIDETIK sesudah `sendMessage()` pulang. Menulisnya di update
+     * terpisah membuka jendela tempat ack pertama datang sebelum id-nya sempat
+     * tersimpan, sehingga `findOne({ waMessageId })` tidak menemukan apa pun dan
+     * konfirmasi paling awal hilang tanpa jejak.
+     *
+     * NULL berarti pustaka tidak menyerahkan id-nya (lihat `idPesanTerkirim`).
+     * Pesannya tetap terkirim dan tetap `sent`; yang hilang cuma pelacakan
+     * konfirmasinya -- karena itu ia BUKAN kegagalan dan tidak mengubah status.
+     */
+    await row.update({ status: 'sent', sentAt: new Date(), attempts, waMessageId });
     await SendLog.create({ outboxId: row.id, attempt: attempts, outcome: 'sent', durationMs: Date.now() - startedAt });
     logger.info(
       { triggerCode: row.triggerCode, tujuan: maskChatId(chatId), berlampiran: !!row.mediaPath },

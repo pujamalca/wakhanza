@@ -1,5 +1,6 @@
 import { Op, type WhereOptions } from 'sequelize';
 import { Outbox, type OutboxStatus } from '@/models';
+import { ACK_ERROR, labelAck, sudahSampai } from '@/core/waAck';
 import { normalizePhone } from '@/core/phone';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { resendOutboxAction } from './actions';
@@ -177,8 +178,34 @@ export default async function AntreanPage({
                 <td className={`${cellClass} hidden max-w-xs truncate lg:table-cell`} title={row.body}>
                   {row.body}
                 </td>
+                {/* Konfirmasi ditempelkan ke sel Status, BUKAN jadi kolom
+                    kesembilan. Tabel ini sudah menyembunyikan empat kolom di
+                    bawah xl, jadi kolom baru akan berakhir tak pernah terlihat
+                    di layar loket -- persis yang sudah terjadi pada centang
+                    tujuan di /farmasi. Status justru tempat mata staf sudah
+                    tertuju saat menjawab "pesannya sampai tidak". */}
                 <td className={cellClass}>
                   <Badge variant={outboxStatusVariant(row.status)}>{outboxStatusLabel(row.status)}</Badge>
+                  {row.status === 'sent' && (
+                    <span
+                      className={`mt-1 block text-xs ${
+                        row.ackLevel === ACK_ERROR
+                          ? 'text-destructive'
+                          : sudahSampai(row.ackLevel)
+                            ? 'text-success'
+                            : 'text-muted-foreground'
+                      }`}
+                      title={
+                        row.ackLevel === null || row.ackLevel === undefined
+                          ? 'Konfirmasi hanya tiba selama sesi yang mengirimnya masih hidup. Kosong BUKAN berarti pesannya tidak sampai.'
+                          : row.ackAt
+                            ? `Tercatat ${row.ackAt.toLocaleString('id-ID')}`
+                            : undefined
+                      }
+                    >
+                      {labelAck(row.ackLevel, !!row.chatId)}
+                    </span>
+                  )}
                 </td>
                 <td className={`${cellClass} hidden whitespace-nowrap text-xs sm:table-cell`}>
                   {row.eventAt.toLocaleString('id-ID')}
