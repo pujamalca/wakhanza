@@ -252,7 +252,16 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<AutoRep
    * lanjut persis seperti sebelum fitur ini ada.
    */
   if (modeStok !== 'mati' || rekapAktif) {
-    const stok = await cobaBalasPersediaan(msg, idempotencyKey);
+    /**
+     * Satu-satunya yang MENGALAHKAN cabang persediaan adalah aturan yang
+     * benar-benar cocok, dan hanya terhadap kata tanya ketersediaan yang
+     * longgar ("ada", "adakah") -- bukan terhadap "stok"/"harga". Diserahkan
+     * sebagai fungsi supaya aturannya cuma dibaca pada jalur yang
+     * membutuhkannya; sebagian besar pesan tidak pernah sampai ke sana.
+     */
+    const stok = await cobaBalasPersediaan(msg, idempotencyKey, undefined, async () =>
+      balasanKataKunciAktif ? matchRule(msg.text, await loadActiveRules()) !== null : false,
+    );
     if (stok.ditangani) {
       await writeLog(msg.phoneE164, 'matched', null, msg.text);
       return { outcome: 'matched', ruleLabel: `persediaan (${stok.cabang})` };

@@ -27,7 +27,8 @@
     "dryrun:hibah": "tsx scripts/dryrun-hibah.ts",
     "dryrun:kontrol": "tsx scripts/dryrun-kontrol.ts",
     "dryrun:pemesanan": "tsx scripts/dryrun-pemesanan.ts",
-    "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts"
+    "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts",
+    "dryrun:stok": "tsx scripts/dryrun-stok.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

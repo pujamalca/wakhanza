@@ -51,6 +51,15 @@ export const KATA_PENGAPIT = new Set([
   'dong', 'deh', 'sih', 'kok', 'nih', 'tuh', 'lah', 'aja', 'saja', 'juga',
   'dulu', 'sekarang', 'daftar', 'list', 'semua', 'oke', 'ok', 'makasih',
   'terima', 'kasih', 'hari', 'kalau', 'kalo', 'boleh',
+  // Kata INGKAR di ekor kalimat. Ditambahkan bersama kata tanya ketersediaan
+  // (migrations/039), dan ditemukan lewat uji bukan lewat perkiraan: "jual obat
+  // amlodipin tidak" menyisakan "amlodipin tidak" sebagai satu pola
+  // `LIKE '%amlodipin tidak%'`, yang tidak pernah cocok dengan satu pun nama
+  // barang. Bentuk "X ada tidak?" adalah cara paling wajar orang bertanya
+  // ketersediaan di sini, jadi tanpa ini golongan barunya meleset justru pada
+  // pertanyaan yang paling sering. Himpunan tertutup; tidak satu pun bisa
+  // menjadi nama obat.
+  'tidak', 'ndak', 'nggak', 'ngga', 'gak', 'ga', 'enggak', 'engga', 'kagak',
 ]);
 
 export interface PermintaanStok {
@@ -58,6 +67,25 @@ export interface PermintaanStok {
   cocok: boolean;
   /** Kata kunci yang membuatnya cocok -- untuk log dan pratinjau. */
   keyword?: string;
+  /**
+   * Yang cocok berasal dari golongan KETAT ("stok", "harga"), bukan golongan
+   * ketersediaan ("adakah", "apotek").
+   *
+   * Bedanya bukan soal kecocokan melainkan soal APA YANG BOLEH DILAKUKAN saat
+   * obatnya tidak ketemu. Orang yang mengetik "stok xyz" jelas sedang bertanya
+   * persediaan, jadi "tidak ditemukan di daftar obat kami" adalah jawaban yang
+   * membantu. Orang yang mengetik "ada dokter jaga" tidak sedang bertanya obat
+   * sama sekali -- menjawabnya dengan "dokter jaga tidak ditemukan di daftar
+   * obat kami" adalah jawaban percaya-diri-dan-keliru, kesalahan yang sama yang
+   * membuat `detectPoli()` mengembalikan null saat ambigu.
+   *
+   * Karena itu golongan ketersediaan hanya MENGKLAIM pesannya bila katalognya
+   * benar-benar menjawab; kalau tidak, pemanggil meneruskannya ke aturan
+   * /balasan-otomatis seolah fitur ini tidak ada. Pemeriksaan itu ada di
+   * `worker/stokReply.ts` -- di sinilah keputusannya cuma dicatat, karena modul
+   * ini tidak boleh menyentuh database.
+   */
+  ketat: boolean;
   /** Sisa teks yang dipakai mencari nama obat. Kosong = penanya tidak menyebut obat apa pun. */
   cari: string;
 }
@@ -113,26 +141,48 @@ function cocokKataUtuh(teks: string, kunci: string): boolean {
  *    Pencarian `LIKE '%a%'` cocok dengan hampir seluruh katalog, dan jawabannya
  *    jadi daftar acak sepanjang limit yang tampak seperti hasil pencarian
  *    sungguhan.
+ *
+ * 4. **Golongan KETAT diperiksa lebih dulu.** Pesan yang memuat keduanya
+ *    ("stok, adakah paracetamol?") harus diperlakukan sebagai pertanyaan stok
+ *    yang tegas -- yaitu tetap dijawab walau obatnya tidak ketemu. Urutan
+ *    sebaliknya membuat kata yang lebih longgar menentukan nasib pesan yang
+ *    sebenarnya sudah jelas maksudnya.
  */
-export function deteksiPermintaanStok(teks: string, keywords: string[]): PermintaanStok {
+export function deteksiPermintaanStok(
+  teks: string,
+  keywords: string[],
+  /**
+   * Kata tanya ketersediaan -- "adakah", "apotek", "jual". Sengaja BUKAN
+   * digabung ke `keywords`: keduanya sama-sama membuat sebuah pesan cocok, tapi
+   * hanya golongan ini yang boleh gugur diam-diam saat obatnya tidak ketemu.
+   * Lihat `PermintaanStok.ketat`.
+   */
+  keywordsKetersediaan: string[] = [],
+): PermintaanStok {
   const norm = normalizeInbound(buangMention(teks));
-  if (!norm) return { cocok: false, cari: '' };
+  if (!norm) return { cocok: false, ketat: false, cari: '' };
 
-  const kunciNorm = keywords.map((k) => normalizeInbound(k)).filter(Boolean);
-  const terpakai = kunciNorm.find((k) => cocokKataUtuh(norm, k));
-  if (!terpakai) return { cocok: false, cari: '' };
+  const kunciKetat = keywords.map((k) => normalizeInbound(k)).filter(Boolean);
+  const kunciLonggar = keywordsKetersediaan.map((k) => normalizeInbound(k)).filter(Boolean);
 
-  // Buang SEMUA kata kunci (bukan cuma yang cocok pertama) -- "stok dan harga
-  // paramex" harus menyisakan "paramex", bukan "harga paramex".
+  const kenaKetat = kunciKetat.find((k) => cocokKataUtuh(norm, k));
+  const terpakai = kenaKetat ?? kunciLonggar.find((k) => cocokKataUtuh(norm, k));
+  if (!terpakai) return { cocok: false, ketat: false, cari: '' };
+
+  // Buang SEMUA kata kunci dari KEDUA golongan (bukan cuma yang cocok pertama)
+  // -- "stok dan harga paramex" harus menyisakan "paramex", bukan "harga
+  // paramex", dan "apotek adakah obat paramex" harus menyisakan "paramex".
+  const semuaKunci = new Set([...kunciKetat, ...kunciLonggar]);
   const sisa = norm
     .split(' ')
-    .filter((kata) => kata && !kunciNorm.includes(kata) && !KATA_PENGAPIT.has(kata))
+    .filter((kata) => kata && !semuaKunci.has(kata) && !KATA_PENGAPIT.has(kata))
     .join(' ')
     .trim();
 
   return {
     cocok: true,
     keyword: terpakai,
+    ketat: kenaKetat !== undefined,
     cari: sisa.length >= MIN_PANJANG_CARI ? sisa : '',
   };
 }
@@ -150,9 +200,31 @@ export function formatRupiah(nilai: number): string {
   return `Rp${Math.round(nilai).toLocaleString('id-ID')}`;
 }
 
+/**
+ * Seberapa banyak yang disebut tentang tiap obat.
+ *
+ * TIGA nilai, bukan boolean, dan itu bukan kerapian: yang disembunyikan pada
+ * masing-masing tingkat adalah informasi yang BERBEDA JENIS, dan rumah sakit
+ * wajar memutuskannya sendiri-sendiri.
+ *
+ * - `penuh`   -- angka sisa, satuan, harga, tanda (menipis)/(habis). Untuk
+ *                petugas apotek: mereka butuh angkanya untuk bekerja.
+ * - `harga`   -- ketersediaan berikut harga, tanpa angka persediaan. Jumlah
+ *                persediaan adalah informasi dagang apotek.
+ * - `ringkas` -- nama dan ketersediaan saja. Dipakai saat harga di Khanza belum
+ *                tentu harga yang siap diumumkan; penanya diarahkan bertanya
+ *                harga ke manusia lewat teks pembungkusnya.
+ *
+ * Bentuk sebelumnya `tampilkanJumlah: boolean` hanya bisa menyatakan dua yang
+ * pertama, dan boolean yang harus tumbuh jadi tiga keadaan adalah persis bentuk
+ * yang berulang kali dibayar di proyek ini (`Modal`'s `wide?: boolean`,
+ * `PlanCheck.allowFullScan`).
+ */
+export type RincianStok = 'penuh' | 'harga' | 'ringkas';
+
 export interface OpsiFormatStok {
-  /** Tampilkan angka stok sungguhan. Bila false, hanya "tersedia"/"kosong". */
-  tampilkanJumlah: boolean;
+  /** Seberapa banyak yang disebut tentang tiap obat. */
+  rincian: RincianStok;
   /** Harga mana yang disebut: rawat jalan atau jual bebas. */
   hargaDipakai: 'ralan' | 'jualbebas';
   /** Jumlah baris yang sebenarnya cocok, untuk catatan pemotongan. */
@@ -180,13 +252,31 @@ export function formatStokObat(rows: BarisStokObat[], opsi: OpsiFormatStok): str
   const baris = rows.map((r) => {
     const nama = sanitizeValue(r.nama_brng ?? '');
     const satuan = sanitizeValue(r.satuan ?? '');
+
+    /**
+     * Obat berstok nol TETAP disebut, ditandai "kosong" -- tidak disembunyikan
+     * dari daftar.
+     *
+     * Membuangnya akan membuat "obat ini tidak dijual di sini" dan "obat ini
+     * dijual, cuma sedang habis" terbaca persis sama oleh penanya: keduanya
+     * menghasilkan daftar tanpa barisnya. Yang pertama berarti cari ke apotek
+     * lain, yang kedua berarti tanyakan lagi besok -- dua tindakan yang
+     * berbeda, dan yang salah membuat orang datang percuma atau justru tidak
+     * datang padahal seharusnya.
+     */
+    const ada = r.stok > 0 ? 'tersedia' : 'kosong';
+
+    // Nama dan ketersediaan saja. Harga sengaja tidak dihitung sama sekali di
+    // cabang ini, bukan dihitung lalu dibuang.
+    if (opsi.rincian === 'ringkas') return `• ${nama} — ${ada}`;
+
     const harga = formatRupiah(opsi.hargaDipakai === 'ralan' ? r.ralan : r.jualbebas);
 
-    if (!opsi.tampilkanJumlah) {
+    if (opsi.rincian === 'harga') {
       // Untuk penanya umum: ADA atau TIDAK, tanpa angka. Jumlah persediaan
       // adalah informasi dagang apotek, dan orang yang bertanya cuma perlu
       // tahu apakah perlu datang.
-      return `• ${nama} — ${r.stok > 0 ? 'tersedia' : 'kosong'} — ${harga}`;
+      return `• ${nama} — ${ada} — ${harga}`;
     }
 
     const satuanTeks = satuan ? ` ${satuan}` : '';

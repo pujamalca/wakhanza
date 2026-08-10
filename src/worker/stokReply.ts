@@ -1,6 +1,6 @@
 import { Op } from 'sequelize';
 import { FarmasiTarget, Outbox, getSetting, getSettingBool, getSettingNumber } from '@/models';
-import { deteksiPermintaanStok, parseStokKeywords, formatStokObat } from '@/core/stokObat';
+import { deteksiPermintaanStok, parseStokKeywords, formatStokObat, type RincianStok } from '@/core/stokObat';
 import {
   deteksiPermintaanDarurat,
   parseFrasaDarurat,
@@ -122,35 +122,109 @@ async function kuotaGrupHabis(chatId: string): Promise<boolean> {
 }
 
 /**
+ * Siapa yang bertanya. Menentukan DUA hal sekaligus: seberapa rinci daftarnya,
+ * dan template mana yang membungkusnya.
+ *
+ * Ditentukan oleh PENDAFTARAN, bukan oleh mode. Sebuah grup apotek yang sudah
+ * dicentang `boleh_tanya` adalah petugas menurut definisinya sendiri, dan ia
+ * tetap petugas walau modenya `semua` -- mode itu mengatur apakah orang luar
+ * boleh ikut bertanya lewat japri, bukan menurunkan derajat grup kerja yang
+ * terdaftar. Mengikat ini ke mode akan membuat apotek kehilangan angka
+ * persediaannya begitu RS membuka layanan untuk umum.
+ */
+export type PenanyaStok = 'petugas' | 'umum';
+
+export type CabangStok = 'ketemu' | 'kosong' | 'tanpa_nama';
+
+/**
+ * Kenapa sebuah pesan DILEPAS alih-alih dijawab di jalur stok.
+ *
+ * Dibedakan karena ketiganya menuntut tindakan berbeda dari staf yang sedang
+ * menyetel kata kunci: yang pertama berarti kata kuncinya belum menjaring,
+ * dua sisanya berarti kata kuncinya menjaring tapi katalognya tidak menjawab.
+ * Satu kalimat "tidak cocok" untuk ketiganya membuat staf menambah kata kunci
+ * yang sebenarnya sudah ada.
+ */
+export type SebabLanjut =
+  | 'bukan_pertanyaan_stok'
+  | 'ketersediaan_tanpa_nama'
+  | 'ketersediaan_tak_ketemu'
+  | 'aturan_menang';
+
+/**
+ * Apakah pesan ini punya aturan /balasan-otomatis yang cocok. Diserahkan
+ * pemanggil sebagai FUNGSI, bukan boolean, supaya query aturannya cuma jalan
+ * pada jalur yang benar-benar membutuhkannya -- yaitu saat kata tanya
+ * ketersediaan menjaring DAN katalog menemukan sesuatu, keadaan yang jarang.
+ *
+ * Diserahkan dari luar, bukan dibaca sendiri di sini, karena
+ * `worker/autoReply.ts` sudah mengimpor modul ini: membacanya sendiri berarti
+ * impor melingkar antar dua berkas yang sama-sama dimuat saat worker menyala.
+ */
+export type PemeriksaAturan = () => Promise<boolean>;
+
+/**
+ * Hasil penyusunan jawaban.
+ *
+ * Serikat berdiskriminan, BUKAN `... | null`, karena sejak ada kata tanya
+ * ketersediaan (migrations/039) "tidak dijawab" punya tiga sebab yang berbeda
+ * artinya -- dan `null` tidak bisa membawa satu pun di antaranya. `body` kosong
+ * juga tidak bisa dipakai sebagai penandanya: kosong sudah punya arti sendiri
+ * di sini ("template cabang ini sengaja dikosongkan admin = diam"), dan dua
+ * keadaan berbeda yang terlihat sama persis adalah kelas kegagalan yang sudah
+ * berkali-kali dibayar di proyek ini.
+ */
+export type JawabanStok =
+  | { aksi: 'jawab'; body: string; cabang: CabangStok; cari: string }
+  | { aksi: 'lanjut'; sebab: SebabLanjut; cari: string };
+
+/**
+ * Rincian untuk penanya UMUM. `penuh` sengaja tidak bisa dipilih -- angka
+ * persediaan adalah informasi dagang apotek, dan yang membukanya untuk umum
+ * seharusnya menambah tujuan `boleh_tanya`, bukan menurunkan batas ini.
+ * Ditegakkan tipe, bukan cuma oleh isi dropdown-nya.
+ */
+export async function bacaRincianUmum(): Promise<Exclude<RincianStok, 'penuh'>> {
+  return (await getSetting('farmasi.stok_rincian_umum', 'ringkas')) === 'harga' ? 'harga' : 'ringkas';
+}
+
+/**
  * Menyusun jawaban untuk sebuah pertanyaan stok. FUNGSI YANG SAMA dipakai kotak
  * uji coba di dashboard -- yang membedakan cuma pengirimannya.
- *
- * @returns null bila pesannya bukan pertanyaan stok sama sekali.
  */
 export async function susunJawabanStok(
   teks: string,
   identity: { namaRs: string; alamatRs: string; kontakRs: string },
-  /**
-   * Tampilkan ANGKA sisa stok, bukan sekadar "tersedia"/"kosong".
-   *
-   * Ditentukan oleh SIAPA YANG BERTANYA, bukan oleh mode. Sebuah grup apotek
-   * yang sudah dicentang `boleh_tanya` adalah petugas menurut definisinya
-   * sendiri, dan ia tetap petugas walau modenya `semua` -- mode itu mengatur
-   * apakah orang luar boleh ikut bertanya lewat japri, bukan menurunkan derajat
-   * grup kerja yang terdaftar. Mengikat ini ke mode akan membuat apotek
-   * kehilangan angka persediaannya begitu RS membuka layanan untuk umum.
-   */
-  tampilkanJumlah?: boolean,
-): Promise<{ body: string; cabang: 'ketemu' | 'kosong' | 'tanpa_nama'; cari: string } | null> {
-  const keywords = parseStokKeywords((await getSetting('farmasi.stok_keywords', 'stok,harga')) ?? '');
-  const permintaan = deteksiPermintaanStok(teks, keywords);
-  if (!permintaan.cocok) return null;
+  penanyaMasuk?: PenanyaStok,
+  adaAturanCocok?: PemeriksaAturan,
+): Promise<JawabanStok> {
+  const [ketatMentah, longgarMentah] = await Promise.all([
+    getSetting('farmasi.stok_keywords', 'stok,harga'),
+    getSetting('farmasi.stok_keywords_ketersediaan', ''),
+  ]);
+  const permintaan = deteksiPermintaanStok(
+    teks,
+    parseStokKeywords(ketatMentah ?? ''),
+    parseStokKeywords(longgarMentah ?? ''),
+  );
+  if (!permintaan.cocok) return { aksi: 'lanjut', sebab: 'bukan_pertanyaan_stok', cari: '' };
 
+  // Tanpa keterangan pemanggil (mis. pemanggil lama), diturunkan dari mode
+  // seperti semula -- hasilnya persis seperti sebelum migrations/039.
+  const penanya: PenanyaStok = penanyaMasuk ?? ((await bacaModeStok()) === 'petugas' ? 'petugas' : 'umum');
   const vars = { ...identityVars(identity), cari_obat: permintaan.cari };
 
   if (!permintaan.cari) {
+    /**
+     * Kata tanya ketersediaan tanpa nama obat sama sekali ("apotek?", "ada?")
+     * bukan pertanyaan stok yang belum lengkap -- ia bukan pertanyaan stok.
+     * Menjawabnya "sebutkan nama obatnya ya" berarti mengklaim pesan yang
+     * mungkin sedang menanyakan jam buka apotek, lalu mengunci aturan
+     * /balasan-otomatis yang justru bisa menjawabnya.
+     */
+    if (!permintaan.ketat) return { aksi: 'lanjut', sebab: 'ketersediaan_tanpa_nama', cari: '' };
     const body = (await getSetting('farmasi.stok_template_tanpa_nama', '')) ?? '';
-    return { body: renderDenganVars(body, vars), cabang: 'tanpa_nama', cari: '' };
+    return { aksi: 'jawab', body: renderDenganVars(body, vars), cabang: 'tanpa_nama', cari: '' };
   }
 
   const maks = await getSettingNumber('farmasi.stok_max_hasil', 5);
@@ -167,23 +241,60 @@ export async function susunJawabanStok(
   const rows = await cariStokObat(permintaan.cari, maks + 1, pakaiBatch);
 
   if (rows.length === 0) {
+    /**
+     * INI pagar utama kata tanya ketersediaan, dan tanpanya golongan itu tidak
+     * boleh ada sama sekali. "ada dokter jaga" menyisakan "dokter jaga" sebagai
+     * pencarian; katalog tidak menjawab, jadi pesannya dilepas dan aturan
+     * /balasan-otomatis yang memang punya jawabannya tetap sempat berjalan.
+     * Menjawabnya "dokter jaga tidak ditemukan di daftar obat kami" adalah
+     * jawaban percaya-diri-dan-keliru.
+     */
+    if (!permintaan.ketat) return { aksi: 'lanjut', sebab: 'ketersediaan_tak_ketemu', cari: permintaan.cari };
     const body = (await getSetting('farmasi.stok_template_kosong', '')) ?? '';
-    return { body: renderDenganVars(body, vars), cabang: 'kosong', cari: permintaan.cari };
+    return { aksi: 'jawab', body: renderDenganVars(body, vars), cabang: 'kosong', cari: permintaan.cari };
+  }
+
+  /**
+   * Aturan /balasan-otomatis yang cocok MENGALAHKAN kata tanya ketersediaan --
+   * dan hanya kata tanya ketersediaan; kata kunci ketat tetap didahulukan
+   * seperti sebelumnya.
+   *
+   * Diukur, bukan dikira: dengan "ada" ikut menjaring, pertanyaan "ada poli
+   * apa" menyisakan "poli", dan katalog di mesin ini punya barang yang cocok
+   * `LIKE '%poli%'`. Pagar "gugur bila obatnya tidak ketemu" justru tidak
+   * menolong di situ -- obatnya KETEMU, dan itulah yang membuat jawabannya
+   * salah. Yang membedakan keduanya bukan katalog melainkan niat: sebuah aturan
+   * yang ditulis staf adalah pernyataan tegas "pesan seperti ini dijawab
+   * begini", sementara kata tanya ketersediaan cuma dugaan. Yang tegas menang.
+   *
+   * Tanpa pemeriksa (jalur grup -- aturan /balasan-otomatis memang sengaja
+   * tidak berlaku di sana), tidak ada yang bisa mengalahkannya, dan hasilnya
+   * persis seperti tanpa pagar ini.
+   */
+  if (!permintaan.ketat && adaAturanCocok && (await adaAturanCocok())) {
+    return { aksi: 'lanjut', sebab: 'aturan_menang', cari: permintaan.cari };
   }
 
   const ditampilkan = rows.slice(0, maks);
   const daftar = formatStokObat(ditampilkan, {
-    // Angka persediaan hanya untuk petugas. Bagi penanya umum yang perlu
-    // diketahui adalah perlu-tidaknya ia datang, bukan berapa banyak sisa di
-    // gudang -- itu informasi dagang apotek. Tanpa keterangan pemanggil
-    // (mis. kotak uji coba di dashboard), diturunkan dari mode seperti semula.
-    tampilkanJumlah: tampilkanJumlah ?? (await bacaModeStok()) === 'petugas',
+    rincian: penanya === 'petugas' ? 'penuh' : await bacaRincianUmum(),
     hargaDipakai,
     truncatedFrom: rows.length,
   });
 
-  const body = (await getSetting('farmasi.stok_template', '')) ?? '';
-  return { body: renderDenganVars(body, { ...vars, stok_obat: daftar }), cabang: 'ketemu', cari: permintaan.cari };
+  /**
+   * Template TERPISAH per penanya, bukan satu teks dengan daftar yang berbeda:
+   * teks petugas berbunyi "Harga dapat berubah sewaktu-waktu", dan kalimat itu
+   * menggantung tanpa arti pada jawaban ringkas yang memang tidak memuat satu
+   * pun harga.
+   */
+  const body = (await getSetting(penanya === 'petugas' ? 'farmasi.stok_template' : 'farmasi.stok_template_umum', '')) ?? '';
+  return {
+    aksi: 'jawab',
+    body: renderDenganVars(body, { ...vars, stok_obat: daftar }),
+    cabang: 'ketemu',
+    cari: permintaan.cari,
+  };
 }
 
 /**
@@ -349,10 +460,14 @@ export async function cobaBalasPersediaan(
   msg: InboundMessage,
   idempotencyKey: string,
   asal?: AsalPertanyaan,
+  adaAturanCocok?: PemeriksaAturan,
 ): Promise<HasilStokReply> {
+  // Rekap darurat TIDAK ikut menyerah pada aturan: frasanya panjang dan
+  // spesifik ("rekap stok", "stok menipis"), penanyanya wajib terdaftar, dan
+  // tidak ada aturan buatan staf yang wajar bertabrakan dengannya.
   const rekap = await cobaBalasDarurat(msg, idempotencyKey, asal);
   if (rekap.ditangani) return rekap;
-  return cobaBalasStok(msg, idempotencyKey, asal);
+  return cobaBalasStok(msg, idempotencyKey, asal, adaAturanCocok);
 }
 
 /**
@@ -364,6 +479,7 @@ export async function cobaBalasStok(
   msg: InboundMessage,
   idempotencyKey: string,
   asalMasuk?: AsalPertanyaan,
+  adaAturanCocok?: PemeriksaAturan,
 ): Promise<HasilStokReply> {
   // Pemanggil lama (jalur perorangan di handleInboundMessage) tidak menyebut
   // asal -- diturunkan dari nomornya, hasilnya persis seperti sebelumnya.
@@ -387,10 +503,32 @@ export async function cobaBalasStok(
   if (!izin.boleh) return TIDAK_DITANGANI;
 
   const ctxAwal = await loadAutoReplyContext('');
-  // Angka sisa untuk yang TERDAFTAR (petugas/grup apotek), tanpa angka untuk
+  // Angka sisa untuk yang TERDAFTAR (petugas/grup apotek), bentuk ringkas untuk
   // penanya umum yang lolos lewat mode 'semua'.
-  const jawaban = await susunJawabanStok(msg.text, ctxAwal.identity, izin.terdaftar);
-  if (!jawaban) return TIDAK_DITANGANI;
+  const jawaban = await susunJawabanStok(
+    msg.text,
+    ctxAwal.identity,
+    izin.terdaftar ? 'petugas' : 'umum',
+    adaAturanCocok,
+  );
+
+  if (jawaban.aksi === 'lanjut') {
+    /**
+     * Dilepas ke aturan /balasan-otomatis. Dicatat HANYA bila kata tanya
+     * ketersediaan sempat menjaring lalu gugur -- itu keadaan yang berguna saat
+     * menelusuri ("kata kuncinya sudah kena, katalognya yang tidak menjawab").
+     * Pesan yang memang tidak memuat kata kunci apa pun adalah lalu lintas
+     * normal; mencatatnya membuat log dipenuhi baris yang tidak menandai apa
+     * pun, dan sejak itu yang benar-benar berarti ikut tidak terbaca.
+     */
+    if (jawaban.sebab !== 'bukan_pertanyaan_stok') {
+      logger.info(
+        { asal: jejakAsal(asal), sebab: jawaban.sebab, cari: jawaban.cari },
+        'pertanyaan ketersediaan dilepas ke aturan balasan otomatis',
+      );
+    }
+    return TIDAK_DITANGANI;
+  }
 
   /**
    * Kuota grup diperiksa SESUDAH terbukti ini memang pertanyaan stok.

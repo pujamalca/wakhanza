@@ -9,9 +9,12 @@ import { simpanStokAction, ujiStokAction, type HasilForm, type HasilUji } from '
 export interface NilaiStok {
   mode: 'mati' | 'petugas' | 'semua';
   keywords: string;
+  keywordsKetersediaan: string;
   maxHasil: number;
   harga: 'ralan' | 'jualbebas';
+  rincianUmum: 'ringkas' | 'harga';
   template: string;
+  templateUmum: string;
   templateKosong: string;
   templateTanpaNama: string;
 }
@@ -38,12 +41,18 @@ const MODE: { nilai: NilaiStok['mode']; judul: string; keterangan: string }[] = 
     nilai: 'semua',
     judul: 'Siapa saja yang bertanya',
     keterangan:
-      'Siapa pun yang mengirim pesan pribadi ke nomor rumah sakit ikut dijawab, TANPA angka persediaan — hanya "tersedia"/"kosong" berikut harganya. Tujuan yang dicentang "Boleh tanya" tetap mendapat angkanya.',
+      'Siapa pun yang mengirim pesan pribadi ke nomor rumah sakit ikut dijawab, TANPA angka persediaan — bentuknya diatur di "Rincian untuk nomor umum" di bawah. Tujuan yang dicentang "Boleh tanya" tetap mendapat angkanya.',
   },
+];
+
+const RINCIAN_UMUM: { nilai: NilaiStok['rincianUmum']; judul: string }[] = [
+  { nilai: 'ringkas', judul: 'Nama obat + tersedia/kosong saja' },
+  { nilai: 'harga', judul: 'Nama obat + tersedia/kosong + harga' },
 ];
 
 export function StokForm({ nilai }: { nilai: NilaiStok }) {
   const [mode, setMode] = useState(nilai.mode);
+  const [rincian, setRincian] = useState(nilai.rincianUmum);
   const [state, formAction, isPending] = useActionState(
     async (prev: HasilForm, formData: FormData) => simpanStokAction(prev, formData),
     {},
@@ -94,16 +103,41 @@ export function StokForm({ nilai }: { nilai: NilaiStok }) {
           </p>
         </fieldset>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <label className="block space-y-1 sm:col-span-1">
-            <span className="block text-xs font-medium">Kata kunci</span>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium">Kata kunci — selalu dijawab</span>
             <Input name="farmasi.stok_keywords" defaultValue={nilai.keywords} className="w-full" fieldSize="sm" />
             <span className="block text-xs text-muted-foreground">
-              Dipisah koma, dicocokkan sebagai kata utuh. Diperiksa <span className="font-medium">sebelum</span> aturan
-              Balasan otomatis, jadi hindari kata yang terlalu umum.
+              Dipisah koma, dicocokkan sebagai kata utuh. Kalau obatnya tidak ketemu, tetap dijawab{' '}
+              <span className="font-medium">&ldquo;tidak ditemukan&rdquo;</span> — jadi hindari kata yang terlalu umum.
             </span>
           </label>
 
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium">Kata tanya ketersediaan — dijawab kalau obatnya ketemu</span>
+            <Input
+              name="farmasi.stok_keywords_ketersediaan"
+              defaultValue={nilai.keywordsKetersediaan}
+              className="w-full"
+              fieldSize="sm"
+              placeholder="adakah, apotek, jual, obat"
+            />
+            <span className="block text-xs text-muted-foreground">
+              Untuk pertanyaan sehari-hari seperti{' '}
+              <span className="font-medium">&ldquo;apotek adakah obat paracetamol&rdquo;</span> atau{' '}
+              <span className="font-medium">&ldquo;ada amlodipin?&rdquo;</span>. Dua pagar menjaganya: kalau namanya
+              tidak ada di katalog, atau kalau pesannya cocok dengan{' '}
+              <Link href="/balasan-otomatis" className="font-medium underline">
+                sebuah aturan Balasan otomatis
+              </Link>
+              , pesannya <span className="font-medium">diteruskan</span> ke sana — bukan dijawab &ldquo;tidak
+              ditemukan&rdquo;. Itu yang membuat &ldquo;ada dokter jaga?&rdquo; dan &ldquo;ada poli apa&rdquo; tidak
+              ikut terjaring. Kosongkan untuk mematikannya.
+            </span>
+          </label>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
           <label className="block space-y-1">
             <span className="block text-xs font-medium">Maksimal obat per jawaban</span>
             <Input
@@ -130,20 +164,71 @@ export function StokForm({ nilai }: { nilai: NilaiStok }) {
               Keduanya ada di Khanza dan sering berbeda — yang keliru membuat orang datang membawa uang yang salah.
             </span>
           </label>
+
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium">Rincian untuk nomor umum</span>
+            <Select
+              name="farmasi.stok_rincian_umum"
+              value={rincian}
+              onChange={(e) => setRincian(e.target.value as NilaiStok['rincianUmum'])}
+              fieldSize="sm"
+              className="w-full"
+            >
+              {RINCIAN_UMUM.map((r) => (
+                <option key={r.nilai} value={r.nilai}>
+                  {r.judul}
+                </option>
+              ))}
+            </Select>
+            <span className="block text-xs text-muted-foreground">
+              Angka sisa stok tidak pernah ikut ke nomor umum, apa pun pilihannya — itu hanya untuk tujuan yang
+              dicentang &ldquo;Boleh tanya&rdquo;.
+            </span>
+          </label>
         </div>
 
-        <div className="space-y-1">
-          <span className="block text-xs font-medium">Jawaban saat obatnya ketemu</span>
-          <MessageEditor
-            name="farmasi.stok_template"
-            defaultValue={nilai.template}
-            variables={STOK_TEMPLATE_VARIABLES}
-            rows={5}
-          />
-          <span className="block text-xs text-muted-foreground">
-            Wajib memuat <span className="font-mono">{'{stok_obat}'}</span> — itulah bagian yang berisi daftar obat,
-            sisa stok, dan harganya.
-          </span>
+        {rincian === 'ringkas' && (
+          /* Ditulis di sini, bukan cuma diketahui dari pilihannya: kata kunci
+             "harga" tetap menjaring pertanyaan harga, dan orangnya lalu menerima
+             jawaban yang justru tidak memuat harga. Itu perilaku yang benar
+             (harga di Khanza belum tentu siap diumumkan), tapi hanya kalau teks
+             pembungkusnya mengarahkan ke manusia -- kalau tidak, yang terbaca
+             adalah sistem yang tidak menjawab pertanyaan. */
+          <p className="rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
+            Pertanyaan <span className="font-medium">harga</span> dari nomor umum tetap dijawab, tapi jawabannya tidak
+            memuat harga. Pastikan teks &ldquo;Jawaban untuk nomor umum&rdquo; di bawah mengarahkan mereka menanyakan
+            harga lewat {'{kontak_rs}'}.
+          </p>
+        )}
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="space-y-1">
+            <span className="block text-xs font-medium">Jawaban saat obatnya ketemu — untuk petugas apotek</span>
+            <MessageEditor
+              name="farmasi.stok_template"
+              defaultValue={nilai.template}
+              variables={STOK_TEMPLATE_VARIABLES}
+              rows={5}
+            />
+            <span className="block text-xs text-muted-foreground">
+              Wajib memuat <span className="font-mono">{'{stok_obat}'}</span> — di sini isinya angka sisa stok, satuan,
+              harga, dan tanda (menipis)/(habis).
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <span className="block text-xs font-medium">Jawaban saat obatnya ketemu — untuk nomor umum</span>
+            <MessageEditor
+              name="farmasi.stok_template_umum"
+              defaultValue={nilai.templateUmum}
+              variables={STOK_TEMPLATE_VARIABLES}
+              rows={5}
+            />
+            <span className="block text-xs text-muted-foreground">
+              Terpisah karena isinya memang beda: <span className="font-mono">{'{stok_obat}'}</span> di sini hanya
+              memuat nama obat dan tersedia/kosong, jadi kalimat tentang harga di teks petugas tidak berlaku.
+            </span>
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -193,7 +278,7 @@ export function StokForm({ nilai }: { nilai: NilaiStok }) {
         <div className="flex flex-wrap gap-2">
           <Input
             name="teks"
-            placeholder='mis. "stok paracetamol" atau "berapa harga paramex"'
+            placeholder='mis. "apotek adakah obat paracetamol" atau "stok paramex"'
             className="min-w-56 flex-1"
             fieldSize="sm"
           />
@@ -202,18 +287,37 @@ export function StokForm({ nilai }: { nilai: NilaiStok }) {
           </Button>
         </div>
         {uji.error && <p className="text-xs text-destructive">{uji.error}</p>}
-        {uji.hasil && (
-          <div className="space-y-1">
+        {uji.hasil && <p className="rounded-md bg-muted p-2 text-xs">{uji.hasil}</p>}
+        {uji.petugas !== undefined && (
+          <div className="space-y-2">
             {uji.cabang && (
               <Badge variant="neutral">
-                {uji.cabang === 'ketemu' ? 'Obat ditemukan' : uji.cabang === 'kosong' ? 'Tidak ada di daftar' : 'Nama obat tidak disebut'}
+                {uji.cabang === 'ketemu'
+                  ? 'Obat ditemukan'
+                  : uji.cabang === 'kosong'
+                    ? 'Tidak ada di daftar'
+                    : 'Nama obat tidak disebut'}
               </Badge>
             )}
-            <pre className="whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{uji.hasil}</pre>
+            {/* Keduanya ditampilkan sekaligus supaya bentuk jawaban untuk nomor
+                umum bisa dilihat TANPA menyalakan mode "siapa saja" lebih dulu
+                -- kalau tidak, satu-satunya cara mengujinya adalah di hadapan
+                orang sungguhan. */}
+            <div className="grid gap-2 lg:grid-cols-2">
+              <div className="space-y-1">
+                <span className="block text-xs font-medium">Yang diterima petugas apotek</span>
+                <pre className="whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{uji.petugas}</pre>
+              </div>
+              <div className="space-y-1">
+                <span className="block text-xs font-medium">Yang diterima nomor umum</span>
+                <pre className="whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{uji.umum}</pre>
+              </div>
+            </div>
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Membaca stok dan harga dari SIMRS Khanza secara langsung, tanpa mengirim pesan apa pun.
+          Membaca stok dan harga dari SIMRS Khanza secara langsung, tanpa mengirim pesan apa pun. Mengabaikan mode
+          akses — yang diuji kata kunci dan isi jawabannya, bukan apakah nomor Anda sendiri berhak bertanya.
         </p>
       </form>
     </div>

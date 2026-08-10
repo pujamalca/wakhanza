@@ -51,6 +51,37 @@ Diverifikasi: `susunJawabanStok()` dan `cobaBalasStok()` (fungsi produksi yang s
 
 Jalur GRUP diverifikasi terpisah lewat `cobaBalasStokDariGrup()` (fungsi produksi yang sama dipanggil pendengar) atas 8 keadaan, 22 pemeriksaan: grup tak terdaftar tidak dijawab; grup terdaftar tapi `boleh_tanya=0` juga tidak; sesudah dicentang barisnya terbentuk dengan `chat_id` grup, `phone_e164` NULL, dan menyebut ANGKA; penyerahan ulang pesan yang sama tetap satu baris; obrolan biasa dan emoji tidak dijawab; **mode `semua` TIDAK meloloskan grup yang belum dicentang** sementara yang dicentang tetap mendapat angka; perorangan pada mode `semua` tidak mendapat angka; dan kuota per grup menahan baris berikutnya tanpa menjatuhkannya ke aturan lain. Centang "Boleh tanya" lewat **browser sungguhan** (9 pemeriksaan, dikembalikan ke mati sesudahnya karena grup itu grup apotek nyata). JID grup ujinya karangan, worker dihentikan selama pengujian, dan seluruh baris dibersihkan di `finally`.
 
+## Kata tanya ketersediaan, dan jawaban ringkas untuk nomor umum (`migrations/039`)
+
+**Tabrakan yang melahirkan seluruh rancangannya DIUKUR lebih dulu, bukan dikira.** Katalog `alca` (880 barang aktif) dicocokkan terhadap kata-kata yang muncul di aturan `/balasan-otomatis` yang sedang aktif: `poli` → **2 barang** cocok `nama_brng LIKE '%poli%'`, `apa` → 10, `ada` → 1, `hari` → 1; `jadwal`/`dokter`/`praktek`/`layanan`/`alamat`/`lokasi`/`telepon`/`jaga` → 0. Angka 2 pada `poli` itulah yang membuktikan pagar "lepas bila obat tak ketemu" TIDAK cukup sendirian -- pada "ada poli apa" obatnya justru ketemu -- dan karena itu pagar kedua (aturan `/balasan-otomatis` menang) ada.
+
+**Perutean dibuktikan atas 11 kalimat lewat `npm run dryrun:stok`**, yang memanggil `susunJawabanStok()` berikut pemeriksa aturan yang SAMA dipakai worker, terhadap `alca`/`wakhanza` sungguhan:
+
+| Pertanyaan | Hasil |
+|---|---|
+| `apotek adakah obat paracetamol` | dijawab -- 4 barang, cari `paracetamol` |
+| `ada paracetamol?` | dijawab |
+| `jual obat amlodipin tidak` | dijawab -- cari `amlodipin`, 5 dari 6 cocok |
+| `ready paracetamol ga` | dijawab |
+| `stok paracetamol` / `berapa harga paracetamol` | dijawab (golongan ketat, tak berubah) |
+| `adakah obat <nama karangan>` | **dilepas** -- `ketersediaan_tak_ketemu` |
+| `ada poli apa` | **dilepas** -- `aturan_menang` (cari `poli`) |
+| `ada dokter jaga hari ini` | **dilepas** -- `ketersediaan_tak_ketemu` (cari `dokter jaga`) |
+| `jadwal dokter` | **dilepas** -- `bukan_pertanyaan_stok` |
+| `apotek` (tanpa nama obat) | **dilepas** -- `ketersediaan_tanpa_nama` |
+
+Bentuk jawabannya juga dibuktikan berdampingan pada tiap kalimat: `[petugas]` menyebut `sisa 187 Tablet — Rp500` berikut `(habis)` pada yang nol, `[umum]` menyebut `• <nama> — tersedia` / `• <nama> — kosong` saja -- tanpa satu pun angka rupiah, angka sisa, satuan, maupun tanda `(menipis)`.
+
+**Dua hal ditemukan oleh uji, bukan oleh pembacaan kode.** (1) `jual obat amlodipin tidak` semula menyisakan `amlodipin tidak` sebagai satu pola `LIKE` dan tidak pernah cocok -- kata ingkar (`tidak`, `nggak`, `ga`, ...) karena itu masuk `KATA_PENGAPIT`; tanpa itu golongan barunya meleset justru pada bentuk "X ada tidak?" yang paling sering. (2) `ada paracetamol?` meleset selama `ada` polos masih dikecualikan, dan itu yang menuntut pagar kedua dibangun alih-alih membuang katanya.
+
+**Gerbang penuh**: `npx jest` **40 suite / 680 uji** lolos (dari 667; `stokObat.test.ts` 23 → 39, termasuk asersi bahwa nama obat berisi baris baru tidak bisa menyisipkan barisnya sendiri pada cabang `ringkas` yang merakit barisnya SENDIRI), `tsc --noEmit` bersih, `eslint` bersih, `verify:plans` lolos, `verify:db` lolos (`sik` tulis DITOLAK), `npm run build` berhasil dan penanda teks barunya terbukti ada di `.next/server`.
+
+**Pemasangan**: `pm2 restart wakhanza-web` (`/login` HTTP 200, `/farmasi?tab=stok` 307 ke login = pagar peran tegak), lalu worker lewat prosedur tiga langkah -- `pm2 stop` → Chromium pemegang sesi tersisa **nol** → `pm2 start`. Penghitung restart worker tetap **8**, tanpa kaskade; sesi kembali `ready` dengan umur denyut **12 detik** dan `last_error` kosong, dibaca lewat Sequelize (bukan `NOW()` SQL, yang melebihkan 25.200 detik).
+
+**Yang TIDAK diubah, sengaja**: `farmasi.stok_mode` tetap `petugas`. Membuka jawaban untuk nomor umum adalah keputusan rumah sakit, dan pemilik sistem memilih menyiapkannya dulu -- jadi bentuk `[umum]` di atas terbukti benar tanpa satu pun nomor asing pernah dijawab. Tidak ada pesan WhatsApp yang dikirim selama verifikasi ini.
+
+**Sesudah verifikasi, pemilik sistem menyalakannya sendiri lewat dashboard** (`farmasi.stok_mode` = `semua`, `farmasi.stok_rincian_umum` tetap `ringkas`), dan jalurnya terbukti hidup end-to-end di produksi: empat baris `outbox` berkode `AUTO_REPLY` berstatus `sent` -- japri menerima `Informasi ketersediaan obat di ...` (bentuk ringkas, tanpa satu angka pun), grup apotek yang terdaftar `boleh_tanya` menerima `Informasi obat di ...` (bentuk penuh). Jadi keputusan (a) di CLAUDE.md sudah diambil RS; yang masih bawaan (b).
+
 ## Kelas keenam: DARURAT STOK (`/farmasi`, migrations/021) -- dipicu WAKTU, bukan kejadian
 
 Diverifikasi: `verify:plans` menunjukkan `range`/`Using index` pada `databarang` dan `eq_ref` seluruh join, tanpa satu pun izin pindai penuh; `verify:db` lolos; 370 unit test (26 baru: `stokDarurat.test.ts` 17, `every_n_days` 9). **Jawaban balasan stok dibuktikan TIDAK berubah** -- query lama vs baru dijalankan berdampingan atas seluruh katalog, 880 baris identik kode-per-kode dan stok-per-stok. `runDueStokDarurat()`/`jalankanSatuJadwal()` (fungsi produksi yang sama dipanggil worker) dijalankan terhadap `alca`/`wakhanza` sungguhan atas 9 keadaan, 23 pemeriksaan -- termasuk bahwa jalan kedua atas jatuh tempo yang SAMA tidak menambah baris sementara jatuh tempo baru menambah, sakelar mati tidak memajukan `next_run_at`, tanpa tujuan `next_run_at` dipertahankan, dan gudang aman + pesan kosong tidak mengirim pesan hampa. Worker dihentikan selama pengujian; seluruh baris dan pengaturan dikembalikan di `finally`. Halaman lewat HTTP asli terhadap build produksi di port sendiri (20 pemeriksaan). Server action lewat **browser sungguhan**: jadwal (28 pemeriksaan -- termasuk penolakan jarak 1 hari, penolakan `{nama_pasien}`, jeda/aktifkan, dan **Batal benar-benar tidak menghapus**) dan centang tujuan (14 pemeriksaan -- `terima_darurat_stok` berubah sementara `is_active` dan `boleh_tanya` TIDAK). Dan **satu peringatan benar-benar terkirim** ke nomor uji oleh worker PM2 (`send_log.outcome='sent'`, 295 ms, `attempts=1`).
@@ -129,6 +160,8 @@ Skripnya menerima token lewat variabel lingkungan dan mencetak URL tersamar (`bo
 Uji "token di ekor teks panjang" versi pertama **tidak menggigit** dan diperbaiki: tokennya jatuh di luar 200 karakter sehingga hilang oleh pemotongan bahkan tanpa penyensoran. Diganti dengan token yang dimulai tepat sebelum batas, sehingga yang diuji benar-benar URUTANNYA.
 
 **Gerbang penuh**: `npx jest` 40 suite / 667 uji lolos (dari 650), `tsc --noEmit` bersih, `eslint` bersih, `npm run build` berhasil dan penanda teks barunya terbukti ada di `.next/server`.
+
+**Jalur UI-nya dikonfirmasi pemilik sistem sesudah pemasangan**: tombol "Kirim peringatan uji" di `/pengaturan` ditekan lewat dashboard sungguhan, menampilkan "Terkirim", dan pesannya benar-benar masuk ke Telegram. Itu menutup satu-satunya sambungan yang tidak bisa dibuktikan dari sisi skrip -- pembungkus Server Action (`requireRole` + `logAudit`) dan tampilannya -- karena membuktikannya sendiri menuntut membuat akun admin sementara di sistem yang memegang data pasien.
 
 **Pemasangan**: `pm2 restart wakhanza-web` (`/login` -> HTTP 200), lalu worker lewat prosedur tiga langkah -- `pm2 stop` -> Chromium pemegang sesi tersisa **nol** -> `pm2 start`. Penghitung restart worker tetap 8, tanpa kaskade; `WhatsApp siap` ~3 detik sesudah start. Kesehatannya diperiksa lewat **umur denyut** dibaca Sequelize (bukan `NOW()` SQL, yang melebihkan 25.200 detik): `ready`, denyut 10 detik, `last_error` kosong.
 

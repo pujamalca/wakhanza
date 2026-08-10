@@ -1,0 +1,101 @@
+-- 039_stok_ketersediaan.sql
+-- PERTANYAAN KETERSEDIAAN -- "apotek adakah obat paracetamol", dan jawaban
+-- yang cuma menyebut nama obatnya berikut tersedia/kosong.
+--
+-- Balasan stok (migrations/019) mengenali pesan lewat SATU daftar kata kunci,
+-- bawaannya "stok" dan "harga". Bentuk pertanyaan yang paling wajar diketik
+-- orang tidak memuat satu pun di antaranya: "apotek adakah obat paracetamol",
+-- "ada amlodipin?", "jual salbutamol nggak". Semuanya jatuh ke aturan
+-- /balasan-otomatis dan tidak pernah dijawab -- 95% pesan masuk selama ini
+-- memang tidak terjawab, dan sebagiannya bentuk ini.
+--
+-- Menambahkan kata-kata itu ke `farmasi.stok_keywords` yang sudah ada TIDAK
+-- bisa, dan sebabnya diukur bukan dikira: cabang stok diperiksa SEBELUM aturan
+-- /balasan-otomatis, dan cabang itu selalu menjawab -- kalau obatnya tidak
+-- ketemu, ia menjawab "tidak ditemukan di daftar obat kami". Dengan "ada"
+-- sebagai kata kunci, pertanyaan "ada poli apa" menyisakan "poli" sebagai
+-- pencarian, dan katalog di mesin ini punya DUA barang yang cocok
+-- (`nama_brng LIKE '%poli%'`). Aturan "daftar poli" yang sudah aktif tidak
+-- akan pernah menjawabnya lagi, tanpa satu pun galat -- yang terlihat cuma
+-- pasien yang bertanya poli lalu diberi tahu nama sebuah obat.
+--
+-- Karena itu golongan KEDUA, bukan pelebaran golongan pertama.
+
+-- ---------------------------------------------------------------------------
+-- Kata tanya ketersediaan -- cocok, tapi boleh GUGUR diam-diam
+-- ---------------------------------------------------------------------------
+--
+-- Bedanya dari `farmasi.stok_keywords` bukan soal kecocokan melainkan soal apa
+-- yang terjadi saat obatnya TIDAK ketemu:
+--
+--   stok/harga (ketat)  -> tetap dijawab "tidak ditemukan di daftar obat kami"
+--   adakah/apotek/jual  -> pesannya DILEPAS, diteruskan ke /balasan-otomatis
+--                          seolah fitur ini tidak ada
+--
+-- Orang yang mengetik "stok xyz" jelas sedang bertanya persediaan, jadi
+-- jawaban "tidak ditemukan" membantu. Orang yang mengetik "ada dokter jaga"
+-- tidak sedang bertanya obat sama sekali; menjawabnya "dokter jaga tidak
+-- ditemukan di daftar obat kami" adalah jawaban percaya-diri-dan-keliru --
+-- kesalahan yang sama yang membuat `detectPoli()` mengembalikan null saat
+-- ambigu, dan yang membuat `deteksiPermintaanStok` tidak pernah menebak nama
+-- obat saat penanya tidak menyebutnya.
+--
+-- Penjaga alaminya ternyata kuat: sisa kata dipakai UTUH sebagai satu pola
+-- `LIKE '%sisa%'`, jadi "kapan obat saya siap" mencari `%kapan siap%` dan
+-- tidak cocok dengan apa pun. Yang lolos hanyalah sisa yang benar-benar
+-- menyerupai satu nama barang.
+--
+-- Penjaga KEDUA menutup sisanya, dan ia yang membuat "ada" polos tetap boleh
+-- ikut: sebuah aturan /balasan-otomatis yang benar-benar cocok MENGALAHKAN
+-- golongan ini. "ada poli apa" menyisakan "poli", dan katalog di mesin ini
+-- punya barang yang cocok `LIKE '%poli%'` -- jadi penjaga pertama tidak
+-- menolong di situ, obatnya justru ketemu. Yang membedakan keduanya bukan
+-- katalog melainkan niat: aturan yang ditulis staf adalah pernyataan tegas
+-- "pesan seperti ini dijawab begini", sementara kata tanya ketersediaan cuma
+-- dugaan. Yang tegas menang. `farmasi.stok_keywords` yang ketat TIDAK ikut
+-- menyerah -- urutan lama ("stok"/"harga" mendahului aturan) tetap berlaku.
+INSERT INTO app_setting (k, v) VALUES
+  ('farmasi.stok_keywords_ketersediaan', 'ada,adakah,apotek,apotik,tersedia,ready,punya,jual,beli,obat'),
+
+-- ---------------------------------------------------------------------------
+-- Seberapa banyak yang disebut kepada NOMOR UMUM
+-- ---------------------------------------------------------------------------
+--
+-- `ringkas` = nama obat dan tersedia/kosong saja. `harga` = ditambah harganya,
+-- yaitu perilaku penanya umum sebelum migrasi ini.
+--
+-- Bawaannya `ringkas`, dan itu BUKAN perubahan perilaku diam-diam: bentuk
+-- lamanya hanya pernah berlaku pada `farmasi.stok_mode = 'semua'`, sementara
+-- mesin ini berada di `petugas` sejak fitur itu ada -- tidak satu pun jawaban
+-- tanpa-angka pernah dikirim. Petugas apotek yang terdaftar TIDAK terpengaruh
+-- sama sekali; mereka tetap menerima angka sisa, satuan, harga, dan tanda
+-- (menipis)/(habis), karena angka itulah yang mereka pakai bekerja.
+--
+-- Yang membenarkan `ringkas` sebagai bawaan: harga di `databarang` belum tentu
+-- harga yang siap diumumkan ke luar (tarif yang belum diperbarui tetap
+-- tersimpan rapi di sana), dan jawaban otomatis yang menyebut harga lama lebih
+-- buruk daripada tidak menyebut harga -- orang datang membawa uang yang salah.
+-- Teks pembungkusnya karena itu mengarahkan pertanyaan harga ke manusia.
+  ('farmasi.stok_rincian_umum', 'ringkas'),
+
+-- ---------------------------------------------------------------------------
+-- Jawaban khusus nomor umum -- template TERSENDIRI, bukan yang sama
+-- ---------------------------------------------------------------------------
+--
+-- Wajib terpisah karena teks lamanya berbunyi "Harga dapat berubah
+-- sewaktu-waktu", dan kalimat itu menggantung tanpa arti pada jawaban yang
+-- memang tidak memuat satu pun harga -- bentuk kegagalan yang sama persis
+-- dengan label "Total nilai hibah :" tanpa angka di migrations/031, yang di
+-- sana terbaca sebagai sistem rusak lalu membuat angka yang benar pun tidak
+-- dipercaya.
+--
+-- KOSONG berarti sengaja tidak menjawab nomor umum -- sama seperti seluruh
+-- kotak teks lain di bagian ini, dan sama seperti `autoreply.fallback_body`.
+-- Sengaja BUKAN "kosong = pakai teks petugas": aturan "kosong = diam" sudah
+-- berlaku di enam kotak teks bersebelahan, dan satu kotak yang artinya
+-- berbeda adalah kotak yang salah dibaca.
+  ('farmasi.stok_template_umum',
+   'Informasi ketersediaan obat di {nama_rs}:\n\n{stok_obat}\n\nUntuk harga dan pemesanan, silakan hubungi {kontak_rs}.')
+
+-- Aman dijalankan ulang, dan tidak menimpa suntingan staf.
+ON DUPLICATE KEY UPDATE v = v;

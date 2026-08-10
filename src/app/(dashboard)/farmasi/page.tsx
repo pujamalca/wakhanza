@@ -398,21 +398,28 @@ async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTuju
 /* ------------------------------------------------------------------------- */
 
 async function TabStok({ mode }: { mode: NilaiStok['mode'] }) {
-  const [stokKeywords, stokMaxHasil, stokHarga, stokTemplate, stokKosong, stokTanpaNama] = await Promise.all([
-    getSetting('farmasi.stok_keywords', 'stok,harga'),
-    getSettingNumber('farmasi.stok_max_hasil', 5),
-    getSetting('farmasi.stok_harga', 'jualbebas'),
-    getSetting('farmasi.stok_template', ''),
-    getSetting('farmasi.stok_template_kosong', ''),
-    getSetting('farmasi.stok_template_tanpa_nama', ''),
-  ]);
+  const [stokKeywords, stokKeywordsAda, stokMaxHasil, stokHarga, stokRincianUmum, stokTemplate, stokUmum, stokKosong, stokTanpaNama] =
+    await Promise.all([
+      getSetting('farmasi.stok_keywords', 'stok,harga'),
+      getSetting('farmasi.stok_keywords_ketersediaan', ''),
+      getSettingNumber('farmasi.stok_max_hasil', 5),
+      getSetting('farmasi.stok_harga', 'jualbebas'),
+      getSetting('farmasi.stok_rincian_umum', 'ringkas'),
+      getSetting('farmasi.stok_template', ''),
+      getSetting('farmasi.stok_template_umum', ''),
+      getSetting('farmasi.stok_template_kosong', ''),
+      getSetting('farmasi.stok_template_tanpa_nama', ''),
+    ]);
 
   const nilaiStok: NilaiStok = {
     mode,
     keywords: stokKeywords ?? '',
+    keywordsKetersediaan: stokKeywordsAda ?? '',
     maxHasil: stokMaxHasil,
     harga: stokHarga === 'ralan' ? 'ralan' : 'jualbebas',
+    rincianUmum: stokRincianUmum === 'harga' ? 'harga' : 'ringkas',
     template: stokTemplate ?? '',
+    templateUmum: stokUmum ?? '',
     templateKosong: stokKosong ?? '',
     templateTanpaNama: stokTanpaNama ?? '',
   };

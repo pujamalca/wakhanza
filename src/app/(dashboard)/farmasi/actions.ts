@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { FarmasiTarget, WaSession, logAudit, setSetting, getSetting } from '@/models';
 import { findUnknownVariables, FARMASI_TEMPLATE_VARIABLES, STOK_TEMPLATE_VARIABLES } from '@/core/template';
 import { parseStokKeywords } from '@/core/stokObat';
-import { susunJawabanStok } from '@/worker/stokReply';
+import { susunJawabanStok, type JawabanStok, type SebabLanjut } from '@/worker/stokReply';
+import { loadActiveRules } from '@/worker/autoReply';
+import { matchRule } from '@/core/autoReply';
 import { getHospitalIdentity } from '@/khanza/common';
 import { parseTarget, type JenisTarget } from '@/core/farmasiTarget';
 import { buildIdempotencyKey } from '@/core/idempotency';
@@ -21,8 +23,21 @@ export interface HasilForm {
 
 export interface HasilUji {
   error?: string;
+  /** Terisi HANYA saat pesannya tidak dijawab di jalur stok -- berikut sebabnya. */
   hasil?: string;
   cabang?: 'ketemu' | 'kosong' | 'tanpa_nama';
+  /**
+   * Dua jawaban dari satu pertanyaan, ditampilkan berdampingan.
+   *
+   * Sejak jawaban untuk nomor umum bisa berbeda bentuk dari jawaban untuk
+   * petugas (migrations/039), menampilkan salah satunya saja berarti staf
+   * menyetel yang satu sambil melihat yang lain. Yang paling mungkin salah
+   * dibaca justru yang umum: modenya masih `petugas`, jadi tanpa kotak ini
+   * satu-satunya cara melihatnya adalah menyalakan mode `semua` lebih dulu --
+   * yaitu mengujinya di hadapan orang sungguhan.
+   */
+  petugas?: string;
+  umum?: string;
 }
 
 function segarkan(): void {
@@ -232,7 +247,18 @@ export async function simpanPesanAction(_prev: HasilForm, formData: FormData): P
 // Balasan stok & harga obat
 // ---------------------------------------------------------------------------
 
-const KUNCI_STOK = ['farmasi.stok_template', 'farmasi.stok_template_kosong', 'farmasi.stok_template_tanpa_nama'] as const;
+const KUNCI_STOK = [
+  'farmasi.stok_template',
+  'farmasi.stok_template_umum',
+  'farmasi.stok_template_kosong',
+  'farmasi.stok_template_tanpa_nama',
+] as const;
+
+/**
+ * Keduanya wajib memuat `{stok_obat}`: tanpa itu jawabannya tidak menyebut satu
+ * pun obat -- pesan sopan yang tidak menjawab apa pun.
+ */
+const KUNCI_KETEMU = ['farmasi.stok_template', 'farmasi.stok_template_umum'] as const;
 
 const VARS_STOK_HINT = STOK_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ');
 
@@ -255,6 +281,30 @@ export async function simpanStokAction(_prev: HasilForm, formData: FormData): Pr
   if (modeBaru !== 'mati' && parseStokKeywords(keywords).length === 0) {
     return { error: 'Isi minimal satu kata kunci, mis. "stok, harga" — tanpa itu tidak ada pertanyaan yang dikenali.' };
   }
+
+  // Boleh kosong: rumah sakit yang cuma mau menjawab "stok"/"harga" tinggal
+  // mengosongkannya, dan bentuknya kembali persis seperti sebelum
+  // migrations/039.
+  const keywordsAda = String(formData.get('farmasi.stok_keywords_ketersediaan') ?? '').trim();
+
+  /**
+   * Kata yang ditulis di KEDUA kotak ditolak, bukan dibiarkan menang di salah
+   * satunya. Keduanya sama-sama membuat pesan cocok, tapi perlakuannya saat
+   * obatnya tidak ketemu berlawanan -- yang satu menjawab "tidak ditemukan",
+   * yang satu melepas pesannya. Yang ketat menang, jadi entri kembarnya
+   * menjadi no-op yang tidak terlihat: staf mengira sudah menyetel perilaku
+   * yang longgar padahal tidak berubah sama sekali.
+   */
+  const ketatSet = new Set(parseStokKeywords(keywords));
+  const kembar = parseStokKeywords(keywordsAda).filter((k) => ketatSet.has(k));
+  if (kembar.length > 0) {
+    return {
+      error: `Kata ${kembar.map((k) => `"${k}"`).join(', ')} ada di kedua kotak kata kunci. Pilih salah satu — yang di kotak atas selalu dijawab, yang di kotak bawah hanya dijawab kalau obatnya benar-benar ketemu.`,
+    };
+  }
+
+  const rincianUmum = String(formData.get('farmasi.stok_rincian_umum') ?? 'ringkas');
+  if (!['ringkas', 'harga'].includes(rincianUmum)) return { error: 'Pilihan rincian untuk nomor umum tidak dikenal.' };
 
   const maks = Number(formData.get('farmasi.stok_max_hasil') ?? 5);
   if (!Number.isInteger(maks) || maks < 1 || maks > 20) {
@@ -279,17 +329,26 @@ export async function simpanStokAction(_prev: HasilForm, formData: FormData): Pr
     teks[kunci] = body;
   }
 
-  // Template utama tanpa {stok_obat} berarti jawabannya tidak memuat satu pun
-  // obat -- pesan sopan yang tidak menjawab apa pun. Ditolak saat menyimpan,
-  // bukan ditemukan lewat pasien yang kebingungan.
-  if (modeBaru !== 'mati' && teks['farmasi.stok_template'] && !teks['farmasi.stok_template'].includes('{stok_obat}')) {
-    return { error: 'Isi jawaban utama harus memuat {stok_obat} — itulah bagian yang berisi daftar obat dan harganya.' };
+  // Template tanpa {stok_obat} berarti jawabannya tidak memuat satu pun obat --
+  // pesan sopan yang tidak menjawab apa pun. Ditolak saat menyimpan, bukan
+  // ditemukan lewat pasien yang kebingungan. Berlaku untuk KEDUA jawaban
+  // "ketemu"; yang umum dulu tidak diperiksa karena memang belum ada.
+  for (const kunci of KUNCI_KETEMU) {
+    if (modeBaru !== 'mati' && teks[kunci] && !teks[kunci].includes('{stok_obat}')) {
+      return {
+        error: `Isi jawaban ${
+          kunci === 'farmasi.stok_template' ? 'untuk petugas apotek' : 'untuk nomor umum'
+        } harus memuat {stok_obat} — itulah bagian yang berisi daftar obatnya.`,
+      };
+    }
   }
 
   const modeLama = (await getSetting('farmasi.stok_mode', 'mati')) ?? 'mati';
 
   for (const [kunci, body] of Object.entries(teks)) await setSetting(kunci, body);
   await setSetting('farmasi.stok_keywords', keywords);
+  await setSetting('farmasi.stok_keywords_ketersediaan', keywordsAda);
+  await setSetting('farmasi.stok_rincian_umum', rincianUmum);
   await setSetting('farmasi.stok_max_hasil', String(maks));
   await setSetting('farmasi.stok_harga', harga);
   await setSetting('farmasi.stok_mode', modeBaru);
@@ -317,17 +376,41 @@ export async function ujiStokAction(_prev: HasilUji, formData: FormData): Promis
   if (!teks) return { error: 'Ketik dulu contoh pertanyaannya.' };
 
   const identity = await getHospitalIdentity();
-  const jawaban = await susunJawabanStok(teks, identity);
+  // DUA kali, sekali per jenis penanya. Cabangnya pasti sama (kata kunci dan
+  // katalognya sama); yang berbeda hanya rincian daftar dan teks pembungkusnya.
+  // Pemeriksa aturan ikut diserahkan supaya pratinjaunya melaporkan hal yang
+  // SAMA dengan worker -- termasuk saat sebuah aturan /balasan-otomatis yang
+  // cocok mengalahkan kata tanya ketersediaan.
+  const aturanCocok = async () => matchRule(teks, await loadActiveRules()) !== null;
+  const [petugas, umum] = await Promise.all([
+    susunJawabanStok(teks, identity, 'petugas', aturanCocok),
+    susunJawabanStok(teks, identity, 'umum', aturanCocok),
+  ]);
 
-  if (!jawaban) {
-    return {
-      hasil: 'Tidak ada kata kunci stok yang cocok — pesan seperti ini akan diteruskan ke aturan di /balasan-otomatis.',
-    };
+  if (petugas.aksi === 'lanjut') return { hasil: alasanLanjut(petugas.sebab, petugas.cari) };
+
+  const isi = (j: JawabanStok): string =>
+    j.aksi === 'jawab' && j.body.trim() ? j.body : '(teks untuk keadaan ini dikosongkan — tidak ada yang dikirim)';
+
+  return { cabang: petugas.cabang, petugas: isi(petugas), umum: isi(umum) };
+}
+
+/**
+ * Ketiga sebabnya dijelaskan lewat AKIBATNYA, bukan nama enumnya -- dan
+ * dibedakan karena tindakan staf atasnya berbeda: yang pertama menuntut kata
+ * kunci ditambah, dua sisanya justru menandakan kata kuncinya sudah bekerja.
+ */
+function alasanLanjut(sebab: SebabLanjut, cari: string): string {
+  if (sebab === 'aturan_menang') {
+    return `Ada obat bernama "${cari}" di katalog, TAPI pesan ini juga cocok dengan sebuah aturan aktif di /balasan-otomatis — dan aturan yang ditulis staf selalu menang atas kata tanya ketersediaan. Aturan itulah yang menjawab.`;
   }
-  if (!jawaban.body.trim()) {
-    return { hasil: `Cocok (${jawaban.cabang}), tapi teks untuk cabang itu kosong — tidak ada yang dikirim.` };
+  if (sebab === 'ketersediaan_tak_ketemu') {
+    return `Kata tanya ketersediaan cocok, tapi "${cari}" tidak ada di katalog obat — pesannya diteruskan ke aturan di /balasan-otomatis, BUKAN dijawab "tidak ditemukan". Itulah yang membuat pertanyaan seperti "ada dokter jaga?" tidak dibajak ke jalur obat.`;
   }
-  return { hasil: jawaban.body, cabang: jawaban.cabang };
+  if (sebab === 'ketersediaan_tanpa_nama') {
+    return 'Kata tanya ketersediaan cocok, tapi tidak ada nama obat yang bisa dicari — pesannya diteruskan ke aturan di /balasan-otomatis.';
+  }
+  return 'Tidak ada kata kunci stok yang cocok — pesan seperti ini akan diteruskan ke aturan di /balasan-otomatis.';
 }
 
 // ---------------------------------------------------------------------------
