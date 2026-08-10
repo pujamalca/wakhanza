@@ -2230,3 +2230,132 @@ restart sesi sebelumnya, jadi tidak ada kaskade baru yang terpicu.
 dibuat**: `pm2 stop wakhanza-worker` -> pastikan Chromium bersih -> `pm2 start
 wakhanza-worker`. Tanpa itu jadwal yang memakai keempat variabel baru
 mengirimkannya KOSONG tanpa satu pun galat.
+
+## Pagar watermark: kursor tidak boleh melampaui waktu berjalan (`core/watermark.ts`)
+
+Dijalankan 10 Agustus 2026.
+
+**Keadaan awal: berkasnya ada, pemanggilnya tidak.** `src/core/watermark.ts`
+tersisa tak terlacak dari sesi sebelumnya. Diukur atas seluruh repo (di luar
+`.next/`), `batasiWatermark` dan `TOLERANSI_WATERMARK_MS` muncul **hanya di
+berkas itu sendiri** -- nol impor, nol pemanggil, dan tidak ada
+`watermark.test.ts`. `advanceCursor()` (`src/worker/cursor.ts:24`) masih menulis
+`newCursorTs` apa adanya. Jadi lubangnya masih terbuka seluruhnya; yang ada cuma
+obatnya, belum diminum.
+
+Itu keadaan yang lebih berbahaya daripada berkasnya tidak ada sama sekali:
+komentarnya rapi dan menjelaskan insiden sungguhan, sehingga pembaca berikutnya
+menyimpulkan lubangnya sudah tertutup.
+
+**Keadaan produksi saat diperiksa** (baca-saja lewat Sequelize, karena
+`heartbeat_at`/`cursor_ts` disimpan UTC sementara `NOW()` MariaDB mengembalikan
+WIB -- selisih 25.200 detik):
+
+```
+sekarang: 2026-08-10T02:45:13Z   (8 baris poll_cursor)
+QUEUE_REG                2026-08-10T02:40:16Z     -5 menit
+FARMASI_PENYERAHAN       2026-08-08T08:12:08Z  -2553 menit
+FARMASI_VALIDASI         2026-08-05T10:01:21Z  -6764 menit
+BILLING_READY / BOOKING_SCAN / PHARMACY_READY /
+RESULT_READY_LAB / RESULT_READY_RADIOLOGI
+                         2026-08-03T12:37:15Z  -9488 menit
+0 baris melampaui waktu berjalan lebih dari toleransi 5 menit.
+```
+
+Kursor yang berumur hari BUKAN gejala: `runSisipCycle` keluar lebih dulu
+("pemicu nonaktif atau template belum ada") sebelum memajukan kursornya, jadi
+pemicu yang belum dinyalakan memang membekukan watermarknya. `QUEUE_REG` -5
+menit menunjukkan jalur yang aktif memang bergerak.
+
+Jadi bug-nya tidak sedang menyala, dan itu keadaan normalnya -- lubangnya
+terbuka pada hari ada satu kolom jam salah ketik.
+
+**Uji unit dibuktikan MENGGIGIT, bukan diasumsikan.** `src/core/watermark.test.ts`
+berisi 9 kasus. Dengan implementasi utuh: 9 lolos. Dengan pagarnya dirusak
+sengaja (baris `if (lampau <= 0)` diganti pengembalian tanpa syarat):
+
+```
+Tests: 5 failed, 4 passed, 9 total
+```
+
+Keempat yang tetap lolos memang kasus "lewatkan apa adanya", yang benar untuk
+kedua versi. Dipulihkan: 9 lolos.
+
+**Pemasangannya dibuktikan lewat `advanceCursor` SUNGGUHAN terhadap database
+`wakhanza`**, memakai kunci buangan `ZZ_UJI_WATERMARK` yang tidak dibaca poller
+mana pun, dihapus di `finally`:
+
+```
+diminta  : 2026-08-10T15:51:42Z  (+13 jam, meniru jam_reg 19:59 pada pendaftaran 06:15)
+tersimpan: 2026-08-10T02:51:42Z  (+0 menit)
+
+OK  nilai dipotong, tidak disimpan apa adanya
+OK  tidak melampaui waktu berjalan
+OK  waktu kejadian wajar (-45 menit) disimpan apa adanya
+
+baris uji dibersihkan: ya
+```
+
+Berikut baris peringatannya, yang sebelumnya tidak pernah ada:
+
+```
+WARN watermark diminta melampaui waktu berjalan, dipotong -- periksa kolom jam di Khanza
+     triggerCode: "ZZ_UJI_WATERMARK"  lampauMenit: 775  rowsSeen: 1
+```
+
+Pemeriksaan kedua (-45 menit lewat utuh) sama pentingnya dengan yang pertama:
+pagar yang memotong segalanya sama rusaknya dengan pagar yang tidak ada, dan
+akibatnya kursor mandek selamanya.
+
+**Titik pemasangannya dipilih dari pengukuran, bukan selera.** `advanceCursor`
+punya **enam pemanggil di empat berkas** -- `sisipCycle.ts:152`,
+`pollerBooking.ts:63`, `farmasiRunner.ts:158` dan `:184`, `bpjsRunner.ts:159` dan
+`:188` -- dan ia satu-satunya tempat `poll_cursor.cursor_ts` dimajukan.
+`recordCursorError` menulis kolom yang sama tapi mempertahankan nilai lamanya
+(`row?.cursorTs`), jadi ia tidak pernah memajukan dan tidak perlu pagar.
+
+**Pagarnya MENYEMBUHKAN, bukan cuma mencegah**, dan itu terbukti dari bentuk
+kodenya: ketiga runner menyemai `let maxTs = cursorTs` (`sisipCycle.ts:96`,
+`farmasiRunner.ts:110`, `bpjsRunner.ts:126`), jadi kursor yang telanjur rusak
+diserahkan kembali ke `advanceCursor` pada siklus berhasil berikutnya lalu
+ditarik ke sekarang. Tanpa itu, keputusan "boleh mundur" di `core/watermark.ts`
+tidak akan pernah terpakai.
+
+`pollerBooking.ts:63` menyerahkan `now`, jadi pagarnya tidak pernah menggigit di
+sana -- benar menurut rancangan, bukan pengecualian yang perlu ditulis.
+
+**Pemeriksaan menyeluruh:**
+
+```
+npx jest             39 suite, 650 uji lolos   (+9 di watermark.test.ts, dari 641)
+npm run test:int      3 suite,  46 uji lolos
+npx tsc --noEmit     bersih
+npx eslint           bersih
+npm run build        Compiled successfully
+npm run verify:db    lolos -- sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK, wakhanza 23 tabel
+npm run verify:plans lolos
+```
+
+**Pemasangan.** `pm2 stop wakhanza-worker` -> Chromium pemegang sesi tersisa
+diperiksa dan hasilnya **nol** -> `pm2 start wakhanza-worker`. Satu restart, dan
+**tidak ada kaskade**: penghitung restart tetap 8. Proses lama keluar lewat jalur
+IPC yang benar, terbaca di log sebagai `wakhanza-worker berhenti...` (exitCode 0)
+lalu `sesi WhatsApp ditutup rapi` -- bukan mati mendadak. Pengganti tunggal
+mencapai siap dalam ~1,6 detik:
+
+```
+wakhanza-worker memulai...
+koneksi database terverifikasi (read-only sik, read-write wakhanza)
+memulai siklus poller   pollIntervalMs 60000  scanIntervalMs 300000
+siklus polling selesai  triggerCode QUEUE_REG  rowsSeen 1
+WhatsApp siap
+```
+
+Kesehatannya diperiksa lewat **umur denyut**, bukan kolom `status` (yang bisa
+tertinggal `ready` walau prosesnya sudah mati): `wa_session` `ready`, denyut **5
+detik**, `last_error` kosong. Tidak ada baris `warn` watermark di log startup --
+benar, karena tidak ada satu pun kursor yang melampaui waktu berjalan.
+
+**Kebersihan.** Ketiga skrip `.tmp-*.mts` (periksa kursor, bukti pemasangan,
+periksa denyut) dihapus; `git status --short` tidak menyisakan satu pun.
+`wakhanza-web` tidak ikut di-restart -- perubahannya murni jalur worker.
