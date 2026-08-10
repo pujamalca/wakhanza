@@ -3,8 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
-import { fetchPatientSegment } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment, isFollowupSchedule } from '@/khanza/broadcastSchedule';
+import { fetchSegmentUntukJadwal, isFollowupSchedule, isPilihSchedule } from '@/khanza/broadcastSchedule';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { computeNextRunAt, type RepeatKind } from '@/core/schedule';
 import { BroadcastSchedule, logAudit } from '@/models';
@@ -86,6 +85,8 @@ export async function createScheduleAction(_prev: { error?: string }, formData: 
     kec: formData.getAll('kec').map(String),
     pj: formData.getAll('pj').map(String),
     cari: String(formData.get('cari') ?? ''),
+    mode: formData.getAll('mode').map(String),
+    rm: formData.getAll('rm').map(String),
   };
   const filterConfig = parseScheduleFilters(raw);
 
@@ -98,9 +99,20 @@ export async function createScheduleAction(_prev: { error?: string }, formData: 
   // H+N kebetulan jatuh di hari sepi) dan sama sekali bukan tanda filternya
   // keliru. Menolak simpan di situ akan membuat jadwal yang benar mustahil
   // dibuat pada hari yang salah.
-  const preview = await fetchPatientSegment(scheduleFiltersToSegment(filterConfig));
+  const preview = await fetchSegmentUntukJadwal(filterConfig);
   if (preview.length === 0 && !isFollowupSchedule(filterConfig)) {
-    return { error: 'Tidak ada pasien yang cocok dengan filter ini saat ini -- periksa kembali filter sebelum menyimpan jadwal.' };
+    return {
+      error: isPilihSchedule(filterConfig)
+        ? 'Tidak satu pun no. RM yang dicentang punya riwayat kunjungan di Khanza -- jadwal tidak disimpan.'
+        : 'Tidak ada pasien yang cocok dengan filter ini saat ini -- periksa kembali filter sebelum menyimpan jadwal.',
+    };
+  }
+  // Mode pilih yang tidak mencentang siapa pun tidak akan pernah mengirim apa
+  // pun, dan bentuk kegagalannya tak terlihat: jadwalnya tersimpan, tampil
+  // "Aktif", lalu diam selamanya. Ditolak di sini, bukan dibiarkan lolos --
+  // pagar yang sama dipasang pada template bermode `tujuan` tanpa tujuan aktif.
+  if (filterConfig.mode === 'pilih' && !isPilihSchedule(filterConfig)) {
+    return { error: 'Mode "Hanya yang dicentang" dipilih tapi belum ada pasien yang dicentang -- jadwal tidak akan mengirim apa pun.' };
   }
 
   const schedule = await BroadcastSchedule.create({

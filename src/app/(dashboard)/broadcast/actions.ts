@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
-import { fetchPatientSegment } from '@/khanza/pasienSegment';
+import { fetchPatientSegment, fetchPatientsByRm } from '@/khanza/pasienSegment';
+import { bacaModePenerima, bacaPilihanRm } from '@/core/pilihanPasien';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
@@ -43,20 +44,40 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
     cari: String(formData.get('cari') ?? ''),
   };
   const filters = parseFilters(raw);
-  if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo) {
-    return { error: 'Tanggal mulai tidak boleh setelah tanggal akhir.' };
-  }
-  // fetchPatientSegment mengembalikan larik kosong untuk cakupan ini, jadi
-  // pesannya akan jatuh ke "tidak ada pasien yang cocok" -- benar hasilnya,
-  // tapi menyesatkan sebabnya: filternya bukan terlalu sempit, melainkan tidak
-  // ada sama sekali.
-  if (segmentScope(filters) === 'tanpa-batas') {
-    return { error: PESAN_TANPA_BATAS };
-  }
 
-  const recipients = await fetchPatientSegment(filters);
-  if (recipients.length === 0) {
-    return { error: 'Tidak ada pasien yang cocok dengan filter ini -- tidak ada yang dikirim.' };
+  // Mode penerima diuraikan lewat fungsi core yang SAMA dipakai halaman untuk
+  // pratinjau -- kalau keduanya menafsirkan sendiri, staf melihat satu daftar
+  // dan pasien lain yang menerima pesannya.
+  const mode = bacaModePenerima(formData.getAll('mode').map(String));
+  const pilihan = bacaPilihanRm(formData.getAll('rm').map(String));
+
+  let recipients;
+  if (mode === 'pilih') {
+    if (pilihan.daftar.length === 0) {
+      return { error: 'Belum ada pasien yang dicentang -- centang dulu di tabel, atau kembali ke "Semua yang cocok dengan filter".' };
+    }
+    // No. RM dari form dipakai HANYA sebagai kunci pencarian; nama, nomor
+    // telepon, poli, dan kunjungan terakhirnya dibaca ulang dari `sik` di sini.
+    recipients = await fetchPatientsByRm(pilihan.daftar);
+    if (recipients.length === 0) {
+      return { error: 'Tidak satu pun no. RM yang dicentang punya riwayat kunjungan di Khanza -- tidak ada yang dikirim.' };
+    }
+  } else {
+    if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo) {
+      return { error: 'Tanggal mulai tidak boleh setelah tanggal akhir.' };
+    }
+    // fetchPatientSegment mengembalikan larik kosong untuk cakupan ini, jadi
+    // pesannya akan jatuh ke "tidak ada pasien yang cocok" -- benar hasilnya,
+    // tapi menyesatkan sebabnya: filternya bukan terlalu sempit, melainkan tidak
+    // ada sama sekali.
+    if (segmentScope(filters) === 'tanpa-batas') {
+      return { error: PESAN_TANPA_BATAS };
+    }
+
+    recipients = await fetchPatientSegment(filters);
+    if (recipients.length === 0) {
+      return { error: 'Tidak ada pasien yang cocok dengan filter ini -- tidak ada yang dikirim.' };
+    }
   }
 
   const maxRecipients = await getSettingNumber('broadcast.max_recipients', 500);
@@ -94,17 +115,26 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
 
   const campaign = await BroadcastCampaign.create({
     createdBy: session!.user.username,
-    filterJson: JSON.stringify({
-      // null = tanpa batas waktu. Jejak audit harus bisa membedakan itu dari
-      // jendela tanggal tertentu -- keduanya menghasilkan segmen yang sangat
-      // berbeda dari filter yang sama persis selebihnya.
-      dateFrom: filters.dateFrom ? formatSqlDate(filters.dateFrom) : null,
-      dateTo: filters.dateTo ? formatSqlDate(filters.dateTo) : null,
-      kdKab: filters.kdKab,
-      kdKec: filters.kdKec,
-      kdPj: filters.kdPj,
-      cari: filters.cari,
-    }),
+    // Jejak auditnya WAJIB menyatakan cara penerimanya ditentukan, bukan cuma
+    // hasilnya. Merekam filter yang tidak dipakai pada kiriman bercentang akan
+    // membuat baris kampanye yang mengaku disaring rentang tanggal padahal
+    // tidak -- dan broadcast_campaign insert-only, jadi catatan yang terlanjur
+    // keliru tidak bisa dikoreksi belakangan.
+    filterJson: JSON.stringify(
+      mode === 'pilih'
+        ? { mode: 'pilih', noRkmMedis: recipients.map((r) => r.no_rkm_medis) }
+        : {
+            // null = tanpa batas waktu. Jejak audit harus bisa membedakan itu dari
+            // jendela tanggal tertentu -- keduanya menghasilkan segmen yang sangat
+            // berbeda dari filter yang sama persis selebihnya.
+            dateFrom: filters.dateFrom ? formatSqlDate(filters.dateFrom) : null,
+            dateTo: filters.dateTo ? formatSqlDate(filters.dateTo) : null,
+            kdKab: filters.kdKab,
+            kdKec: filters.kdKec,
+            kdPj: filters.kdPj,
+            cari: filters.cari,
+          },
+    ),
     messageBody,
     mediaPath: media?.path ?? null,
     mediaMime: media?.mime ?? null,
@@ -129,11 +159,14 @@ export async function sendBroadcastAction(_prev: { error?: string }, formData: F
     );
   }
 
+  const asal = mode === 'pilih' ? 'dicentang' : 'filter';
   await logAudit(
     session!.user.username,
     'broadcast_send',
     String(campaign.id),
-    media ? `${recipients.length} penerima, lampiran ${media.name}` : `${recipients.length} penerima`,
+    media
+      ? `${recipients.length} penerima (${asal}), lampiran ${media.name}`
+      : `${recipients.length} penerima (${asal})`,
   );
   revalidatePath('/broadcast');
   redirect(`/broadcast?sent=${campaign.id}`);

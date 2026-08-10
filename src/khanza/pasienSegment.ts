@@ -215,6 +215,51 @@ function buildAllTimeSql(filters: PatientSegmentFilters, cariNoRkmMedis: string 
   return { sql, replacements };
 }
 
+/**
+ * BENTUK 3 -- daftar pilihan: berangkat dari `reg_periksa` lewat indeks
+ * `no_rkm_medis`, tanpa tanggal dan tanpa satu pun filter lain.
+ *
+ * Dipakai saat staf mencentang pasien satu per satu (core/pilihanPasien.ts).
+ * Daftar itu MENGGANTIKAN segmen, jadi tidak ada rentang tanggal yang bisa
+ * membuang pasien yang dicentang sendiri -- lihat alasannya di modul itu.
+ *
+ * Ini juga yang menegakkan aturan "hasil pratinjau tidak pernah jadi sumber
+ * kebenaran": klien menyerahkan no. RM saja, lalu nama, nomor telepon, poli,
+ * dan kunjungan terakhirnya dibaca ULANG dari `sik` di sini. Tidak satu pun
+ * data pasien datang dari form.
+ *
+ * `MAX(r.no_rawat)` = kunjungan TERBARU pasien, seumur riwayatnya -- berbeda
+ * dari bentuk berjendela yang mengambil terbaru DI DALAM rentang. Itu yang
+ * benar di sini: tanpa rentang, "terbaru" tidak punya arti lain. Konsekuensinya
+ * `{tanggal_kunjungan}` pada mode ini berarti kunjungan terakhir sungguhan.
+ */
+function buildPilihRmSql(noRkmMedis: string[]) {
+  const sql = `${SELECT_DAN_JOIN}
+      SELECT r.no_rkm_medis, MAX(r.no_rawat) AS no_rawat
+      FROM reg_periksa r
+      WHERE r.no_rkm_medis IN (:rm)
+      GROUP BY r.no_rkm_medis
+    ${joinEkor('')}
+  `;
+  return { sql, replacements: { rm: noRkmMedis } };
+}
+
+/**
+ * Pasien yang BELUM PERNAH berkunjung tidak muncul, dan itu disengaja: seluruh
+ * variabel broadcast ({tanggal_kunjungan}, {cara_bayar}) berasal dari sebuah
+ * kunjungan, dan `checkPrivacy` memeriksa `kd_poli` kunjungan itu. Tanpa satu
+ * pun kunjungan, tidak ada yang bisa diperiksa maupun dirender. Praktisnya
+ * tidak menggigit -- no. RM yang dicentang selalu berasal dari tabel pratinjau,
+ * yang isinya memang hasil join ke `reg_periksa`.
+ */
+export async function fetchPatientsByRm(noRkmMedis: string[]): Promise<PatientSegmentRow[]> {
+  // `IN ()` kosong adalah galat sintaks di MariaDB, bukan "nol hasil" -- jadi
+  // dijaga di sini, bukan diserahkan ke database.
+  if (noRkmMedis.length === 0) return [];
+  const { sql, replacements } = buildPilihRmSql(noRkmMedis);
+  return sikSelect<PatientSegmentRow>(sql, replacements);
+}
+
 const SQL_CARI_NO_RAWAT = 'SELECT no_rkm_medis FROM reg_periksa WHERE no_rawat = :cariExact LIMIT 1';
 
 /**
@@ -357,4 +402,19 @@ registerPlanCheck({
   name: 'BROADCAST_CARI_RAWAT',
   sql: SQL_CARI_NO_RAWAT,
   replacements: { cariExact: '2026/01/01/000001' },
+});
+
+/**
+ * TANPA izin pindai penuh, dan itu bukan keberuntungan: `no_rkm_medis` adalah
+ * indeks pada `reg_periksa` (indeks yang sama dipakai bentuk semua-waktu untuk
+ * masuk dari sisi `pasien`), jadi daftar pilihan berapa pun panjangnya tetap
+ * `range`/`ref` -- tidak pernah memindai tabel yang tumbuh satu baris per
+ * kunjungan. Nilai contohnya sengaja no. RM yang tidak ada di database mana pun;
+ * baris EXPLAIN ber-`table = NULL` yang lahir dari situ sudah ditangani
+ * verify-plans sebagai KEBALIKAN dari pemindaian penuh.
+ */
+registerPlanCheck({
+  name: 'BROADCAST_PILIH_RM',
+  sql: buildPilihRmSql(['000001', '000002']).sql,
+  replacements: buildPilihRmSql(['000001', '000002']).replacements,
 });

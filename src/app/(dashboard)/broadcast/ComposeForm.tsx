@@ -54,11 +54,14 @@ export function ComposeForm({
   reachable,
   uniqueCodeFooter,
   templates,
+  modePilih = false,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
   total: number;
   reachable: number;
+  /** True bila penerimanya daftar centang, bukan segmen hasil filter. */
+  modePilih?: boolean;
   /** Contoh baris kode unik yang ditambahkan otomatis; null bila fitur dimatikan. */
   uniqueCodeFooter: string | null;
   /** Template broadcast tersimpan yang aktif (dikelola di /template). */
@@ -86,7 +89,8 @@ export function ComposeForm({
       className={`mt-4 space-y-2 ${cardClassName}`}
       onSubmit={(e) => {
         const ok = window.confirm(
-          `Kirim pesan ini ke ${total} pasien (${reachable} akan benar-benar menerima -- sisanya tanpa nomor valid atau sudah berhenti)?` +
+          `Kirim pesan ini ke ${total} pasien ${modePilih ? 'yang dicentang' : 'yang cocok dengan filter'}` +
+            ` (${reachable} akan benar-benar menerima -- sisanya tanpa nomor valid atau sudah berhenti)?` +
             (lampiran ? `\n\nLampiran ikut terkirim: ${lampiran.name} (${formatUkuran(lampiran.size)}).` : ''),
         );
         if (!ok) e.preventDefault();

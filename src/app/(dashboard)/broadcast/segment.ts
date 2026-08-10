@@ -18,7 +18,7 @@ export interface SegmentSummary {
   preview: SegmentPreviewRow[];
 }
 
-const PREVIEW_LIMIT = 30;
+export const PREVIEW_LIMIT = 30;
 
 /**
  * Sama seperti scripts/poll-dryrun.ts's previewPhone -- baca saja lewat
@@ -27,7 +27,16 @@ const PREVIEW_LIMIT = 30;
  * enqueue di actions.ts, bukan di sini). Dibatch, bukan per-baris, karena
  * bisa sampai ribuan baris dalam satu pratinjau.
  */
-export async function summarizeSegment(rows: PatientSegmentRow[]): Promise<SegmentSummary> {
+export async function summarizeSegment(
+  rows: PatientSegmentRow[],
+  /**
+   * Bisa dilonggarkan untuk mode "hanya yang dipilih": di sana tabelnya bukan
+   * cuplikan sebuah segmen melainkan DAFTAR PENERIMANYA, dan daftar penerima
+   * yang dipotong di 30 adalah daftar yang menyembunyikan orang ke-31 dari
+   * satu-satunya layar tempat ia bisa dibatalkan.
+   */
+  previewLimit: number = PREVIEW_LIMIT,
+): Promise<SegmentSummary> {
   const [contacts, sensitivePoli, sensitiveExam] = await Promise.all([
     rows.length > 0 ? PatientContact.findAll({ where: { noRkmMedis: rows.map((r) => r.no_rkm_medis) } }) : [],
     getSettingJson<string[]>('privacy.sensitive_poli_codes', []),
@@ -57,7 +66,7 @@ export async function summarizeSegment(rows: PatientSegmentRow[]): Promise<Segme
     if (!phoneE164) noContact++;
     else if (optedOutSet.has(phoneE164)) optedOut++;
     if (!privacy.safe) sensitive++;
-    if (preview.length < PREVIEW_LIMIT) preview.push({ row, phoneE164, safe: privacy.safe });
+    if (preview.length < previewLimit) preview.push({ row, phoneE164, safe: privacy.safe });
   });
 
   return { total: rows.length, noContact, optedOut, sensitive, reachable: rows.length - noContact - optedOut, preview };

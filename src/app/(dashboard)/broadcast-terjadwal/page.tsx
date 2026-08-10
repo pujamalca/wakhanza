@@ -1,14 +1,23 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment, isFollowupSchedule, DEFAULT_FOLLOWUP_OFFSET_DAYS, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
+import { fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
+import {
+  fetchSegmentUntukJadwal,
+  isFollowupSchedule,
+  isPilihSchedule,
+  DEFAULT_FOLLOWUP_OFFSET_DAYS,
+  type ScheduleFilterConfig,
+} from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
 import { broadcastVars } from '@/core/broadcastVars';
+import { MAX_PILIHAN_PASIEN, bacaPilihanRm } from '@/core/pilihanPasien';
 import { BroadcastSchedule, BroadcastTemplate } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { parseScheduleFilters, DATE_PRESETS, type RawFilterInput } from './filters';
 import { summarizeSegment } from '../broadcast/segment';
+import { PenerimaBar, KolomPilihHeader, SelPilih, PilihanTersembunyi } from '../broadcast/PilihPenerima';
+import { CariPasien, TombolSubmitBawaan } from '../broadcast/CariPasien';
 import { toggleScheduleAction, deleteScheduleAction } from './actions';
 import { ScheduleForm } from './ScheduleForm';
 import { WindowModeFields } from './WindowModeFields';
@@ -17,7 +26,6 @@ import {
   Card,
   cardClassName,
   Button,
-  Input,
   CheckboxList,
   Badge,
   EmptyState,
@@ -40,6 +48,9 @@ function toSet(value: string | string[] | undefined): Set<string> {
 
 const DAY_LABELS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
+/** Satu id, dirujuk checkbox & radio yang letaknya di luar <form> lewat atribut `form=`. */
+const FORM_FILTER = 'filter-jadwal';
+
 function describeRepeat(s: BroadcastSchedule): string {
   const time = s.timeOfDay;
   if (s.repeatKind === 'once') return s.runOnceAt ? `Sekali, ${s.runOnceAt.toLocaleString('id-ID')}` : 'Sekali';
@@ -60,6 +71,10 @@ function describeWindow(s: BroadcastSchedule): string {
   } catch {
     return '-';
   }
+  // Daftar pilihan diperiksa DULU: ia menggantikan jendela, jadi menyebut
+  // "Jendela 30 hari" untuk jadwal bercentang adalah keterangan yang salah
+  // pada satu-satunya kolom yang menjelaskan siapa penerimanya.
+  if (isPilihSchedule(config)) return `Daftar pilihan, ${config.noRkmMedis?.length ?? 0} pasien`;
   return isFollowupSchedule(config)
     ? `Tindak lanjut, H+${config.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS}`
     : `Jendela ${config.lookbackDays} hari`;
@@ -77,15 +92,23 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
 
   const p = hitungPaginasi(bacaHalaman(sp.page), await BroadcastSchedule.count(), UKURAN_HALAMAN.konfigurasi);
 
+  const modePilih = isPilihSchedule(filterConfig);
+  const pilihan = bacaPilihanRm(sp.rm);
+  const terpilih = new Set(pilihan.daftar);
+  const followup = isFollowupSchedule(filterConfig);
+
   const [schedules, regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
     BroadcastSchedule.findAll({ order: [['id', 'DESC']], limit: p.limit, offset: p.offset }),
     fetchRegionOptions(),
     fetchPaymentOptions(),
-    fetchPatientSegment(scheduleFiltersToSegment(filterConfig)),
+    // Pintu yang SAMA dipakai worker saat jadwalnya jatuh tempo -- pratinjau
+    // yang bercabang sendiri adalah pratinjau yang cepat atau lambat
+    // menampilkan penerima yang berbeda dari yang benar-benar dikirimi.
+    fetchSegmentUntukJadwal(filterConfig),
     getHospitalIdentity(),
     BroadcastTemplate.findAll({ where: { isActive: true }, order: [['name', 'ASC']] }),
   ]);
-  const summary = await summarizeSegment(recipients);
+  const summary = await summarizeSegment(recipients, modePilih ? MAX_PILIHAN_PASIEN : undefined);
 
   const firstPreview = summary.preview[0];
   // broadcastVars() yang SAMA dipakai runDueBroadcastSchedules() di worker --
@@ -190,7 +213,30 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
 
       <h2 className="mb-2 font-medium">Buat jadwal baru</h2>
 
-      <form method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
+      <form id={FORM_FILTER} method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
+        {/* WAJIB paling awal: tanpa ini, Enter di kotak cari mengaktifkan tombol
+            preset di dalam WindowModeFields dan menimpa jendela lookback staf --
+            yang kemudian ikut TERSIMPAN ke filter_json. Lihat CariPasien.tsx. */}
+        <TombolSubmitBawaan />
+
+        {/* Centang yang tidak sedang tampil di tabel dititipkan di sini supaya
+            bertahan saat filter diganti; yang tampil sengaja dikecualikan --
+            lihat PilihanTersembunyi. */}
+        <PilihanTersembunyi daftar={pilihan.daftar} tampil={new Set(summary.preview.map((s) => s.row.no_rkm_medis))} />
+
+        {/* Kedua kotak jendela TETAP dirender saat mode pilih aktif, bukan
+            disembunyikan: nilainya ikut terkirim tiap kali Terapkan ditekan,
+            jadi menghilangkannya membuat pengaturan jendela staf lenyap begitu
+            ia mencoba mode pilih lalu kembali. Yang ditambahkan cuma
+            keterangan bahwa keduanya sedang tidak dipakai. */}
+        {modePilih && (
+          <p className="rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
+            Penerimanya sedang daftar centang, jadi kedua pilihan jendela di bawah <strong>tidak dipakai</strong> — daftar itu
+            menggantikan jendela tanggal, bukan menyaringnya. Kembali ke &ldquo;Semua yang cocok dengan filter&rdquo; untuk
+            memakainya lagi.
+          </p>
+        )}
+
         <WindowModeFields
           presets={Object.entries(DATE_PRESETS).map(([key, preset]) => ({ key, label: preset.label }))}
           defaultMode={filterConfig.windowMode ?? 'rolling'}
@@ -198,12 +244,9 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
           defaultOffset={filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS}
         />
 
-        <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
-            Cari nama, no. RM (tabel pasien), atau no. pendaftaran (tabel reg_periksa) -- kosong = semua
-          </p>
-          <Input name="cari" defaultValue={filterConfig.cari ?? ''} placeholder="mis. Budi, TESTWA00001..." className="w-full sm:w-1/2" fieldSize="sm" />
-        </div>
+        {/* Kotak cari pasien SENGAJA tidak di sini melainkan tepat di atas
+            tabel -- lihat CariPasien.tsx. Ia tetap milik form ini lewat
+            atribut form=, jadi seluruh saringan tetap berangkat sekali jalan. */}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -228,23 +271,45 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
         </Button>
       </form>
 
+      <PenerimaBar
+        formId={FORM_FILTER}
+        basePath="/broadcast-terjadwal"
+        params={{ ...sp }}
+        mode={modePilih ? 'pilih' : 'semua'}
+        jumlahCocok={modePilih ? null : summary.total}
+        dicentang={pilihan.daftar.length}
+        ditemukan={modePilih ? summary.total : null}
+        terpotong={bacaPilihanRm(sp.rm).terpotong}
+      />
+
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Stat label="Cocok saat ini" value={summary.total} />
+        <Stat label={modePilih ? 'Dipilih' : 'Cocok saat ini'} value={summary.total} />
         <Stat label="Bisa dihubungi" value={summary.reachable} />
         <Stat label="Tanpa nomor valid" value={summary.noContact} />
         <Stat label="Sudah berhenti" value={summary.optedOut} />
         <Stat label="Layanan sensitif" value={summary.sensitive} />
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        {isFollowupSchedule(filterConfig)
-          ? `Ini pasien yang berkunjung ${filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS} hari lalu -- yakni yang akan dikirimi SEANDAINYA jadwal jalan hari ini. Tiap hari isinya berbeda, dan tiap pasien hanya pernah masuk sekali.`
-          : 'Angka ini pratinjau HARI INI -- jumlah sesungguhnya saat jadwal jalan bisa berbeda karena jendela tanggal dihitung ulang.'}
+        {modePilih
+          ? 'Daftar tetap: pasien inilah yang dikirimi SETIAP kali jadwal jalan, tanpa dihitung ulang dari tanggal kunjungan. Yang berubah tiap kali cuma data yang dibaca ulang dari Khanza (nama, nomor, kunjungan terakhir).'
+          : followup
+            ? `Ini pasien yang berkunjung ${filterConfig.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS} hari lalu -- yakni yang akan dikirimi SEANDAINYA jadwal jalan hari ini. Tiap hari isinya berbeda, dan tiap pasien hanya pernah masuk sekali.`
+            : 'Angka ini pratinjau HARI INI -- jumlah sesungguhnya saat jadwal jalan bisa berbeda karena jendela tanggal dihitung ulang.'}
       </p>
+
+      <CariPasien
+        formId={FORM_FILTER}
+        basePath="/broadcast-terjadwal"
+        params={{ ...sp }}
+        nilai={filterConfig.cari ?? ''}
+        nonaktif={modePilih}
+      />
 
       <div className={tableWrapperClass}>
         <table className="w-full text-sm">
           <thead className={theadClass}>
             <tr>
+              <KolomPilihHeader />
               <th className={cellClass}>No. RM</th>
               <th className={cellClass}>Nama</th>
               <th className={cellClass}>Wilayah</th>
@@ -256,6 +321,12 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
           <tbody>
             {summary.preview.map(({ row, phoneE164, safe }) => (
               <tr key={row.no_rkm_medis} className={rowClass}>
+                <SelPilih
+                  formId={FORM_FILTER}
+                  noRkmMedis={row.no_rkm_medis}
+                  nama={row.nm_pasien}
+                  terpilih={terpilih.has(row.no_rkm_medis)}
+                />
                 <td className={`${cellClass} font-mono text-xs`}>{row.no_rkm_medis}</td>
                 <td className={cellClass}>{row.nm_pasien ?? '-'}</td>
                 <td className={`${cellClass} text-xs`}>{[row.nm_kec, row.nm_kab].filter(Boolean).join(', ') || '-'}</td>
@@ -273,14 +344,24 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
             ))}
             {summary.preview.length === 0 && (
               <tr>
-                <td colSpan={6}>
-                  <EmptyState>Tidak ada pasien yang cocok dengan filter ini.</EmptyState>
+                <td colSpan={7}>
+                  <EmptyState>
+                    {modePilih
+                      ? 'Belum ada pasien yang dicentang. Kembali ke "Semua yang cocok dengan filter" untuk memilihnya dari tabel.'
+                      : 'Tidak ada pasien yang cocok dengan filter ini.'}
+                  </EmptyState>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      {summary.total > summary.preview.length && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Menampilkan {summary.preview.length} dari {summary.total} pasien &mdash; hanya baris yang tampil di sini yang bisa
+          dicentang. Pakai kotak cari atau persempit filter untuk menjangkau yang lain; centang yang sudah ada tidak hilang.
+        </p>
+      )}
 
       <ScheduleForm
         hiddenFilters={{
@@ -291,11 +372,18 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
           kec: [...selectedKec],
           pj: [...selectedPj],
           cari: filterConfig.cari ? [filterConfig.cari] : [],
+          // Keduanya WAJIB ikut: createScheduleAction menyusun ulang
+          // filter_json dari FormData satu per satu, jadi field yang lupa
+          // dititipkan akan benar di pratinjau lalu diam-diam hilang saat
+          // jadwalnya disimpan.
+          mode: [modePilih ? 'pilih' : 'semua'],
+          rm: pilihan.daftar,
         }}
         sampleVars={sampleVars}
         total={summary.total}
         uniqueCodeFooter={uniqueCodeFooter}
-        isFollowup={isFollowupSchedule(filterConfig)}
+        isFollowup={followup}
+        isPilih={modePilih}
         templates={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
       />
     </div>

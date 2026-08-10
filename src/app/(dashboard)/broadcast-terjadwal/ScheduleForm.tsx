@@ -17,6 +17,7 @@ export function ScheduleForm({
   total,
   uniqueCodeFooter,
   isFollowup,
+  isPilih,
   templates,
 }: {
   hiddenFilters: Record<string, string[]>;
@@ -26,6 +27,8 @@ export function ScheduleForm({
   uniqueCodeFooter: string | null;
   /** Mode jendela terpilih di filter di atas -- menentukan peringatan pengulangan di bawah. */
   isFollowup: boolean;
+  /** Penerimanya daftar centang tetap, bukan segmen hasil filter. */
+  isPilih: boolean;
   /** Template broadcast tersimpan yang aktif (dikelola di /template). */
   templates: BroadcastTemplateOption[];
 }) {
@@ -183,7 +186,19 @@ export function ScheduleForm({
           Pasien yang sama tetap masuk kriteria selama masih di dalam jendela,
           jadi ia menerima pesan LAGI tiap kali jadwal jalan -- jendela 30 hari
           + harian berarti 30 pesan ke orang yang sama. */}
-      {!isFollowup && repeatKind !== 'once' && (
+      {/* Peringatan pengulangan punya DUA bentuk, dan menyamakannya menyesatkan:
+          pada jendela berjalan jalan keluarnya adalah mode tindak lanjut,
+          sementara pada daftar centang mode itu justru tidak berlaku sama
+          sekali -- menyarankannya di sana menyuruh staf menekan pilihan yang
+          diabaikan. */}
+      {isPilih && repeatKind !== 'once' && (
+        <div className="rounded-md border border-amber-600/40 bg-amber-50 p-2 text-xs dark:border-amber-500/40 dark:bg-amber-950">
+          Penerimanya <span className="font-medium">daftar centang tetap</span> ({total} pasien), dan jadwal ini berulang. Orang
+          yang sama akan menerima pesan <span className="font-medium">setiap kali</span> jadwal jalan &mdash; tidak ada jendela
+          tanggal yang bisa mengeluarkan mereka dengan sendirinya. Isi &ldquo;Berhenti otomatis setelah tanggal&rdquo; di bawah.
+        </div>
+      )}
+      {!isPilih && !isFollowup && repeatKind !== 'once' && (
         <div className="rounded-md border border-amber-600/40 bg-amber-50 p-2 text-xs dark:border-amber-500/40 dark:bg-amber-950">
           Filter di atas memakai <span className="font-medium">jendela berjalan</span>, dan jadwal ini berulang. Pasien yang sama
           akan dikirimi <span className="font-medium">setiap kali</span>{' '}

@@ -3,7 +3,8 @@ import {
   DEFAULT_FOLLOWUP_OFFSET_DAYS,
   type ScheduleWindowMode,
 } from '@/core/schedule';
-import type { PatientSegmentFilters } from './pasienSegment';
+import type { ModePenerima } from '@/core/pilihanPasien';
+import { fetchPatientSegment, fetchPatientsByRm, type PatientSegmentFilters, type PatientSegmentRow } from './pasienSegment';
 
 export { DEFAULT_FOLLOWUP_OFFSET_DAYS };
 export type { ScheduleWindowMode };
@@ -27,10 +28,40 @@ export interface ScheduleFilterConfig {
   kdKec?: string[];
   kdPj?: string[];
   cari?: string;
+  /**
+   * 'pilih' = penerimanya daftar no. RM tetap di bawah, bukan segmen hasil
+   * filter. Absen pada seluruh baris yang dibuat sebelum fitur ini ada ->
+   * dibaca sebagai 'semua', jadi jadwal lama berperilaku persis seperti dulu.
+   */
+  mode?: ModePenerima;
+  noRkmMedis?: string[];
 }
 
+/**
+ * Daftar pilihan MENGGANTIKAN jendela tanggal, tidak menyaringnya -- jadi mode
+ * ini dan mode tindak lanjut saling meniadakan, dan itu ditegakkan di
+ * `isFollowupSchedule` di bawah alih-alih diingat oleh tiap pemanggil.
+ */
+export function isPilihSchedule(config: ScheduleFilterConfig): boolean {
+  return config.mode === 'pilih' && (config.noRkmMedis?.length ?? 0) > 0;
+}
+
+/**
+ * SENGAJA false saat modenya `pilih`, dan itu bukan kerapian melainkan
+ * kebenaran: mode tindak lanjut berarti "N hari sesudah SEBUAH KUNJUNGAN", dan
+ * kunci idempotennya berkunci pada `no_rawat` supaya satu kunjungan hanya
+ * pernah memicu satu pesan selamanya. Pada daftar pilihan tidak ada kunjungan
+ * yang memicu apa pun -- yang memicu adalah jadwalnya -- dan `no_rawat` di sana
+ * cuma kunjungan TERAKHIR pasien, yang berubah setiap kali ia datang lagi.
+ * Membiarkan keduanya menyala berarti pasien yang dicentang menerima pesan
+ * tambahan setiap kali ia berobat, tanpa satu pun galat.
+ *
+ * Ditegakkan di sini, bukan di runner, karena jawabannya dibutuhkan di empat
+ * tempat (pratinjau halaman, pemeriksaan simpan, keterangan tabel, eksekusi
+ * worker) -- dan yang lupa memeriksanya tidak mendapat galat apa pun.
+ */
 export function isFollowupSchedule(config: ScheduleFilterConfig): boolean {
-  return config.windowMode === 'followup';
+  return config.windowMode === 'followup' && !isPilihSchedule(config);
 }
 
 /** Dipakai baik oleh dashboard (pratinjau saat menyusun jadwal) maupun worker (eksekusi sungguhan) supaya keduanya konsisten. */
@@ -44,4 +75,17 @@ export function scheduleFiltersToSegment(config: ScheduleFilterConfig): PatientS
     kdPj: config.kdPj,
     cari: config.cari,
   };
+}
+
+/**
+ * SATU pintu menuju daftar penerima sebuah jadwal, dipakai ketiga pemanggilnya:
+ * pratinjau halaman, pemeriksaan kewarasan saat simpan, dan worker saat jadwal
+ * jatuh tempo. Percabangan yang disalin ke tiga tempat adalah percabangan yang
+ * cepat atau lambat berbeda di salah satunya -- dan yang paling mungkin
+ * tertinggal adalah PRATINJAUNYA, yaitu satu-satunya dari ketiganya yang tidak
+ * mengirim apa pun sehingga kesalahannya tidak bergejala.
+ */
+export async function fetchSegmentUntukJadwal(config: ScheduleFilterConfig): Promise<PatientSegmentRow[]> {
+  if (isPilihSchedule(config)) return fetchPatientsByRm(config.noRkmMedis ?? []);
+  return fetchPatientSegment(scheduleFiltersToSegment(config));
 }

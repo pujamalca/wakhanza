@@ -1,4 +1,5 @@
 import { DEFAULT_FOLLOWUP_OFFSET_DAYS, type ScheduleFilterConfig, type ScheduleWindowMode } from '@/khanza/broadcastSchedule';
+import { bacaModePenerima, bacaPilihanRm } from '@/core/pilihanPasien';
 import { DATE_PRESETS } from '../broadcast/filters';
 
 export { DATE_PRESETS };
@@ -12,6 +13,8 @@ export interface RawFilterInput {
   kec?: string | string[];
   pj?: string | string[];
   cari?: string | string[];
+  mode?: string | string[];
+  rm?: string | string[];
 }
 
 function single(value: string | string[] | undefined): string | undefined {
@@ -44,6 +47,13 @@ export function parseScheduleFilters(input: RawFilterInput): ScheduleFilterConfi
   // dari lookbackDays yang harus > 0 karena jendela nol hari tidak bermakna.
   if (Number.isFinite(rawOffset) && rawOffset >= 0) offsetDays = rawOffset;
 
+  // Daftar centang disimpan APA ADANYA ke filter_json, bukan cuma saat mode
+  // `pilih` aktif: staf yang mengumpulkan pasien lalu menyalakan modenya di
+  // langkah terakhir tidak boleh kehilangan centangnya karena satu radio.
+  // isPilihSchedule() yang memutuskan dipakai atau tidak.
+  const mode = bacaModePenerima(input.mode);
+  const noRkmMedis = bacaPilihanRm(input.rm).daftar;
+
   return {
     windowMode,
     lookbackDays,
@@ -52,5 +62,7 @@ export function parseScheduleFilters(input: RawFilterInput): ScheduleFilterConfi
     kdKec: toArray(input.kec),
     kdPj: toArray(input.pj),
     cari: single(input.cari)?.trim() || undefined,
+    mode,
+    noRkmMedis,
   };
 }

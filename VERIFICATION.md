@@ -2437,3 +2437,210 @@ benar, karena tidak ada satu pun kursor yang melampaui waktu berjalan.
 **Kebersihan.** Ketiga skrip `.tmp-*.mts` (periksa kursor, bukti pemasangan,
 periksa denyut) dihapus; `git status --short` tidak menyisakan satu pun.
 `wakhanza-web` tidak ikut di-restart -- perubahannya murni jalur worker.
+
+## Memilih pasien satu per satu (`core/pilihanPasien.ts`)
+
+### Cara bayar: SUDAH ADA, tidak ditambahkan
+
+Diperiksa lebih dulu supaya tidak membangun ulang yang sudah jalan. `CheckboxList name="pj"` ada di `/broadcast` maupun `/broadcast-terjadwal`, dan ia benar-benar menggigit di SQL pada KEDUA bentuk query (`innerFilter` bentuk berjendela, `kunjunganFilter` bentuk semua-waktu). Rencananya dijaga pemeriksaan tersendiri:
+
+```
+[ok] BROADCAST_SEGMENT_SEMUA_PJ r ref kd_pj  rows~1  (Using index)
+[ok] BROADCAST_SEGMENT_SEMUA_PJ p0 eq_ref PRIMARY  rows~1
+```
+
+### Query bentuk ketiga tidak memindai `reg_periksa`
+
+`npm run verify:plans`, baris baru:
+
+```
+[ok] BROADCAST_PILIH_RM   <derived2> (hasil subquery, sudah tersaring)  rows~2
+[ok] BROADCAST_PILIH_RM   p eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   lv eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   pj eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   kb eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   kc eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   kl eq_ref PRIMARY  rows~1
+[ok] BROADCAST_PILIH_RM   r range no_rkm_medis  rows~2  (Using index)
+```
+
+`range no_rkm_medis (Using index)` -- tidak ada izin pindai penuh yang diberikan, dan tidak dibutuhkan.
+
+### `fetchPatientsByRm` terhadap database produksi (baca-saja)
+
+Dijalankan atas `alca`. Tidak satu pun data pasien dicetak; yang dilaporkan cuma jumlah dan kecocokan himpunan.
+
+```
+segmen 120 hari      : 1000 pasien
+diminta              : 3 no. RM
+dikembalikan         : 3
+cocok persis         : true
+satu baris per pasien: true
+kolom lengkap        : true
+4 diminta -> ketemu  : 3  (selisih inilah yang diperingatkan di layar)
+daftar kosong        : 0 baris, tanpa query
+sik tetap read-only  : ya
+```
+
+Baris keempat dari bawah adalah yang membuktikan peringatan "dicentang vs ketemu" di `PenerimaBar` bukan hiasan: satu no. RM karangan ikut diminta dan memang tidak dikembalikan. Baris terakhir dijalankan di skrip yang sama -- `CREATE TEMPORARY TABLE` terhadap `sik` tetap ditolak.
+
+### Percabangan jadwal, termasuk yang paling mahal kalau salah
+
+```
+[ok] mode pilih terbaca dari FormData
+[ok] noRkmMedis tersimpan utuh
+[ok] penerima = daftar centang (4 dari 4)
+[ok] tidak ada penyusup di luar daftar
+[ok] pilih + followup -> followup DIMATIKAN
+[ok] pilih tanpa centang bukan jadwal pilih
+[ok] jadwal lama bukan mode pilih
+[ok] jadwal lama tetap lewat jendela (564 vs 564)
+```
+
+Dijalankan lewat `parseScheduleFilters()` dengan bentuk FormData yang PERSIS dikirim `ScheduleForm`, lalu `fetchSegmentUntukJadwal()` -- rantai yang sama dipakai worker. Dua baris terakhir yang membuktikan nol perubahan perilaku: konfigurasi tanpa field `mode` sama sekali (bentuk seluruh jadwal yang dibuat sebelum fitur ini ada) tetap melewati jendela tanggal dan mengembalikan jumlah yang sama persis dengan `fetchPatientSegment` langsung.
+
+### Gerbang
+
+```
+tsc --noEmit                 -> bersih
+eslint .                     -> bersih
+Test Suites: 41 passed, 41 total
+Tests:       694 passed, 694 total     (dari 680; 14 uji baru di pilihanPasien.test.ts)
+verify:db lolos.
+verify:plans lolos.
+next build -> Compiled successfully
+```
+
+Penanda baru benar-benar ada di build yang dilayani, bukan cuma di berkas sumber:
+
+```
+6  <- Hanya yang dicentang
+4  <- Kosongkan centang
+2  <- daftar centang tetap
+2  <- Daftar pilihan,
+2  <- menggantikan jendela tanggal
+```
+
+### Pemasangan: worker DIMULAI ULANG, dan kenapa kali ini tidak ditunda
+
+Preseden yang tercatat untuk perubahan yang menyentuh `broadcastScheduleRunner.ts` adalah TIDAK menyalakan ulang worker (`broadcast_schedule` berisi 0 baris, jadi kode lamanya tidak punya apa pun untuk dijalankan). Preseden itu **tidak berlaku di sini**, dan bedanya bukan selera: kode worker LAMA membaca `filter_json` lewat `scheduleFiltersToSegment()`, yang mengabaikan `noRkmMedis` sepenuhnya lalu mengirim ke SELURUH jendela. Staf mencentang tiga orang, ratusan yang menerima, tanpa satu pun galat. Kegagalan sebelumnya cuma variabel kosong; yang ini salah kirim massal.
+
+Keadaan sebelum operasi:
+
+```
+broadcast_schedule  : 0 baris, 0 aktif
+wa_session status   : ready | umur denyut: 2 detik
+```
+
+Prosedur tiga langkah yang terdokumentasi, dari PowerShell:
+
+```
+pm2 restart wakhanza-web                       -> online
+pm2 stop wakhanza-worker                       -> stopped
+Chromium pemegang sesi tersisa: 0
+pm2 start wakhanza-worker                      -> online
+SIAP  status=ready denyut=14s  (percobaan 1)
+```
+
+Tanpa kaskade: penghitung restart TIDAK naik (`wakhanza-web` 7, `wakhanza-worker` 10 -- sama seperti sebelum operasi), pid stabil, sesi `ready` pada percobaan polling pertama.
+
+Web dilayani instance PM2 sungguhnya di port 3100, dan gerbang autentikasinya tetap tegak:
+
+```
+/broadcast           -> HTTP 307  http://127.0.0.1:3100/login
+/broadcast-terjadwal -> HTTP 307  http://127.0.0.1:3100/login
+/ringkasan           -> HTTP 307  http://127.0.0.1:3100/login
+```
+
+### Yang TIDAK diverifikasi, dan sengaja dikatakan
+
+Perilaku sesudah login (checkbox yang bertahan lintas pencarian, radio mode, tombol Terapkan) **tidak diuji lewat peramban**. Membuktikannya menuntut akun admin berhak penuh pada sistem yang memegang data pasien, dan aturan proyek ini menempuhnya hanya bila memang tidak ada jalan lain. Di sini ada: aturan yang gagal DIAM (`pilihanTersembunyi`) dipindah ke fungsi murni dan dijaga lima uji, sementara sisa kabelnya (atribut `form=`) gagal berisik pada pemakaian pertama -- tidak ada di antaranya yang bisa salah tanpa terlihat. Tidak ada pesan WhatsApp yang dikirim selama verifikasi ini, dan tidak satu pun baris `broadcast_schedule` dibuat.
+
+## Kotak cari pasien DI ATAS TABEL, dan tombol submit bawaan yang wajib menyertainya
+
+Diverifikasi 10 Agustus 2026. Nol pesan WhatsApp dikirim, nol baris ditulis ke database mana pun, dan `sik` tidak disentuh selain lewat gerbang baca-saja yang sudah ada.
+
+### Perilaku Enter DIUKUR di Chromium, bukan dibaca dari spesifikasi
+
+Replika struktur kedua halaman (deretan tombol preset bernama, lalu kotak cari) dilayani di `127.0.0.1:3211` lalu dijalankan di Chromium bawaan proyek. Yang diketik `Budi`, yang ditekan `Enter`:
+
+```
+/sebelum  -> ?dateFrom=2026-01-01&preset=1m&cari=Budi
+             cari="Budi"  preset="1m" (rentang tanggal ditimpa)
+/sesudah  -> ?dateFrom=2026-01-01&cari=Budi
+             cari="Budi"  preset=TIDAK IKUT
+```
+
+`/sebelum` adalah bentuk yang berjalan di produksi sampai perubahan ini: `preset=1m` ikut terkirim tanpa seorang pun menekannya, dan `parseFilters` (`broadcast/filters.ts:80`) memberinya prioritas di atas `dateFrom`/`dateTo`. `parseScheduleFilters` (`broadcast-terjadwal/filters.ts:35`) melakukan hal yang sama terhadap `lookback`. `/sesudah` adalah bentuk dengan `TombolSubmitBawaan` sebagai anak pertama form.
+
+### `sr-only` benar-benar dirender di CSS hasil build
+
+Tombol bawaan harus DIRENDER supaya peramban memakainya; itu yang membedakannya dari `hidden`. Dari `.next/static/chunks/*.css` sesudah `npm run build`:
+
+```
+.sr-only{clip:rect(0, 0, 0, 0);white-space:nowrap;border-width:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}
+```
+
+Sama persis dengan gaya inline yang dipakai replika `/sesudah` di atas.
+
+### Uji `hrefTanpa`, dan buktinya MENGGIGIT
+
+```
+PASS src/core/hrefFilter.test.ts
+  hrefTanpa
+    v membuang kunci yang diminta, menahan sisanya
+    v bisa membuang beberapa kunci sekaligus
+    v larik dipertahankan sebagai kunci BERULANG
+    v undefined dilewati, larik kosong tidak meninggalkan kunci
+    v tanpa sisa parameter -> tanpa tanda tanya
+    v nilai disandikan, bukan disambung mentah
+    v membuang kunci yang tidak ada tidak mengubah apa pun
+Tests:       7 passed, 7 total
+```
+
+Aturan larik dirusak sengaja (`qs.append(kunci, nilai.join(','))`) lalu dipulihkan:
+
+```
+--- dirusak sengaja: larik digabung berkoma ---
+Tests:       2 failed, 5 passed, 7 total
+--- dipulihkan ---
+Tests:       7 passed, 7 total
+```
+
+### Gerbang
+
+```
+tsc --noEmit                 -> bersih
+eslint .                     -> bersih
+Test Suites: 42 passed, 42 total
+Tests:       701 passed, 701 total
+verify:db lolos.
+verify:plans lolos.
+npm run build                -> sukses
+```
+
+Penanda kalimat baru ada di build: `grep -rlF "Nama, no. RM, atau no. pendaftaran" .next/server` menemukan `src_0-z232q._.js`.
+
+### Pemasangan: web dimulai ulang, worker TIDAK -- dan kali ini itu yang benar
+
+Perubahan ini seluruhnya di `src/app/(dashboard)/**` plus `src/core/hrefFilter.ts`, yang tidak diimpor satu pun berkas worker. Berbeda dari perubahan pemilihan pasien sebelumnya, di sini tidak ada kode worker yang berubah, jadi menyalakannya ulang cuma menanggung risiko kaskade restart tanpa imbalan apa pun.
+
+```
+pm2 restart wakhanza-web  -> [PM2] [wakhanza-web](4) v
+wakhanza-web     online  uptime 4s   restart 9
+wakhanza-worker  online  uptime 25m  restart 10   (tidak disentuh)
+sesi worker: {"status":"ready","umur_detik":7}
+```
+
+Keempat halaman tetap dijaga gerbang autentikasi sesudah pemasangan:
+
+```
+/broadcast           : 307 -> http://127.0.0.1:3100/login
+/broadcast-terjadwal : 307 -> http://127.0.0.1:3100/login
+/nomor-bermasalah    : 307 -> http://127.0.0.1:3100/login
+/antrean             : 307 -> http://127.0.0.1:3100/login
+```
+
+### Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
+
+Tampilan sesudah login tidak diuji lewat peramban -- itu menuntut akun admin berhak penuh pada sistem yang memegang data pasien. Yang bisa gagal DIAM di perubahan ini cuma dua, dan keduanya sudah ditutup dengan bukti tersendiri: perilaku Enter (diukur di Chromium atas replika strukturnya) dan perakitan URL "hapus pencarian" (uji unit yang dibuktikan menggigit). Sisanya -- letak kotak di dalam JSX, atribut `form=`, `readOnly` pada mode centang -- gagal BERISIK pada pemakaian pertama atau memang terlihat langsung di layar.

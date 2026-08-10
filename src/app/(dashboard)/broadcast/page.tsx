@@ -1,19 +1,27 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { fetchPatientSegment, fetchRegionOptions, fetchPaymentOptions, SEGMENT_LIMIT } from '@/khanza/pasienSegment';
+import { fetchPatientSegment, fetchPatientsByRm, fetchRegionOptions, fetchPaymentOptions, SEGMENT_LIMIT } from '@/khanza/pasienSegment';
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
+import { bacaModePenerima, bacaPilihanRm, MAX_PILIHAN_PASIEN } from '@/core/pilihanPasien';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
 import { broadcastVars } from '@/core/broadcastVars';
 import { Outbox, BroadcastCampaign, BroadcastTemplate } from '@/models';
 import { parseFilters, DATE_PRESETS, PRESET_SEMUA_WAKTU, type RawFilterInput } from './filters';
 import { summarizeSegment } from './segment';
 import { ComposeForm } from './ComposeForm';
-import { PageHeader, Card, cardClassName, Button, Input, CheckboxList, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
+import { PenerimaBar, KolomPilihHeader, SelPilih, PilihanTersembunyi } from './PilihPenerima';
+import { CariPasien, TombolSubmitBawaan } from './CariPasien';
+import { PageHeader, Card, cardClassName, Button, CheckboxList, Badge, EmptyState, tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 
 interface SearchParams extends RawFilterInput {
   sent?: string;
+  mode?: string | string[];
+  rm?: string | string[];
 }
+
+/** Satu id, dirujuk checkbox & radio yang letaknya di luar <form> lewat atribut `form=`. */
+const FORM_FILTER = 'filter-broadcast';
 
 function toSet(value: string | string[] | undefined): Set<string> {
   if (!value) return new Set();
@@ -33,14 +41,26 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   const selectedKec = toSet(sp.kec);
   const selectedPj = toSet(sp.pj);
 
+  const mode = bacaModePenerima(sp.mode);
+  const pilihan = bacaPilihanRm(sp.rm);
+  const modePilih = mode === 'pilih';
+  const terpilih = new Set(pilihan.daftar);
+
   const [regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
     fetchRegionOptions(),
     fetchPaymentOptions(),
-    fetchPatientSegment(filters),
+    // Daftar pilihan MENGGANTIKAN segmen, tidak menyaringnya -- lihat
+    // core/pilihanPasien.ts. Konsekuensi yang disengaja: pada mode `pilih`,
+    // query segmen tidak dijalankan sama sekali, jadi filter tanggal/wilayah
+    // yang kebetulan masih terpasang tidak bisa diam-diam membuang pasien yang
+    // dicentang staf sendiri.
+    modePilih ? fetchPatientsByRm(pilihan.daftar) : fetchPatientSegment(filters),
     getHospitalIdentity(),
     BroadcastTemplate.findAll({ where: { isActive: true }, order: [['name', 'ASC']] }),
   ]);
-  const summary = await summarizeSegment(recipients);
+  // Pada mode `pilih` tabelnya bukan cuplikan melainkan DAFTAR PENERIMA, jadi
+  // batas 30 baris tidak berlaku: penerima ke-31 harus bisa dibatalkan.
+  const summary = await summarizeSegment(recipients, modePilih ? MAX_PILIHAN_PASIEN : undefined);
 
   let sentCampaign: { id: number; recipientCount: number; createdAt: Date; counts: Record<string, number> } | null = null;
   if (sp.sent) {
@@ -81,7 +101,16 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      <form method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
+      <form id={FORM_FILTER} method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
+        {/* WAJIB paling awal: tanpa ini, Enter di kotak cari mengaktifkan tombol
+            preset di bawah dan menimpa rentang tanggal staf. Lihat CariPasien.tsx. */}
+        <TombolSubmitBawaan />
+
+        {/* Centang yang tidak sedang tampil di tabel dititipkan di sini supaya
+            bertahan saat filter diganti; yang tampil sengaja dikecualikan --
+            lihat PilihanTersembunyi. */}
+        <PilihanTersembunyi daftar={pilihan.daftar} tampil={new Set(summary.preview.map((p) => p.row.no_rkm_medis))} />
+
         <div>
           <p className="mb-1 text-xs font-medium text-muted-foreground">Rentang kunjungan (opsional)</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -125,18 +154,9 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           </p>
         </div>
 
-        <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
-            Cari nama, no. RM (tabel pasien), atau no. pendaftaran (tabel reg_periksa) -- kosong = semua
-          </p>
-          <Input
-            name="cari"
-            defaultValue={filters.cari ?? ''}
-            placeholder="mis. Budi, TESTWA00001, atau 2026/07/31/000001..."
-            className="w-full sm:w-1/2"
-            fieldSize="sm"
-          />
-        </div>
+        {/* Kotak cari pasien SENGAJA tidak di sini melainkan tepat di atas
+            tabel -- lihat CariPasien.tsx. Ia tetap milik form ini lewat
+            atribut form=, jadi seluruh saringan tetap berangkat sekali jalan. */}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -164,27 +184,53 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
       {/* Rentang tanggal yang mati harus TERLIHAT mati. Kotak tanggal kosong
           gampang terbaca sebagai "belum diisi" alih-alih "sengaja tanpa batas",
           dan bedanya menentukan siapa saja yang masuk segmen. */}
-      {scope === 'tanpa-batas' && (
+      {/* Keduanya menjelaskan BENTUK query segmen, jadi tidak berlaku pada mode
+          pilih -- di sana query itu memang tidak dijalankan. Menampilkannya
+          tetap akan menyuruh staf membetulkan filter yang sedang tidak dipakai. */}
+      {!modePilih && scope === 'tanpa-batas' && (
         <div className="mb-4 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">{PESAN_TANPA_BATAS}</div>
       )}
-      {scope === 'semua-waktu' && (
+      {!modePilih && scope === 'semua-waktu' && (
         <p className="mb-4 text-xs text-muted-foreground">
           Tanpa batas rentang kunjungan &mdash; mencari di seluruh riwayat, disaring filter lain di atas.
         </p>
       )}
 
+      <PenerimaBar
+        formId={FORM_FILTER}
+        basePath="/broadcast"
+        // Disebar, bukan diteruskan apa adanya: interface tidak punya index
+        // signature implisit, sementara objek literal punya -- idiom yang sama
+        // sudah dipakai pemanggil hrefHalaman.
+        params={{ ...sp }}
+        mode={mode}
+        jumlahCocok={modePilih ? null : summary.total}
+        dicentang={pilihan.daftar.length}
+        ditemukan={modePilih ? summary.total : null}
+        terpotong={pilihan.terpotong}
+      />
+
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Stat label="Cocok" value={summary.total} />
+        <Stat label={modePilih ? 'Dipilih' : 'Cocok'} value={summary.total} />
         <Stat label="Bisa dihubungi" value={summary.reachable} />
         <Stat label="Tanpa nomor valid" value={summary.noContact} />
         <Stat label="Sudah berhenti" value={summary.optedOut} />
         <Stat label="Layanan sensitif" value={summary.sensitive} />
       </div>
 
+      <CariPasien
+        formId={FORM_FILTER}
+        basePath="/broadcast"
+        params={{ ...sp }}
+        nilai={filters.cari ?? ''}
+        nonaktif={modePilih}
+      />
+
       <div className={tableWrapperClass}>
         <table className="w-full text-sm">
           <thead className={theadClass}>
             <tr>
+              <KolomPilihHeader />
               <th className={cellClass}>No. RM</th>
               <th className={cellClass}>Nama</th>
               <th className={cellClass}>Wilayah</th>
@@ -196,6 +242,12 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           <tbody>
             {summary.preview.map(({ row, phoneE164, safe }) => (
               <tr key={row.no_rkm_medis} className={rowClass}>
+                <SelPilih
+                  formId={FORM_FILTER}
+                  noRkmMedis={row.no_rkm_medis}
+                  nama={row.nm_pasien}
+                  terpilih={terpilih.has(row.no_rkm_medis)}
+                />
                 <td className={`${cellClass} font-mono text-xs`}>{row.no_rkm_medis}</td>
                 <td className={cellClass}>{row.nm_pasien ?? '-'}</td>
                 <td className={`${cellClass} text-xs`}>{[row.nm_kec, row.nm_kab].filter(Boolean).join(', ') || '-'}</td>
@@ -213,8 +265,12 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
             ))}
             {summary.preview.length === 0 && (
               <tr>
-                <td colSpan={6}>
-                  <EmptyState>Tidak ada pasien yang cocok dengan filter ini.</EmptyState>
+                <td colSpan={7}>
+                  <EmptyState>
+                    {modePilih
+                      ? 'Belum ada pasien yang dicentang. Kembali ke "Semua yang cocok dengan filter" untuk memilihnya dari tabel.'
+                      : 'Tidak ada pasien yang cocok dengan filter ini.'}
+                  </EmptyState>
                 </td>
               </tr>
             )}
@@ -223,14 +279,16 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
       </div>
       {summary.total > summary.preview.length && (
         <p className="mt-1 text-xs text-muted-foreground">
-          Menampilkan {summary.preview.length} dari {summary.total} pasien cocok.
+          Menampilkan {summary.preview.length} dari {summary.total} pasien cocok &mdash; hanya baris yang tampil di sini yang
+          bisa dicentang. Pakai kotak cari atau persempit filter untuk menjangkau yang lain; centang yang sudah ada tidak
+          hilang.
         </p>
       )}
       {/* Angka "cocok" berhenti di batas query, jadi tepat pada angka itu ia
           berubah arti: bukan lagi jumlah yang cocok, melainkan jumlah yang
           sempat terbaca. Diam di sini membuat segmen yang terpotong terlihat
           persis seperti segmen yang utuh. */}
-      {summary.total >= SEGMENT_LIMIT && (
+      {!modePilih && summary.total >= SEGMENT_LIMIT && (
         <p className="mt-1 text-xs text-warning">
           Hasil dipotong di {SEGMENT_LIMIT} pasien pertama (kunjungan terbaru lebih dulu) &mdash; yang cocok kemungkinan
           lebih banyak. Persempit filter supaya jelas siapa saja yang dikirimi.
@@ -249,10 +307,16 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           kec: [...selectedKec],
           pj: [...selectedPj],
           cari: filters.cari ? [filters.cari] : [],
+          // Mode dan daftar centang ikut dikirim ke server action, yang
+          // MENJALANKAN ULANG query-nya sendiri dari keduanya -- baris pratinjau
+          // tidak pernah jadi sumber kebenaran siapa yang dikirimi.
+          mode: [mode],
+          rm: modePilih ? pilihan.daftar : [],
         }}
         sampleVars={sampleVars}
         total={summary.total}
         reachable={summary.reachable}
+        modePilih={modePilih}
         uniqueCodeFooter={uniqueCodeFooter}
         templates={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
       />

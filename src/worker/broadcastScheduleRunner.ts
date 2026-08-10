@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import { BroadcastSchedule, BroadcastCampaign, getSettingNumber, logAudit } from '@/models';
-import { fetchPatientSegment, type PatientSegmentRow } from '@/khanza/pasienSegment';
-import { scheduleFiltersToSegment, isFollowupSchedule, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
+import { type PatientSegmentRow } from '@/khanza/pasienSegment';
+import { fetchSegmentUntukJadwal, isFollowupSchedule, isPilihSchedule, type ScheduleFilterConfig } from '@/khanza/broadcastSchedule';
 import { getHospitalIdentity } from '@/khanza/common';
 import { loadBroadcastContext, enqueueMessage, saringKunciBaru } from './pipeline';
 import { broadcastVars } from '@/core/broadcastVars';
@@ -57,9 +57,13 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
   }
 
   const filterConfig: ScheduleFilterConfig = JSON.parse(schedule.filterJson);
+  // isFollowupSchedule() sendiri yang menegakkan bahwa daftar pilihan dan mode
+  // tindak lanjut saling meniadakan -- lihat alasannya di khanza/broadcastSchedule.ts.
+  // Percabangan itu TIDAK diulang di sini justru supaya tidak bisa menyimpang.
   const followup = isFollowupSchedule(filterConfig);
-  const segmentFilters = scheduleFiltersToSegment(filterConfig);
-  const matched = await fetchPatientSegment(segmentFilters);
+  // Pintu yang SAMA dipakai pratinjau dashboard: daftar centang menggantikan
+  // jendela tanggal, dan datanya tetap dibaca ulang dari `sik` tiap kali jalan.
+  const matched = await fetchSegmentUntukJadwal(filterConfig);
   const maxRecipients = await getSettingNumber('broadcast.max_recipients', 500);
 
   // Mode tindak lanjut: buang lebih dulu kunjungan yang PERNAH dikirimi oleh
@@ -133,7 +137,13 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
     }
 
     logger.info(
-      { scheduleId: schedule.id, name: schedule.name, campaignId: campaign.id, recipients: recipients.length, mode: followup ? 'followup' : 'rolling' },
+      {
+        scheduleId: schedule.id,
+        name: schedule.name,
+        campaignId: campaign.id,
+        recipients: recipients.length,
+        mode: isPilihSchedule(filterConfig) ? 'pilih' : followup ? 'followup' : 'rolling',
+      },
       'broadcast_schedule terkirim',
     );
     await logAudit(SCHEDULE_ACTOR, 'broadcast_schedule_run', String(schedule.id), `kampanye #${campaign.id}, ${recipients.length} penerima`);
