@@ -1255,6 +1255,16 @@ Dipasang di tiga titik, semuanya keadaan "tidak ada pesan yang bisa terkirim": w
 
 **Kunci baru wajib didaftarkan ke `EDITABLE_KEYS`** di `api/settings/route.ts` -- itu daftar-izin, jadi kunci yang tidak terdaftar tersimpan diam-diam tanpa efek.
 
+**Bot Telegram: bentuk URL-nya `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`, dan KEDUA ekornya wajib.** Komentar di `alert.ts` sudah lama menyebut "bisa diarahkan ke bot Telegram" tanpa pernah diuji, dan klaim itu kurang satu syarat. Diukur langsung terhadap `api.telegram.org`: URL bot telanjang menjawab **404** (ia bukan endpoint -- `getMe` berhasil atas URL yang sama hanya karena itu path lain, dan keberhasilan itulah yang menyesatkan: ia membuktikan TOKENNYA sah, bukan bahwa URL-nya bisa dikirimi), `/sendMessage` tanpa `chat_id` menjawab **400 `chat_id is empty`**. `chat_id` sengaja TIDAK ditambahkan ke payload: ia bagian dari TUJUAN, bukan isi peringatan, dan Telegram terbukti membaca parameter dari query string walau body-nya JSON (`chat_id` palsu di query -> `chat not found`, dua galat yang berbeda) sekaligus mengabaikan field asing kita (`kind`, `host`, `at`). Jadi bentuk generiknya tetap utuh -- nol cabang per-tujuan, nol paket baru.
+
+**Kegagalannya kini menyebut SEBABNYA di layar** (`core/alertError.ts`, murni + diuji). Sebelumnya tombol uji menjawab "Gagal terkirim. Periksa log worker untuk alasannya" sementara jawabannya -- `res.status` -- sudah dipegang `sendAlert()` satu baris sebelumnya, dan log worker adalah berkas yang staf tidak punya akses ke sana. Bukan kegagalan senyap, tapi kegagalan yang menyembunyikan jawabannya sendiri. Tiga hal yang menempel:
+
+- **`sendAlert()` mengembalikan `{ terkirim, alasan? }`, bukan fungsi kedua.** Dua jalur kirim pasti menyimpang, dan yang menyimpang di sini berarti tombol uji membuktikan jalur yang BUKAN dipakai worker saat gangguan sungguhan -- persis yang sudah dihindari dengan menguji nilai TERSIMPAN alih-alih isi kotak yang sedang diketik. Ketiga pemanggil di worker mengabaikan nilai baliknya (pada jam 01:25 tidak ada yang membaca apa pun -- itu justru alasan jalur ini ada).
+- **Cuplikan jawaban penerima ikut, karena ia sering LEBIH menjawab daripada kalimat kita**: `chat not found` membedakan "chat_id salah" dari "chat_id kosong", pembedaan yang mustahil diturunkan dari status 400 saja. Dipotong 200 karakter -- teks pihak ketiga tak terbatas panjangnya, dan proxy yang salah setel menjawab satu halaman HTML utuh.
+- **Token disensor SEBELUM dipotong.** Token bot hidup DI DALAM URL, dan sebagian server memuntahkan URL permintaan ke halaman galatnya -- tanpa penyensoran, satu 404 memindahkan token ke berkas log, tempat yang aturannya berbeda dari `app_setting` dan yang isinya bertahan lama. Urutannya mengikat: potong dulu baru sensor akan membelah token di tengah lalu meloloskan separuhnya, dan separuh itu tidak lagi cocok dengan polanya. Dipatok unit test yang dibuktikan menggigit di kedua arah.
+
+Kegagalan SEBELUM ada status HTTP (DNS, firewall keluar, TLS, batas 10 detik) punya kalimatnya sendiri -- tindakannya berbeda sama sekali, dan membetulkan URL tidak akan mengubah apa pun.
+
 ### Akun dashboard: dua jalur, satu pagar
 
 `/pengguna` (admin-only) dan `/profil` (semua peran) menggantikan keadaan lama di mana pengelolaan akun HANYA ada di CLI. Yang menempel di sini:

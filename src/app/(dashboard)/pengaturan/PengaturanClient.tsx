@@ -103,7 +103,11 @@ const GROUPS: { title: string; fields: SettingField[] }[] = [
       {
         key: 'alert.webhook_url',
         label: 'URL webhook peringatan',
-        hint: 'Kosongkan untuk mematikan. Diisi URL bot Telegram / webhook Slack-Discord / endpoint IT rumah sakit -- SENGAJA bukan WhatsApp, karena yang dilaporkan justru saat WhatsApp tidak jalan.',
+        hint:
+          'Kosongkan untuk mematikan. SENGAJA bukan WhatsApp, karena yang dilaporkan justru saat WhatsApp tidak jalan. ' +
+          'Bot Telegram: https://api.telegram.org/bot<token>/sendMessage?chat_id=<id> -- KEDUA bagian itu wajib; ' +
+          'URL bot tanpa /sendMessage atau tanpa chat_id ditolak Telegram (HTTP 400) dan tidak ada peringatan yang pernah sampai. ' +
+          'Webhook Slack atau endpoint IT rumah sakit: tempel URL-nya apa adanya. Tekan "Kirim peringatan uji" sesudah Simpan.',
       },
       {
         key: 'alert.min_interval_minutes',
@@ -201,8 +205,14 @@ function UjiWebhook() {
         </Button>
         <p className="text-xs text-muted-foreground">Memakai URL yang sudah tersimpan -- simpan dulu bila baru diubah.</p>
       </div>
+      {/*
+       * `break-words` wajib sejak alasannya memuat cuplikan jawaban penerima:
+       * teks pihak ketiga bisa berupa satu rentetan tanpa spasi (URL, JSON
+       * rapat), dan di dalam kolom sempit itu melebarkan seluruh kartu alih-alih
+       * membungkus.
+       */}
       {hasil && (
-        <p className={`mt-2 text-xs ${hasil.ok ? 'text-success' : 'text-destructive'}`}>{hasil.message}</p>
+        <p className={`mt-2 break-words text-xs ${hasil.ok ? 'text-success' : 'text-destructive'}`}>{hasil.message}</p>
       )}
     </div>
   );

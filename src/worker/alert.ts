@@ -1,6 +1,7 @@
 import os from 'node:os';
 import { getSetting, getSettingNumber } from '@/models';
 import { logger, safeError } from '@/lib/logger';
+import { jelaskanKegagalanWebhook, jelaskanKegagalanJaringan } from '@/core/alertError';
 
 /**
  * Peringatan ke LUAR dashboard.
@@ -84,27 +85,54 @@ export async function alertWebhookUrl(): Promise<string | null> {
 }
 
 /**
+ * `alasan` HANYA diisi saat gagal, dan ia untuk MATA MANUSIA -- tombol uji di
+ * `/pengaturan`. Ketiga pemanggil di worker (watchdog, pemeriksaan kesehatan,
+ * kegagalan startup) mengabaikan nilai balik ini seluruhnya: pada jam 01:25
+ * tidak ada yang membaca apa pun, dan itu justru alasan jalur peringatan ini
+ * ada. Mereka tetap mendapatkannya lewat `logger.warn` seperti sebelumnya.
+ */
+export interface HasilKirimPeringatan {
+  terkirim: boolean;
+  alasan?: string;
+}
+
+/**
  * TIDAK PERNAH melempar. Peringatan yang gagal terkirim tidak boleh menjatuhkan
  * proses yang sedang berusaha melaporkan masalahnya sendiri -- itu akan menukar
  * satu gangguan dengan dua.
  *
- * @returns true bila benar-benar terkirim.
+ * Nilai baliknya sengaja diperlebar dari `boolean` alih-alih menambah fungsi
+ * kedua yang mengembalikan alasan: dua jalur kirim akan menyimpang, dan yang
+ * menyimpang di sini berarti tombol uji membuktikan jalur yang BUKAN dipakai
+ * worker saat gangguan sungguhan datang -- persis yang sudah dihindari dengan
+ * menguji nilai TERSIMPAN, bukan isi kotak yang sedang diketik.
  */
-export async function sendAlert(payload: AlertPayload): Promise<boolean> {
+export async function sendAlert(payload: AlertPayload): Promise<HasilKirimPeringatan> {
   try {
     const url = await alertWebhookUrl();
-    if (!url) return false;
+    if (!url) return { terkirim: false, alasan: 'URL webhook belum diisi atau bukan URL http/https.' };
 
     const jedaMenit = await getSettingNumber('alert.min_interval_minutes', JEDA_DEFAULT_MENIT);
     const sebelumnya = terakhirDikirim.get(payload.kind);
     if (payload.kind !== 'test' && sebelumnya && Date.now() - sebelumnya < jedaMenit * 60_000) {
       logger.debug({ kind: payload.kind }, 'peringatan ditahan (masih dalam jeda)');
-      return false;
+      return { terkirim: false, alasan: `Ditahan jeda antar peringatan sejenis (${jedaMenit} menit).` };
     }
 
     const body = JSON.stringify({
       // `text` diletakkan di depan dan diberi nama itu supaya payload yang sama
       // langsung terpakai apa adanya oleh Slack/Discord/Telegram tanpa adaptor.
+      //
+      // TELEGRAM, diukur langsung terhadap api.telegram.org (bukan dibaca dari
+      // dokumentasi): `sendMessage` MEWAJIBKAN `chat_id`, yang tidak ada di
+      // payload ini dan sengaja tidak ditambahkan -- ia bagian dari TUJUAN,
+      // bukan bagian dari isi peringatan. Tempatnya di URL:
+      //   https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>
+      // Telegram membaca parameter dari query string WALAU body-nya JSON
+      // (dibuktikan: chat_id palsu di query -> "chat not found", sedangkan
+      // tanpanya -> "chat_id is empty"; dua galat yang berbeda), dan field
+      // asing kita (`kind`, `host`, `at`, ...) diabaikannya tanpa menolak.
+      // Karena itu bentuk generik ini tetap utuh: nol cabang per-tujuan.
       text: `[wakhanza/${os.hostname()}] ${payload.message}${payload.detail ? `\n${payload.detail}` : ''}`,
       kind: payload.kind,
       message: payload.message,
@@ -121,15 +149,26 @@ export async function sendAlert(payload: AlertPayload): Promise<boolean> {
     });
 
     if (!res.ok) {
-      logger.warn({ kind: payload.kind, status: res.status }, 'webhook peringatan menolak');
-      return false;
+      // Badan jawaban dibaca HANYA saat gagal, dan kegagalan membacanya tidak
+      // boleh menutupi status yang sudah di tangan -- itu menukar keterangan
+      // lengkap dengan tidak ada keterangan sama sekali.
+      let jawaban = '';
+      try {
+        jawaban = await res.text();
+      } catch {
+        jawaban = '';
+      }
+      const alasan = jelaskanKegagalanWebhook(res.status, jawaban);
+      logger.warn({ kind: payload.kind, status: res.status, alasan }, 'webhook peringatan menolak');
+      return { terkirim: false, alasan };
     }
 
     terakhirDikirim.set(payload.kind, Date.now());
     logger.info({ kind: payload.kind }, 'peringatan terkirim ke webhook');
-    return true;
+    return { terkirim: true };
   } catch (err) {
+    const { message } = safeError(err);
     logger.warn({ kind: payload.kind, ...safeError(err) }, 'peringatan gagal dikirim');
-    return false;
+    return { terkirim: false, alasan: jelaskanKegagalanJaringan(message) };
   }
 }

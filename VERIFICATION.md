@@ -87,6 +87,51 @@ Diverifikasi: 23 unit test (`core/pagination.test.ts`), lalu **52 pemeriksaan le
 
 Diverifikasi: keempat perilaku jeda dibuktikan lewat penerima webhook lokal sungguhan (jenis sama tertahan, jenis beda lolos, `test` dua kali beruntun keduanya lolos), payload diperiksa dan tidak memuat data pasien; tombolnya ditekan lewat **browser sungguhan** (Puppeteer, mencari tombol lewat TEKSNYA -- pelajaran dari uji broadcast yang dulu tidak sengaja menekan "Keluar") dengan ketiga jalur: terkirim, URL kosong, dan URL sah tapi tidak ada yang mendengarkan. Tercatat di `audit_log` sebagai `alert_webhook_test`. Dikembalikan ke kosong setelah diuji.
 
+### Bot Telegram + alasan kegagalan yang menyebut sebabnya (10 Agustus 2026)
+
+**Bentuk URL-nya diukur langsung terhadap `api.telegram.org`, bukan dibaca dari dokumentasi.** Empat probe, dan yang membuktikan bukan keberhasilannya melainkan BEDA GALATNYA:
+
+```
+POST bot<token>                          -> HTTP 404  {"description":"Not Found"}
+POST bot<token>/sendMessage              -> HTTP 400  "Bad Request: chat_id is empty"
+POST bot<token>/sendMessage?chat_id=999… -> HTTP 400  "Bad Request: chat not found"
+POST bot<token>/sendMessage?chat_id=<sah> -> HTTP 200 terkirim
+```
+
+Baris ketiga itu intinya: `chat not found` (bukan `chat_id is empty`) membuktikan Telegram **membaca query string walau body-nya JSON**, dan itu yang membuat `chat_id` bisa tinggal di URL alih-alih memaksa cabang payload per-tujuan. Field asing kita (`kind`, `message`, `detail`, `host`, `at`) ikut di body pada keempatnya dan tidak pernah ditolak -- Telegram mengabaikan parameter yang tidak dikenalnya.
+
+`getMe` atas URL bot telanjang **berhasil**, dan itu jebakannya: ia membuktikan tokennya sah, bukan bahwa URL-nya bisa dikirimi. Kejadian nyata yang melahirkan seluruh perubahan ini adalah `alert.webhook_url` diisi bentuk itu, tombol uji menjawab "Gagal terkirim", dan HTTP 404 yang menjawabnya tidak pernah sampai ke layar.
+
+**Alasan kegagalan dibuktikan lewat `sendAlert()` SUNGGUHAN** (skrip sekali pakai terhadap database `wakhanza`, bukan curl), keempat keadaan berturut-turut, dan nilai yang ditinggalkan dipaksa benar lewat `finally`:
+
+```
+[SALAH -- tanpa /sendMessage] terkirim:false
+  HTTP 404 -- URL-nya tidak menunjuk endpoint apa pun. ... ekornya wajib "/sendMessage" ...
+  Jawaban penerima: {"ok":false,"error_code":404,"description":"Not Found"}
+[SALAH -- tanpa chat_id]      terkirim:false
+  HTTP 400 -- ... sebabnya hampir selalu "?chat_id=<id>" belum ada di URL.
+  Jawaban penerima: {"ok":false,"error_code":400,"description":"Bad Request: chat_id is empty"}
+[SALAH -- host tidak ada]     terkirim:false
+  Tidak sampai ke penerimanya sama sekali (nama domain, firewall keluar, TLS, atau lewat batas 10 detik).
+[BENAR]                       terkirim:true, alasan kosong
+nilai tersimpan sesudah uji sama dengan bentuk yang benar: true
+```
+
+Skripnya menerima token lewat variabel lingkungan dan mencetak URL tersamar (`bot<token>`) -- rahasianya tidak pernah mendarat di disk dalam repositori publik ini, dan berkas `.tmp-*` dihapus sesudahnya.
+
+**17 unit test `core/alertError.test.ts`, dibuktikan MENGGIGIT dua arah** dengan merusak implementasinya sengaja, bukan diasumsikan:
+
+| Yang dirusak | Yang gagal |
+|---|---|
+| urutan sensor/potong dibalik (potong dulu, sensor belakangan) | 1 dari 17 -- tepat uji "token persis di garis potong" |
+| `sensorRahasia()` dimatikan seluruhnya | 2 dari 17 -- kedua uji penyensoran |
+
+Uji "token di ekor teks panjang" versi pertama **tidak menggigit** dan diperbaiki: tokennya jatuh di luar 200 karakter sehingga hilang oleh pemotongan bahkan tanpa penyensoran. Diganti dengan token yang dimulai tepat sebelum batas, sehingga yang diuji benar-benar URUTANNYA.
+
+**Gerbang penuh**: `npx jest` 40 suite / 667 uji lolos (dari 650), `tsc --noEmit` bersih, `eslint` bersih, `npm run build` berhasil dan penanda teks barunya terbukti ada di `.next/server`.
+
+**Pemasangan**: `pm2 restart wakhanza-web` (`/login` -> HTTP 200), lalu worker lewat prosedur tiga langkah -- `pm2 stop` -> Chromium pemegang sesi tersisa **nol** -> `pm2 start`. Penghitung restart worker tetap 8, tanpa kaskade; `WhatsApp siap` ~3 detik sesudah start. Kesehatannya diperiksa lewat **umur denyut** dibaca Sequelize (bukan `NOW()` SQL, yang melebihkan 25.200 detik): `ready`, denyut 10 detik, `last_error` kosong.
+
 ## Akun dashboard: dua jalur, satu pagar
 
 Diverifikasi: otorisasi halaman lewat HTTP asli (operator 307 ke `/ringkasan`, tanpa login 307 ke `/login`, admin 200) dan menu yang benar per peran; seluruh alur admin lewat **browser sungguhan** (buat, username duplikat ditolak, ubah nama+naikkan peran, setel ulang sandi, dialog konfirmasi, nonaktifkan) plus tombol Nonaktifkan yang mati di baris sendiri dan penolakan server saat menurunkan peran sendiri; halaman Profil lewat browser sungguhan (sandi lama salah ditolak, sandi baru = lama ditolak, penggantian berhasil lalu **sandi barunya dipakai login sungguhan**, ganti nama tersimpan); pagar admin-terakhir lewat CLI dengan admin aktif benar-benar disisakan satu; dan 34 unit test di `userPolicy.test.ts`. Akun uji dibersihkan sesudahnya.

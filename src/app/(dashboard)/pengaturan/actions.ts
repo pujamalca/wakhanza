@@ -29,20 +29,29 @@ export async function testAlertWebhookAction(): Promise<{ ok: boolean; message: 
     return { ok: false, message: 'URL webhook belum diisi (atau bukan URL http/https). Isi dulu lalu Simpan.' };
   }
 
-  const terkirim = await sendAlert({
+  const hasil = await sendAlert({
     kind: 'test',
     message: 'Uji coba peringatan dari wakhanza.',
     detail: 'Bila pesan ini sampai, jalur peringatan gangguan sudah berfungsi.',
   });
 
+  // Alasannya ikut ke audit_log, bukan cuma ke layar: yang menyetel webhook dan
+  // yang nanti bertanya "kenapa peringatan tidak pernah datang" sering bukan
+  // orang yang sama, dan layar hasil uji hilang begitu halamannya ditutup.
   await logAudit(
     session!.user.username,
     'alert_webhook_test',
     undefined,
-    terkirim ? 'terkirim' : 'gagal terkirim',
+    hasil.terkirim ? 'terkirim' : `gagal terkirim -- ${hasil.alasan ?? 'tanpa keterangan'}`,
   );
 
-  return terkirim
+  // Alasannya DITAMPILKAN, tidak lagi ditunda ke log worker. Sebabnya satu
+  // kejadian nyata: URL bot Telegram tanpa "/sendMessage" menjawab HTTP 404,
+  // angka yang sudah dipegang `sendAlert()` satu baris sebelumnya -- sementara
+  // layar cuma menyuruh membuka log, yaitu berkas yang staf tidak punya akses
+  // ke sana. Pesan galat yang menyembunyikan jawabannya sendiri sama saja
+  // dengan tidak ada pesan galat.
+  return hasil.terkirim
     ? { ok: true, message: 'Terkirim. Periksa penerimanya sekarang -- kalau tidak ada yang masuk, URL-nya sah tapi salah tujuan.' }
-    : { ok: false, message: 'Gagal terkirim. Periksa log worker untuk alasannya (URL salah, jaringan tertutup, atau penerima menolak).' };
+    : { ok: false, message: `Gagal terkirim. ${hasil.alasan ?? 'Periksa log worker untuk alasannya.'}` };
 }
