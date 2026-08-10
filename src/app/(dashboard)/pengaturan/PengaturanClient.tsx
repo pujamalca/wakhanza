@@ -245,54 +245,80 @@ function SettingsForm({ initial, isAdmin }: { initial: Record<string, string>; i
         e.preventDefault();
         mutation.mutate(petakan(form, secondsToMsSetting));
       }}
-      className="max-w-3xl space-y-4"
+      className="max-w-7xl space-y-4"
     >
-      {GROUPS.map((group) => (
-        <Card key={group.title}>
-          <h2 className="mb-3 text-sm font-semibold">{group.title}</h2>
-          <div className="space-y-3">
-            {group.fields.map((field) =>
-              field.variables ? (
-                // Pesan diberi lebar penuh, label di atas: dua kolom sempit
-                // membuat toolbar dan pratinjau tidak muat.
-                <div key={field.key} className="space-y-1">
-                  <label className="text-sm font-medium">{field.label}</label>
-                  {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
-                  <MessageEditor
-                    name={field.key}
-                    value={form[field.key] ?? ''}
-                    onValueChange={(v) => setForm((f) => ({ ...f, [field.key]: v }))}
-                    variables={field.variables}
-                    disabled={!isAdmin}
-                    rows={4}
-                  />
-                </div>
-              ) : (
-                <div key={field.key} className="grid grid-cols-2 items-start gap-3">
-                  <div>
+      {/*
+       * DUA kolom sejak `lg`, lewat multi-kolom CSS dan BUKAN grid.
+       *
+       * Grid menempatkan kartu baris demi baris, jadi tinggi kelompok di sini yang berbeda jauh
+       * (Jadwal 1 baris, Pengiriman 8) meninggalkan lubang sebesar selisihnya di bawah kartu yang
+       * lebih pendek. Terukur pada bentuk gridnya: wadah 1.670px dengan ~250px kosong di bawah
+       * Polling; multi-kolom memadatkannya jadi 1.062px karena perambannya sendiri yang
+       * menyeimbangkan kedua kolom.
+       *
+       * `break-inside-avoid` yang menjaga satu kartu tidak terbelah di antara dua kolom -- tanpa
+       * itu separuh kelompok Pengiriman bisa berpindah kolom di tengah daftar isiannya. Jarak
+       * antar kartu WAJIB `mb-4`, bukan `space-y-4`: yang terakhir memberi margin-TOP pada
+       * saudara berikutnya, dan margin itu runtuh di puncak kolom kedua.
+       *
+       * Urutan DOM tetap urutan alirannya (turun kolom kiri, lalu kolom kanan), jadi urutan Tab
+       * dan pembaca layar tidak melompat-lompat.
+       */}
+      <div className="columns-1 gap-4 lg:columns-2">
+        {GROUPS.map((group) => (
+          <Card key={group.title} className="mb-4 break-inside-avoid">
+            <h2 className="mb-3 text-sm font-semibold">{group.title}</h2>
+            <div className="space-y-3">
+              {group.fields.map((field) =>
+                field.variables ? (
+                  // Pesan diberi lebar penuh KARTUNYA, label di atas: dua kolom sempit membuat
+                  // toolbar dan pratinjau tidak muat. Satu kolom di sini ~632px, dan toolbarnya
+                  // `flex flex-wrap` sehingga tetap muat -- kartunya TIDAK perlu melebar melewati
+                  // kolomnya. Dicoba begitu lebih dulu, dan akibatnya kotak isian angka di kartu
+                  // yang sama ikut melar jadi 610px untuk memuat "60".
+                  <div key={field.key} className="space-y-1">
                     <label className="text-sm font-medium">{field.label}</label>
                     {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
+                    <MessageEditor
+                      name={field.key}
+                      value={form[field.key] ?? ''}
+                      onValueChange={(v) => setForm((f) => ({ ...f, [field.key]: v }))}
+                      variables={field.variables}
+                      disabled={!isAdmin}
+                      rows={4}
+                    />
                   </div>
-                  <Input
-                    value={form[field.key] ?? ''}
-                    disabled={!isAdmin}
-                    onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
-                    className="w-full"
-                    fieldSize="sm"
-                    // Nilai yang benar-benar masuk database tetap terlihat, jadi
-                    // admin yang membandingkan dengan isi `app_setting` atau
-                    // baris `audit_log` tidak menyangka angkanya berubah.
-                    title={
-                      field.storedAsMs ? `Tersimpan sebagai ${secondsToMsSetting(form[field.key] ?? '')} ms` : undefined
-                    }
-                  />
-                </div>
-              ),
-            )}
-          </div>
-          {group.title === 'Peringatan gangguan' && isAdmin && <UjiWebhook />}
-        </Card>
-      ))}
+                ) : (
+                  // Label dan kotak isian DITUMPUK di layar sempit: dua kolom yang dipaksakan
+                  // menyisakan ~120px untuk keterangan yang panjangnya beberapa kalimat.
+                  <div key={field.key} className="grid items-start gap-1 sm:grid-cols-2 sm:gap-3">
+                    <div>
+                      <label className="text-sm font-medium">{field.label}</label>
+                      {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
+                    </div>
+                    <Input
+                      value={form[field.key] ?? ''}
+                      disabled={!isAdmin}
+                      onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+                      className="w-full"
+                      fieldSize="sm"
+                      // Nilai yang benar-benar masuk database tetap terlihat, jadi
+                      // admin yang membandingkan dengan isi `app_setting` atau
+                      // baris `audit_log` tidak menyangka angkanya berubah.
+                      title={
+                        field.storedAsMs
+                          ? `Tersimpan sebagai ${secondsToMsSetting(form[field.key] ?? '')} ms`
+                          : undefined
+                      }
+                    />
+                  </div>
+                ),
+              )}
+            </div>
+            {group.title === 'Peringatan gangguan' && isAdmin && <UjiWebhook />}
+          </Card>
+        ))}
+      </div>
 
       <div className="flex items-center gap-3">
         {isAdmin && (
