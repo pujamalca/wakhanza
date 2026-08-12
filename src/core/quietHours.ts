@@ -122,6 +122,23 @@ const BYPASS_QUIET_HOURS = new Set([
    * dibuat" tidak berlaku untuk yang kedua, jadi ia tidak bisa dipinjam ke sana.
    */
   'FARMASI_PENJUALAN_REKAP',
+  /**
+   * FARMASI_RESEP_REKAP (042): alasannya sama dengan kedua rekap di atasnya --
+   * jam kirimnya dipilih staf sendiri (`farmasi.resep_rekap_jam`).
+   *
+   * Dan di sini SYARATNYA lebih keras lagi, karena jam bawaannya lebih malam:
+   * 22:00, diukur dari sebaran `jam_peresepan` yang berekor tipis sampai 23:11
+   * (berbeda dari penjualan, yang benar-benar nol sesudah pukul 20:00). Jam
+   * tenang bawaan mulai 21:00, jadi tanpa baris ini rekap resep pada setelan
+   * BAWAANNYA tertahan sampai pukul 07:00 keesokan hari SETIAP hari -- rekap
+   * "hari ini" yang selalu tiba keesokan paginya, tanpa satu pun galat.
+   *
+   * Yang SENGAJA tidak ikut: FARMASI_VALIDASI dan FARMASI_PENYERAHAN sudah ada
+   * di daftar ini lebih dulu lewat alasannya sendiri (penerimanya shift apotek
+   * yang memang sedang menunggu pekerjaan masuk), jadi tidak ada yang berubah
+   * bagi keduanya.
+   */
+  'FARMASI_RESEP_REKAP',
   'BPJS_BATAL',
   'ADMINISTRASI',
 ]);

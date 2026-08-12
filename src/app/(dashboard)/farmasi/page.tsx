@@ -7,6 +7,8 @@ import { Callout, PageHeader, Pagination, Tabs, type TabStatus } from '@/compone
 import { MasterSwitch } from './MasterSwitch';
 import { TargetTable, type TargetRow, type GrupRow } from './TargetTable';
 import { PesanForm, type NilaiPesan } from './PesanForm';
+import { RekapResepForm, type NilaiRekapResep } from './RekapResepForm';
+import { RekapResepSwitch } from './RekapResepSwitch';
 import { StokForm, type NilaiStok } from './StokForm';
 import { DaruratForm, type JadwalRow, type JenisOption, type NilaiDarurat } from './DaruratForm';
 import { DaruratSwitch } from './DaruratSwitch';
@@ -114,6 +116,7 @@ export default async function FarmasiPage({
     pemesananEnabled,
     penjualanEnabled,
     rekapEnabled,
+    rekapResepEnabled,
   ] = await Promise.all([
       getSettingBool('farmasi.enabled', false),
       getSetting('farmasi.stok_mode', 'mati'),
@@ -123,6 +126,7 @@ export default async function FarmasiPage({
       getSettingBool('farmasi.pemesanan_enabled', false),
       getSettingBool('farmasi.penjualan_enabled', false),
       getSettingBool('farmasi.penjualan_rekap_enabled', false),
+      getSettingBool('farmasi.resep_rekap_enabled', false),
     ]);
 
   // Dinormalkan SEKALI di sini, bukan sekali untuk titik status lalu sekali
@@ -135,12 +139,35 @@ export default async function FarmasiPage({
   // Titik status per tab. Tiga keadaan, bukan dua: MATI, MENYALA, dan menyala
   // tapi setengah jadi -- yang ketiga itulah yang mahal, karena bergejala sama
   // persis dengan yang benar (halaman tampak wajar, nol pesan keluar).
-  const statusResep: TabStatus = !enabled ? 'neutral' : jumlahTujuanAktif === 0 ? 'warning' : 'success';
-  const labelResep = !enabled
+  /**
+   * Tab Resep memuat DUA sakelar yang berdiri sendiri (notifikasi per kejadian
+   * dan rekap harian), jadi titiknya menyala bila SALAH SATU menyala -- bentuk
+   * yang sama dengan tab Penjualan sejak migrations/041.
+   *
+   * Membacanya dari `enabled` saja akan membuat RS yang memakai rekap SAJA
+   * melihat tabnya bertanda "Mati" sementara ia benar-benar mengirim tiap malam.
+   * Itu kebalikan persis dari guna titik ini. Dan di sini kombinasi "rekap saja"
+   * justru yang paling mungkin dipilih: ia satu-satunya cara mendapat angka
+   * harian tanpa data pasien mengalir ke grup.
+   *
+   * Keduanya berbagi satu daftar tujuan (`is_active`), jadi peringatan "belum ada
+   * tujuan" tetap satu pemeriksaan untuk keduanya.
+   */
+  const resepAdaYangNyala = enabled || rekapResepEnabled;
+  const statusResep: TabStatus = !resepAdaYangNyala
+    ? 'neutral'
+    : jumlahTujuanAktif === 0
+      ? 'warning'
+      : 'success';
+  const labelResep = !resepAdaYangNyala
     ? 'Mati'
     : jumlahTujuanAktif === 0
       ? 'Menyala, tapi belum ada tujuan yang aktif'
-      : 'Menyala';
+      : enabled && rekapResepEnabled
+        ? 'Notifikasi per resep dan rekap harian menyala'
+        : enabled
+          ? 'Notifikasi per resep menyala'
+          : 'Rekap harian menyala';
 
   const statusStok: TabStatus =
     stokMode === 'mati' ? 'neutral' : stokMode === 'petugas' && jumlahBolehTanya === 0 ? 'warning' : 'success';
@@ -284,7 +311,9 @@ export default async function FarmasiPage({
       />
 
       {tab === 'tujuan' && <TabTujuan pageParam={pageParam} jumlahTujuan={jumlahTujuan} />}
-      {tab === 'resep' && <TabResep enabled={enabled} adaTujuanAktif={jumlahTujuanAktif > 0} />}
+      {tab === 'resep' && (
+        <TabResep enabled={enabled} rekapEnabled={rekapResepEnabled} adaTujuanAktif={jumlahTujuanAktif > 0} />
+      )}
       {tab === 'stok' && <TabStok mode={stokMode} />}
       {tab === 'darurat' && (
         <TabDarurat enabled={daruratEnabled} adaTujuan={jumlahTujuanDarurat > 0} adaJadwal={jumlahJadwal > 0} />
@@ -367,8 +396,8 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Satu daftar, dipakai keenam fitur di tab sebelah. Enam centang di tiap baris menjawab enam pertanyaan yang
+      <Callout collapsible className="mb-4" title="Satu daftar tujuan, dipakai keenam fitur di tab sebelah">
+        Enam centang di tiap baris menjawab enam pertanyaan yang
         berbeda: <span className="font-medium text-foreground">Aktif</span> menerima notifikasi resep,{' '}
         <span className="font-medium text-foreground">Boleh tanya</span> boleh membuat nomor rumah sakit menjawab,{' '}
         <span className="font-medium text-foreground">Darurat stok</span> menerima rekap persediaan,{' '}
@@ -378,7 +407,7 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
         terpisah — sebuah grup sangat wajar perlu tahu tiap resep tanpa ikut membaca harga beli dari pemasok, nilai
         barang hibah punya batas kerahasiaan yang lain lagi, dan memantau apa yang sedang <em>dipesan</em> adalah
         pekerjaan yang berbeda dari mencocokkan apa yang sudah <em>datang</em>.
-      </p>
+      </Callout>
 
       <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
       <Pagination
@@ -402,8 +431,28 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
 /* Tab: Notifikasi resep                                                     */
 /* ------------------------------------------------------------------------- */
 
-async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTujuanAktif: boolean }) {
-  const [validasiEnabled, penyerahanEnabled, tValidasi, tPenyerahan, tGeneric, tRekap, maxPerCycle] = await Promise.all([
+async function TabResep({
+  enabled,
+  rekapEnabled,
+  adaTujuanAktif,
+}: {
+  enabled: boolean;
+  rekapEnabled: boolean;
+  adaTujuanAktif: boolean;
+}) {
+  const [
+    validasiEnabled,
+    penyerahanEnabled,
+    tValidasi,
+    tPenyerahan,
+    tGeneric,
+    tRekap,
+    maxPerCycle,
+    rekapJam,
+    rekapOffset,
+    rekapTemplate,
+    rekapTemplateKosong,
+  ] = await Promise.all([
     getSettingBool('farmasi.validasi_enabled', true),
     getSettingBool('farmasi.penyerahan_enabled', true),
     getSetting('farmasi.template_validasi', ''),
@@ -411,6 +460,10 @@ async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTuju
     getSetting('farmasi.template_generic', ''),
     getSetting('farmasi.template_rekap', ''),
     getSettingNumber('farmasi.max_per_cycle', 20),
+    getSetting('farmasi.resep_rekap_jam', '22:00'),
+    getSettingNumber('farmasi.resep_rekap_offset_hari', 0),
+    getSetting('farmasi.template_resep_rekap', ''),
+    getSetting('farmasi.template_resep_rekap_kosong', ''),
   ]);
 
   const nilaiPesan: NilaiPesan = {
@@ -421,6 +474,13 @@ async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTuju
     templateGeneric: tGeneric ?? '',
     templateRekap: tRekap ?? '',
     maxPerCycle,
+  };
+
+  const nilaiRekap: NilaiRekapResep = {
+    jam: rekapJam ?? '22:00',
+    offset: rekapOffset,
+    template: rekapTemplate ?? '',
+    templateKosong: rekapTemplateKosong ?? '',
   };
 
   return (
@@ -450,6 +510,49 @@ async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTuju
         wakhanza tidak pernah menulis apa pun ke sana.
       </p>
       <PesanForm nilai={nilaiPesan} />
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Bagian kedua: REKAP HARIAN (migrations/042)                         */}
+      {/*                                                                     */}
+      {/* Sakelarnya berdiri sendiri dari yang di atas -- lihat komentar di   */}
+      {/* RekapResepSwitch. Ditaruh SESUDAH notifikasi per kejadian karena    */}
+      {/* itulah urutan orang memikirkannya ("saya sudah tahu tiap resep,     */}
+      {/* sekarang saya mau angka hariannya"), bukan urutan pentingnya.       */}
+      {/* ------------------------------------------------------------------ */}
+      <h2 className="mb-3 mt-10 border-t border-border pt-6 font-medium">Rekap harian</h2>
+
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Satu pesan sehari berisi ANGKA saja — tanpa satu pun nama pasien"
+      >
+        <p>
+          Pada jam yang disetel di bawah, sistem membaca seluruh resep satu hari lalu mengirim{' '}
+          <span className="font-medium text-foreground">satu pesan</span> berisi totalnya: jumlah resep, baris obat,
+          racikan, berapa yang sudah diserahkan dan berapa yang belum, plus rincian per dokter.
+        </p>
+        <p className="mt-2">
+          Berbeda dari notifikasi di atas, rekap ini{' '}
+          <span className="font-medium text-foreground">tidak menyentuh tabel pasien sama sekali</span> &mdash; bukan
+          &ldquo;dibaca lalu tidak ditampilkan&rdquo;, melainkan <span className="font-mono">reg_periksa</span> dan{' '}
+          <span className="font-mono">pasien</span> memang tidak ikut dalam query-nya, sehingga tidak ada jalan apa pun
+          menuju identitas seseorang. Nama obat dan aturan pakai juga tidak; yang dihitung cuma banyaknya.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          Karena itu rekap bisa dipakai <span className="font-medium text-foreground">tanpa</span> menyalakan notifikasi
+          per resep di atas &mdash; dan bagi RS yang belum memutuskan soal data pasien di grup, itulah kombinasi yang
+          masuk akal.
+        </p>
+      </Callout>
+
+      <RekapResepSwitch
+        enabled={rekapEnabled}
+        adaTujuan={adaTujuanAktif}
+        notifEnabled={enabled}
+        jam={nilaiRekap.jam}
+        offset={nilaiRekap.offset}
+      />
+      <RekapResepForm nilai={nilaiRekap} adaTujuan={adaTujuanAktif} />
     </section>
   );
 }
@@ -487,13 +590,16 @@ async function TabStok({ mode }: { mode: NilaiStok['mode'] }) {
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Arah <span className="font-medium text-foreground">MASUK</span> — menjawab pertanyaan yang dikirim ke nomor
-        rumah sakit (“stok paracetamol?”) dengan data dari <span className="font-mono">databarang</span> dan{' '}
-        <span className="font-mono">gudangbarang</span> milik SIMRS Khanza. Punya sakelarnya sendiri:{' '}
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Arah MASUK — menjawab pertanyaan yang dikirim ke nomor rumah sakit"
+      >
+        Pertanyaan seperti “stok paracetamol?” dijawab dengan data dari <span className="font-mono">databarang</span>{' '}
+        dan <span className="font-mono">gudangbarang</span> milik SIMRS Khanza. Punya sakelarnya sendiri:{' '}
         <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep maupun
         sakelar di Balasan otomatis.
-      </p>
+      </Callout>
 
       <Callout
         variant="warning"
@@ -586,12 +692,11 @@ async function TabDarurat({
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Dipicu <span className="font-medium text-foreground">WAKTU</span> — pada jam yang dijadwalkan, sistem membaca
-        barang yang stoknya sudah menyentuh atau turun di bawah <span className="font-mono">stokminimal</span> di
-        Khanza, lalu mengirimkan daftarnya. Sakelarnya sendiri,{' '}
+      <Callout collapsible className="mb-4" title="Dipicu WAKTU — bukan oleh kejadian apa pun di Khanza">
+        Pada jam yang dijadwalkan, sistem membaca barang yang stoknya sudah menyentuh atau turun di bawah{' '}
+        <span className="font-mono">stokminimal</span> di Khanza, lalu mengirimkan daftarnya. Sakelarnya sendiri,{' '}
         <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep.
-      </p>
+      </Callout>
 
       <Callout collapsible className="mb-4" title="Barang tanpa ambang minimal tidak ikut dihitung">
         Khanza membandingkan stok dengan <span className="font-mono">stokminimal</span> apa adanya, sehingga barang yang
@@ -624,12 +729,16 @@ async function TabPengadaan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> — setiap pembelian yang disimpan
-        lewat menu <span className="font-medium text-foreground">Transaksi Pengadaan Obat, Alkes &amp; BHP Medis</span>{' '}
-        dikirim sebagai nota berisi pemasok, daftar barang, dan totalnya. Sakelarnya sendiri,{' '}
-        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep.
-      </p>
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Berbunyi saat pembelian disimpan di Khanza, dan sakelarnya berdiri sendiri"
+      >
+        Setiap pembelian yang disimpan lewat menu{' '}
+        <span className="font-medium text-foreground">Transaksi Pengadaan Obat, Alkes &amp; BHP Medis</span> dikirim
+        sebagai nota berisi pemasok, daftar barang, dan totalnya.{' '}
+        <span className="font-medium text-foreground">Tidak</span> terpengaruh sakelar di tab Notifikasi resep.
+      </Callout>
 
       {/* Isinya kebalikan dari peringatan di tab Notifikasi resep: yang di sana
           memperingatkan adanya data pasien, yang di sini justru menjelaskan
@@ -675,13 +784,16 @@ async function TabHibah({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: b
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> — setiap penerimaan yang
-        disimpan lewat menu <span className="font-medium text-foreground">Hibah Obat &amp; BHP</span> dikirim sebagai
-        nota berisi asal hibah, daftar barang, dan nilainya. Sakelarnya sendiri,{' '}
-        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep maupun
-        Pengadaan.
-      </p>
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Berbunyi saat penerimaan hibah disimpan di Khanza, dan sakelarnya berdiri sendiri"
+      >
+        Setiap penerimaan yang disimpan lewat menu{' '}
+        <span className="font-medium text-foreground">Hibah Obat &amp; BHP</span> dikirim sebagai nota berisi asal
+        hibah, daftar barang, dan nilainya. <span className="font-medium text-foreground">Tidak</span> terpengaruh
+        sakelar di tab Notifikasi resep maupun Pengadaan.
+      </Callout>
 
       {/* Dilipat, sama seperti padanannya di tab Pengadaan -- dan lewat alasan
           yang sama: kesimpulannya ada di JUDUL, yang tetap terlihat. */}
@@ -738,12 +850,16 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> — setiap pesanan yang disimpan
-        lewat menu <span className="font-medium text-foreground">Surat Pemesanan Obat &amp; BHP</span> dikirim sebagai
-        nota berisi pemasok, daftar barang, dan harganya. Sakelarnya sendiri,{' '}
-        <span className="font-medium">tidak</span> terpengaruh sakelar di tab mana pun yang lain.
-      </p>
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Berbunyi saat pesanan disimpan di Khanza, dan sakelarnya berdiri sendiri"
+      >
+        Setiap pesanan yang disimpan lewat menu{' '}
+        <span className="font-medium text-foreground">Surat Pemesanan Obat &amp; BHP</span> dikirim sebagai nota berisi
+        pemasok, daftar barang, dan harganya. <span className="font-medium text-foreground">Tidak</span> terpengaruh
+        sakelar di tab mana pun yang lain.
+      </Callout>
 
       {/* Perbedaan yang paling gampang keliru dipahami di halaman ini, jadi ia
           TIDAK dilipat: dua tab bersebelahan yang sama-sama menyebut "pemasok"
@@ -861,13 +977,17 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> &mdash; setiap nota yang disimpan
-        lewat menu <span className="font-medium text-foreground">Transaksi Penjualan Obat, Alkes &amp; BHP</span>{' '}
-        dikirim sebagai nota berisi daftar barang dan totalnya, dan setiap nota yang{' '}
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Berbunyi saat nota penjualan disimpan di Khanza — DAN saat nota dihapus"
+      >
+        Setiap nota yang disimpan lewat menu{' '}
+        <span className="font-medium text-foreground">Transaksi Penjualan Obat, Alkes &amp; BHP</span> dikirim berisi
+        daftar barang dan totalnya, dan setiap nota yang{' '}
         <span className="font-medium text-foreground">dihapus</span> dikabarkan sebagai pembatalan. Sakelarnya sendiri,{' '}
-        <span className="font-medium">tidak</span> terpengaruh sakelar di tab mana pun yang lain.
-      </p>
+        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab mana pun yang lain.
+      </Callout>
 
       {/* TIDAK dilipat, dan ini satu-satunya peringatan privasi di halaman ini
           yang berbunyi berbeda dari ketiga tab nota barang lain. Di sana
@@ -933,14 +1053,17 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
       <hr className="my-8 border-border" />
 
       <h3 className="mb-2 text-base font-medium">Rekap harian</h3>
-      <p className="mb-3 text-sm text-muted-foreground">
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Satu pesan sehari, dan sakelarnya berdiri sendiri dari nota per transaksi"
+      >
         Dipicu <span className="font-medium text-foreground">WAKTU</span>, bukan kejadian &mdash; pada jam yang disetel
-        di bawah, sistem membaca seluruh penjualan satu hari lalu mengirim{' '}
-        <span className="font-medium text-foreground">satu pesan</span> berisi totalnya. Tujuannya sama dengan nota per
-        transaksi (yang mencentang &ldquo;Penjualan&rdquo;), tapi{' '}
-        <span className="font-medium">sakelarnya berdiri sendiri</span>: rekap bisa dipakai tanpa menyalakan kabar per
-        nota, dan itu justru pemakaian yang paling masuk akal bagi grup yang tidak ingin puluhan pesan sehari.
-      </p>
+        di bawah, sistem membaca seluruh penjualan satu hari lalu mengirim satu pesan berisi totalnya. Tujuannya sama
+        dengan nota per transaksi (yang mencentang &ldquo;Penjualan&rdquo;), tapi rekap bisa dipakai{' '}
+        <span className="font-medium text-foreground">tanpa</span> menyalakan kabar per nota &mdash; dan itu justru
+        pemakaian yang paling masuk akal bagi grup yang tidak ingin puluhan pesan sehari.
+      </Callout>
 
       <RekapSwitch
         enabled={rekapEnabled}

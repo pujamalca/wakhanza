@@ -1452,7 +1452,7 @@ nota_diperiksa  cocok  beda
 Percobaan pertama memetakan `nm_perawatan` sebagai label kelompok. Keluaran `npm run dryrun:dokumen` atas nota sungguhan:
 
 ```
-  dr. Intan Rahma Dewi                                                  Rp0
+  dr. (nama disamarkan)                                                  Rp0
   :                                                                Rp10.000
   :                                                                     Rp0
     konsultasi dokter umum                         Rp25.000    1     Rp25.000
@@ -1462,7 +1462,7 @@ Percobaan pertama memetakan `nm_perawatan` sebagai label kelompok. Keluaran `npm
 Judul kelompok berbunyi ":" dan subtotalnya jadi baris bernama "31,655" tanpa angka. Sesudah diperbaiki (`no` sebagai label, `Ttl*` dihitung ulang):
 
 ```
-    [keterangan] dr. Intan Rahma Dewi
+    [keterangan] dr. (nama disamarkan)
   [seksi] Registrasi                                                  Rp10.000
   [seksi] Tindakan
     [item] konsultasi dokter umum                     Rp25.000    1     Rp25.000
@@ -2522,7 +2522,7 @@ Selisihnya tepat 25.200 detik (7 jam). `heartbeat_at` ditulis Sequelize ber-
 `timezone: '+00:00'` sementara `NOW()` mengembalikan WIB. Nol baris `outbox`
 hari itu juga bukan gejala: hari Minggu, tidak ada pelayanan.
 
-## Konfirmasi terkirim (`migrations/035`) -- dan kenapa BELUM terbukti
+## Konfirmasi terkirim (`migrations/035`) -- terbukti untuk grup, belum untuk nomor
 
 Skema diterapkan dan diperiksa:
 
@@ -2534,9 +2534,10 @@ Skema diterapkan dan diperiksa:
 sulitnya: tingkat hanya boleh maju, `ACK_ERROR` boleh menimpa dari bawah, dan
 label grup berbeda dari perorangan.
 
-**Yang TIDAK terbukti: penautan id.** Lima kiriman uji sungguhan ke nomor RS
-sendiri (obrolan dengan diri sendiri, tidak mengganggu siapa pun) semuanya
-berakhir `sent` dengan `wa_message_id` tetap NULL:
+**Yang TIDAK terbukti SAAT ITU: penautan id** -- lalu terbukti belakangan, lihat
+"Penautan id: terukur ulang" di bawah seksi ini. Lima kiriman uji sungguhan ke
+nomor RS sendiri (obrolan dengan diri sendiri, tidak mengganggu siapa pun)
+semuanya berakhir `sent` dengan `wa_message_id` tetap NULL:
 
 ```
 34815  sent  NULL  -
@@ -2574,6 +2575,73 @@ berikutnya tanpa mengulang seluruh percobaan.
 Selama belum tertaut, fiturnya merosot persis seperti rancangannya: kolom kosong
 dan UI berbunyi "Belum ada kabar" -- yang memang bukti POSITIF, bukan negatif.
 Tidak ada yang menyesatkan dan tidak ada yang rusak.
+
+**Seluruh dua paragraf di atas adalah catatan SEJARAH, dan kesimpulannya sudah
+dibantah.** Dugaan yang tertulis di sana -- bahwa jawabannya "didapat pada restart
+berikutnya" -- ternyata tepat: pengukuran ulang di bawah menunjukkan penautannya
+mulai berhasil pada 2026-08-10T01:18Z dan sejak itu bekerja untuk tujuan grup.
+
+### Penautan id: terukur ulang (12 Agustus 2026)
+
+Klaim "belum terbukti" di atas **dibantah pengukuran**, dan yang keliru bukan
+angkanya melainkan SAMPELNYA: ketiga baris di atas (34815, 34820, 34821)
+seluruhnya mendahului baris tertaut pertama, jadi ia mengukur keadaan sebelum
+penautannya pernah sekali pun berhasil.
+
+Batasnya dicari, bukan dikira:
+
+```
+id tertaut PERTAMA : 37116  (2026-08-10T01:18:26.000Z)
+id NULL TERAKHIR   : 43552
+-> BERCAMPUR: ada NULL sesudah penautan pertama
+```
+
+Sejak baris tertaut pertama:
+
+```
+226 dari 232 baris 'sent' membawa wa_message_id
+
+per jenis tujuan:
+  grup/petugas (chat_id) : 226/227 tertaut
+  pasien (nomor)         :   0/5   tertaut
+```
+
+Keenam yang tidak tertaut diperiksa satu per satu, bukan dihitung saja:
+
+```
+kiriman ke NOMOR sejak penautan pertama -- SELURUHNYA satu pemicu, satu ledakan:
+  #37591 AUTO_REPLY kirim=2026-08-10T04:12:11.000Z ack=NULL panjang=119
+  #37592 AUTO_REPLY kirim=2026-08-10T04:12:21.000Z ack=NULL panjang=307
+  #37595 AUTO_REPLY kirim=2026-08-10T04:12:37.000Z ack=NULL panjang=307
+  #37599 AUTO_REPLY kirim=2026-08-10T04:13:44.000Z ack=NULL panjang=307
+  #37606 AUTO_REPLY kirim=2026-08-10T04:15:42.000Z ack=NULL panjang=307
+
+kiriman ke GRUP yang tidak tertaut -- satu-satunya:
+  #43552 QUEUE_REG kirim=2026-08-12T09:15:20.000Z
+```
+
+Sebaran `ack_level` atas seluruh `outbox` berstatus `sent`:
+
+```
+ack=NULL : 407     <- seluruhnya mendahului 37116
+ack=1    : 147
+ack=2    :  79
+```
+
+Delapan baris `sent` terakhir, seluruhnya tertaut:
+
+```
+#44211 kirim=2026-08-12T14:37:05Z ack=1 ack_at=14:37:34Z wa_message_id=TERTAUT (51 karakter)
+#44112 kirim=2026-08-12T13:48:50Z ack=1 ack_at=13:48:50Z wa_message_id=TERTAUT (51 karakter)
+#44019 kirim=2026-08-12T13:03:38Z ack=1 ack_at=13:03:38Z wa_message_id=TERTAUT (51 karakter)
+#43926 kirim=2026-08-12T12:16:57Z ack=1 ack_at=12:16:58Z wa_message_id=TERTAUT (51 karakter)
+```
+
+Kesimpulan yang ditopang angka ini, dan tidak lebih dari itu: **penautan bekerja
+untuk tujuan grup/petugas (226/227)**; untuk kiriman ke NOMOR masih tak terjawab,
+karena satu-satunya sampel yang ada adalah lima baris `AUTO_REPLY` dari satu
+ledakan tiga menit. Nol dari lima BUKAN bukti bahwa kiriman ke nomor tidak pernah
+menaut.
 
 Baris uji dibersihkan (`DELETE ... WHERE body LIKE '%uji konfirmasi terkirim%'`,
 5 baris) dan skrip sementaranya dihapus.
@@ -3569,3 +3637,620 @@ pm2 restart wakhanza-web -> online, unstable restarts 0, /login HTTP 200
 **Tingkat D (hapus prosa alasan-implementasi) praktis tidak menghasilkan apa pun.** Perkiraan dari sampel memperkirakan ~6 blok; pembacaan sesungguhnya tidak menemukan satu pun yang jelas-jelas cuma berguna bagi penulis kodenya. Yang paling mendekati (angka pengukuran seperti "141 dari 348" pada ambang stok) ternyata menjelaskan ke staf KENAPA sebuah barang tidak ikut terhitung -- itu keterangan operasional, bukan catatan pengembang. Menghapusnya bukan keputusan yang aman diambil sepihak.
 
 **Halaman dashboard-nya sendiri tidak dibuka lewat peramban ber-login.** Perilakunya dibuktikan lewat CSS hasil build plus markup yang bentuknya persis seperti keluaran komponennya; membuat akun admin sementara pada sistem yang memegang data pasien bukan harga yang sepadan untuk memeriksa tata letak.
+
+### Lintasan kedua: menutup 77% prosa yang tidak pernah dibungkus apa pun
+
+Lintasan pertama di atas dinilai selesai, dan pemakainya mengatakan sebaliknya
+("kenapa masih belum semua menu"). Diukur, keberatan itu benar.
+
+**Keadaan sebelum lintasan kedua**, dari `src/app/(dashboard)/**` -- prosa
+(`<p>`/`<li>` >= 40 karakter setelah tag dan ekspresi `{..}` dibuang) dibagi
+menurut WADAHNYA:
+
+```
+sudah terlipat (Callout collapsible)   6.624   14%
+Callout terbentang (pagar, sengaja)    4.225    9%
+PROSA TELANJANG, tanpa wadah          36.815   77%   <- 190 blok, 16 rute
+```
+
+Sembilan dari enam belas rute (`broadcast-terjadwal`, `balasan-otomatis`,
+`pesan-masuk`, `broadcast`, `ringkasan`, `pengguna`, `profil`, `koneksi`,
+`nomor-bermasalah`) tidak punya SATU pun `Callout`, jadi tidak ada tombol lipat
+untuk ditekan di sana.
+
+**Sesudah**, diukur dengan alat yang sama, membagi tiga ember (terbentang saat
+halaman dibuka / di balik `<details>` / di balik ikon `Petunjuk`). Angka
+"sebelum" diambil dengan `git stash` lalu menjalankan skrip yang sama persis,
+bukan dari catatan:
+
+```
+                        sebelum   sesudah
+terbentang saat dibuka   42.187    31.004   (-11.183, -26,5%)
+dilipat                   8.238    13.533
+di balik ikon               880     7.397
+tersembunyi                 18%       40%
+```
+
+Per rute yang disentuh:
+
+```
+farmasi              page.tsx 2.811 -> 214 ; rute 43% tersembunyi
+administrasi         45% tersembunyi
+template             71% tersembunyi
+pesan-masuk          55% tersembunyi
+pengguna             54% tersembunyi
+balasan-otomatis     47% tersembunyi
+bpjs                 38% tersembunyi
+broadcast-terjadwal  15% tersembunyi
+```
+
+**Pembagiannya mengikuti aturan empat tingkat, bukan panjang teksnya.** Intro
+tab/halaman -> `Callout collapsible` dengan kesimpulan dinaikkan jadi judul.
+Teks bantuan di bawah kotak isian -> `Petunjuk`, dipasang sebagai SAUDARA
+`<label>` di dalam `<div className="mb-1 flex items-center gap-1">` -- tidak
+pernah di dalam `<label>`, karena tombol di sana akan menyalakan kontrolnya saat
+ikonnya ditekan.
+
+**Yang sengaja TIDAK disentuh, dan itu jawaban atas "kenapa masih ada yang
+panjang":** seluruh isi `*Switch.tsx` (apa yang terjadi saat dinyalakan, lantai
+aktivasi yang tak terbalikkan, peringatan "belum ada tujuan"), instruksi
+pemindaian QR di `/koneksi`, peringatan "Bukan untuk pertanyaan medis" di
+`/balasan-otomatis`, dan angka laju 16-46 nota/hari di `PenjualanSwitch`.
+Rute yang tetap 0% tersembunyi (`/broadcast`, `/ringkasan`, `/profil`,
+`/koneksi`) isinya hampir seluruhnya pesan status bersyarat dan instruksi
+berurutan.
+
+**Gerbang, seluruhnya dijalankan sesudah perubahan:**
+
+```
+tsc --noEmit          bersih
+eslint .              bersih
+npm test              47 suite / 785 uji lolos
+npm run build         Compiled successfully
+```
+
+`petunjuk.test.ts` (gerbang yang melarang `title=` berisi kalimat) ikut lolos --
+`Petunjuk` naik dari **4 menjadi 33** tanpa satu pun mengembalikan pola lamanya
+(dihitung dua kali: `git stash`, hitung, `git stash pop`). `verify:db` dan
+`verify:plans` tidak dijalankan ulang: lintasan ini tidak menyentuh satu pun
+berkas `khanza/` maupun koneksi database.
+
+## Rekap harian resep (`migrations/042`) -- kembaran rekap penjualan, di atas tabel yang paling dijaga
+
+Seluruh angka di bawah diukur langsung terhadap database Khanza produksi (`alca`)
+lewat `wakhanza_ro` (SELECT saja), bukan disimpulkan dari bentuk tabel.
+
+### Prefiks `no_resep` terbukti EKSAK terhadap `tgl_peresepan`
+
+Ini yang menentukan boleh-tidaknya rentang harian dipangkas lewat PRIMARY KEY.
+
+```
+SELECT SUM(LEFT(no_resep,8) = DATE_FORMAT(tgl_peresepan,'%Y%m%d')) AS cocok, ...
+
+  prefix vs tgl_peresepan    cocok 12353   beda 69   tgl_kosong 69
+  prefix vs tgl_perawatan    cocok 12327   beda 95   tgl_kosong  1
+
+SELECT DATEDIFF(tgl_peresepan, STR_TO_DATE(LEFT(no_resep,8),'%Y%m%d')) AS selisih_hari, COUNT(*)
+  selisih_hari 0 -> 12353
+```
+
+Ke-69 "beda" pada baris pertama adalah persis baris yang `tgl_peresepan`-nya
+kosong, bukan yang menyimpang: `DATEDIFF` menunjukkan **selisih nol hari pada
+SELURUH 12.353 baris bertanggal sah**, nol menyimpang ke kedua arah. Sekelas
+`nota_jual` (16.787/16.787), bukan sekelas `no_faktur` pengadaan (9 dari 910).
+
+Baris kedua yang membuktikan pemilihan kolomnya benar: terhadap `tgl_perawatan`
+(validasi apotek) prefiksnya menyimpang pada 94 baris, jadi memakai kolom itu
+sebagai "hari" akan menggeser sebagian resep ke rekap hari lain tanpa galat.
+
+### Sebaran jam yang mendasari jam bawaan 22:00
+
+90 hari terakhir, `HOUR(jam_peresepan)`:
+
+```
+  07   1     12  49     17 312   <- puncaknya
+  08 120     13 140     18 246
+  09 116     14 205     19 243
+  10 104     15 139     20  25
+  11  64     16 174     21   1
+```
+
+Ekor sepanjang 2,5 tahun: jam 20 = 325, jam 21 = 12, jam 22 = 2, jam 23 = 1;
+`MAX(jam_peresepan)` = **23:11:10**. Jadi TIDAK ADA jam yang nol -- berbeda dari
+penjualan, tempat 21:00 benar-benar nol sepanjang 90 hari. Rekap 21:00 akan
+melewatkan 15 dari 12.422 resep (~6 setahun), 22:00 melewatkan 3 (~1 setahun).
+Itulah kenapa jam bawaannya sengaja berbeda dari milik penjualan.
+
+### Dua rincian yang DITOLAK, dan pengukuran yang menolaknya
+
+```
+SELECT status, COUNT(*) FROM resep_obat GROUP BY status;
+  ralan   12422        <- satu-satunya nilai yang pernah ada
+
+SELECT YEAR(tgl_peresepan), COUNT(*) resep, SUM(divalidasi), SUM(diserahkan) ...
+  2024   1782   1782    907
+  2025   6130   6130   5608
+  2026   4441   4440   3975
+```
+
+`{status_resep}` ditolak karena `status` selamanya `ralan`. `{jumlah_divalidasi}`
+ditolak karena validasi terjadi pada praktis setiap resep sehingga angkanya akan
+selalu sama dengan `{jumlah_resep}`. Yang justru bergerak adalah PENYERAHAN (51%
+-> 91% -> 90%), dan itulah yang masuk ke pesan.
+
+### Kasus batas yang membentuk `gabungRekapResep()`
+
+```
+resep tanpa satu baris resep_dokter pun      135
+  di antaranya tanpa racikan juga             69   (jadi 66 racikan-saja)
+racikan yatim (tanpa resep_obat)               0
+kd_dokter berbeda sepanjang 12.422 baris       1
+```
+
+135 resep tanpa baris obat membuktikan sisi header WAJIB dipertahankan saat sisi
+item kosong -- membuangnya membuat 66 resep racikan-saja lenyap dari hitungan.
+Satu-satunya `kd_dokter` adalah alasan `{rincian_dokter}` dibiarkan sebagai
+variabel yang bisa dihapus staf, bukan dilebur ke badan pesan.
+
+Hari tanpa resep, yang menentukan bawaan "pesan saat kosong":
+
+```
+SELECT DAYNAME(tgl_peresepan), COUNT(DISTINCT tgl_peresepan) hari_ada, COUNT(*) resep
+  Monday 13/511  Tuesday 12/314  Wednesday 12/279
+  Thursday 13/340  Friday 13/332  Saturday 13/163
+```
+
+Minggu tidak muncul sama sekali: **nol resep pada seluruh 13 hari Minggu**.
+
+### Rencana query: ketiganya `range`, tanpa izin pindai penuh
+
+`npm run verify:plans`:
+
+```
+[ok] FARMASI_RESEP_REKAP_HEADER  ro range PRIMARY  rows~50
+[ok] FARMASI_RESEP_REKAP_HEADER  d  eq_ref PRIMARY rows~1
+[ok] FARMASI_RESEP_REKAP_ITEM    ro range PRIMARY  rows~50
+[ok] FARMASI_RESEP_REKAP_ITEM    rd ref no_resep   rows~2
+[ok] FARMASI_RESEP_REKAP_RACIKAN rr range PRIMARY  rows~2  (Using index)
+[ok] FARMASI_RESEP_REKAP_RACIKAN ro eq_ref PRIMARY rows~1
+
+verify:plans lolos.
+```
+
+Tidak satu pun `allowFullScan` ditambahkan, dan tidak akan dibutuhkan saat
+tabelnya membesar: `no_resep` adalah PRIMARY KEY `resep_obat` dan
+`resep_dokter_racikan`, serta indeks pada `resep_dokter`.
+
+### `npm run dryrun:resep` terhadap data produksi
+
+Hari sibuk (2026-08-10), dengan nama dokter dan identitas RS disunting di sini:
+
+```
+  kolom yang benar-benar terbaca: kd_dokter, nm_dokter, jml_resep, jml_serah,
+                                  jml_baris, jml_obat, jml_racikan
+  [ok] PAGAR PRIVASI -- tidak satu pun kolom pasien, obat, atau dosis terbaca
+  50 resep, 235 baris obat (1435 satuan), 2 racikan; 36 diserahkan, 14 belum; 1 dokter
+  [ok] diserahkan + belum = jumlah resep
+
+*Rekap Resep Harian*
+Tanggal : 10-08-2026
+Jumlah resep : 50
+Baris obat : 235 (1.435 satuan)
+Racikan : 2
+Sudah diserahkan : 36
+Belum diserahkan : 14
+*Rincian per dokter:*
+- <nama dokter> : 50 resep, 235 baris obat, 2 racikan
+```
+
+Keenam angka itu cocok persis dengan pengukuran SQL langsung atas tanggal yang
+sama (`COUNT(*)` = 50, `COUNT(*)`/`SUM(jml)` pada `resep_dokter` = 235/1435,
+racikan = 2, penyerahan = 36). Jadi yang terbukti bukan cuma skripnya berjalan,
+melainkan seluruh jalur query -> penggabungan -> render menghasilkan angka yang
+sama dengan database.
+
+Hari Minggu (2026-08-09) menempuh cabang yang lain:
+
+```
+  kolom yang benar-benar terbaca: (tidak ada baris)
+  0 resep, ... ; 0 dokter
+  Hari itu tidak ada resep, dan "pesan saat kosong" dibiarkan kosong
+  -- jadi sistem sengaja DIAM.
+```
+
+### Dua gerbang dibuktikan MENGGIGIT, bukan diasumsikan
+
+**1. Pagar privasi `dryrun:resep`.** `ro.no_rawat` ditambahkan ke daftar SELECT
+header dengan sengaja, lalu dijalankan:
+
+```
+  kolom yang benar-benar terbaca: kd_dokter, no_rawat, nm_dokter, ...
+  [BOCOR] kolom terlarang terbaca: no_rawat -- lihat komentar pembuka khanza/farmasiStaf.ts
+  kode keluar skrip saat bocor = 1
+  kode keluar sesudah dipulihkan = 0
+```
+
+`no_rawat` masuk daftar terlarang justru karena ia BUKAN identitas: ia kunci
+menuju `reg_periksa`, jadi kehadirannya berarti jalan menuju pasien sudah
+terbuka walau namanya belum ikut terbaca. Kode keluar 1 membuktikan ia bisa
+menggagalkan pemeriksaan, bukan sekadar mencetak peringatan.
+
+**2. Pendaftaran `{rincian_dokter}` di `MULTILINE_VARIABLES`.** Barisnya dihapus
+dengan sengaja, lalu `npx jest src/core/resepRekap`:
+
+```
+x bertahan melewati renderTemplate tanpa dilipat atau dipotong
+  Received length: 2
+  Received array: ["Rincian:", "- Ani : 5 resep, 0 baris obat - Budi : 2 resep, 0 baris obat"]
+```
+
+Daftar tiga dokter melipat jadi SATU baris -- persis kegagalan diam yang uji itu
+ada untuk menjaganya (dan pada daftar yang lebih panjang ia juga terpotong di 60
+karakter). Uji ini sengaja memeriksa PERILAKU alih-alih keanggotaan himpunannya,
+pola yang sama dipakai `stokDarurat`/`pengadaan`/`hibah`/`pemesanan`.
+
+### Ekstraksi `core/rekapJadwal.ts` terbukti nol-perubahan-perilaku
+
+`bacaJamRekap`/`tulisJamRekap`/`hariRekap` dipindah dan di-re-export dari
+`core/penjualanRekap.ts`. Uji lama dijalankan tanpa satu asersi pun diubah:
+
+```
+npx jest src/core/penjualanRekap
+  Tests: 30 passed, 30 total
+```
+
+Tidak satu pun impor yang sudah ada berubah, jadi `penjualanRekapRunner.ts` dan
+`penjualanActions.ts` yang sedang berjalan di produksi tidak tersentuh.
+
+### Gerbang lengkap
+
+```
+npm run migrate      -> 042_resep_rekap.sql diterapkan (1 migrasi)
+npx tsc --noEmit     -> bersih
+npx eslint .         -> bersih
+npm test             -> 48 suite, 804 uji lolos   (dari 47 suite / 785 uji)
+npm run verify:db    -> lolos (sik menolak tulisan, audit_log append-only tegak)
+npm run verify:plans -> lolos
+npm run build        -> sukses
+```
+
+### Yang TIDAK diverifikasi, dan kenapa
+
+- **Pengiriman WhatsApp sungguhan.** `farmasi.resep_rekap_enabled` default MATI
+  dan sengaja TIDAK dinyalakan: menyalakannya mengirim pesan ke grup/petugas
+  sungguhan, dan yang memutuskan itu rumah sakit. Jalur enqueue-nya sendiri
+  adalah `enqueueMessage()` yang sama dipakai sebelas kelas pemicu lain.
+- **Perilaku saat ada lebih dari satu dokter peresep.** Tidak bisa diuji terhadap
+  data mesin ini (`kd_dokter` cuma punya satu nilai), jadi dijamin lewat unit
+  test `gabungRekapResep`/`formatRincianDokter` dengan tiga dokter buatan --
+  termasuk urutannya dan baris per dokter.
+- **Worker BELUM dimulai ulang.** Selama sakelarnya mati, perilaku kode lama dan
+  baru identik, jadi tidak ada yang perlu dikejar hari ini. Tapi **sebelum
+  sakelarnya dinyalakan, worker harus dimulai ulang** -- kalau tidak, sakelarnya
+  menyala di dashboard sementara worker tidak pernah menjalankan siklus
+  `resep-rekap`: gagal DIAM, tanpa satu pun galat. Sengaja tidak dilakukan
+  sekarang: worker memegang sesi WhatsApp, dan restart yang tidak perlu adalah
+  persis yang berulang kali menjatuhkannya ke crash loop.
+
+### Web dimulai ulang, worker tidak
+
+`npm run build` menimpa `.next` di disk sementara proses PM2 memegang kode lama
+di memori -- keadaan yang tidak boleh dibiarkan, karena `next start` membaca
+potongan rute dari `.next` saat berjalan. Prosedur yang sudah tercatat
+(`npm run build` lalu `pm2 restart wakhanza-web`) dijalankan:
+
+```
+[PM2] [wakhanza-web](4) OK
+curl /login                 -> HTTP 200
+curl /farmasi?tab=resep     -> HTTP 307   (tanpa sesi, gerbang auth menahan)
+```
+
+Penanda fiturnya ada di build yang benar-benar dilayani:
+
+```
+grep -rl "resep_rekap_enabled" .next/server  -> src_app_(dashboard)_farmasi_*.js
+grep -rl "Rekap resep harian"  .next/server  -> src_app_(dashboard)_farmasi_*.js
+```
+
+`wakhanza-worker` sengaja TIDAK disentuh (lihat butir di atas).
+
+## Nilai rupiah pada rekap resep (`migrations/043`) -- angkanya dari tabel PENAGIHAN, bukan daftar harga
+
+### `resep_dokter` tidak punya kolom harga sama sekali
+
+Yang memaksa angkanya datang dari tabel lain, bukan pilihan gaya:
+
+```
+SHOW COLUMNS FROM resep_dokter
+  no_resep:varchar(14)[MUL]  kode_brng:varchar(15)[MUL]  jml:double  aturan_pakai:varchar(150)
+```
+
+Empat kolom, nol di antaranya rupiah.
+
+### Katalog vs yang benar-benar ditagihkan -- 2026-08-10, 50 resep
+
+```
+A.  katalog non-racik    SUM(rd.jml * databarang.ralan)     235 baris  Rp1.460.911
+A2. katalog bahan racik  SUM(rrd.jml * databarang.ralan)      9 baris  Rp   10.915
+    A total                                                 244 baris  Rp1.471.826
+
+B.  SUM(detail_pemberian_obat.total) lewat join resep_obat  245 baris  Rp1.455.477
+    rincian: obat 1.455.477 - embalase 0 - tuslah 0 - modal 996.336
+```
+
+Katalog meleset 244 vs 245 baris dan Rp16.349. Yang mematikannya bukan selisih itu
+melainkan bahwa `databarang` menyimpan harga HARI INI sementara rekap boleh dibaca
+untuk tanggal lampau (`farmasi.resep_rekap_offset_hari`, argumen tanggal `dryrun:resep`).
+
+Cakupan join, 90 hari:
+
+```
+resep 1.939 - resep yang punya baris penagihan 1.934      (5 belum divalidasi)
+resep 9.038 - tanpa dpo 5 - tanpa dpo DAN belum validasi 0
+databarang.ralan untuk obat yang diresepkan: 8.803 baris, katalog_hilang 0, ralan_nol 0
+```
+
+### `total` berwenang, bukan rumusnya
+
+```
+SUM(ABS(total - (biaya_obat*jml + embalase + tuslah)) > 0.01)   21 dari 9.076 baris (90 hari)
+SUM(embalase <> 0) / SUM(tuslah <> 0)                          0 / 0 dari 33.198 baris (365 hari)
+```
+
+Embalase dan tuslah nol seluruhnya, jadi keduanya tidak jadi variabel sendiri --
+tapi sudah ikut terhitung di dalam `total`.
+
+### Mustahil dobel hitung
+
+```
+SELECT COUNT(*) FROM (
+  SELECT no_rawat, tgl_perawatan, jam, COUNT(*) n FROM resep_obat
+  WHERE tgl_peresepan >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+  GROUP BY no_rawat, tgl_perawatan, jam HAVING n > 1) x
+  -> kombinasi_dipakai_ulang = 0
+```
+
+### Rencana query -- tanpa izin pindai penuh
+
+```
+EXPLAIN (hari tersibuk):
+  ro   range  PRIMARY  key_len 16  rows 50
+  dpo  ref    PRIMARY  key_len 25  ref alca.ro.tgl_perawatan,alca.ro.jam,alca.ro.no_rawat  rows 2
+  [31 ms]
+
+npm run verify:plans
+  [ok] FARMASI_RESEP_REKAP_NILAI ro range PRIMARY  rows~50
+  [ok] FARMASI_RESEP_REKAP_NILAI dpo ref PRIMARY  rows~2
+  verify:plans lolos.
+```
+
+### Migrasi menembus template CRLF
+
+Nilai tersimpan SEBELUM (staf sudah menyuntingnya lewat form, jadi CRLF -- bukan LF
+seperti yang di-seed 042):
+
+```
+...Sudah diserahkan : {jumlah_diserahkan}\r\nBelum diserahkan : {jumlah_belum_serah}\r\n\r\n*Rincian per dokter:*...
+```
+
+SESUDAH `npm run migrate` (`043_resep_rekap_nilai.sql`):
+
+```
+...Belum diserahkan : {jumlah_belum_serah}\r\n\r\n*Nilai obat : {nilai_obat}*\r\n\r\n*Rincian per dokter:*...
+```
+
+Baris yang disisipkan memakai CRLF, mengikuti gaya yang sudah dipakai baris di
+sekitarnya -- bukan LF yang akan mencampur dua gaya dalam satu template.
+
+### Pesan sungguhan (`npm run dryrun:resep -- alca 2026-08-10`)
+
+```
+kolom yang benar-benar terbaca: kd_dokter, nm_dokter, jml_resep, jml_serah,
+                                jml_baris, jml_obat, jml_racikan, nilai_obat
+[ok] PAGAR PRIVASI -- tidak satu pun kolom pasien, obat, atau dosis terbaca
+
+50 resep, 235 baris obat (1435 satuan), 2 racikan; 36 diserahkan, 14 belum;
+1 dokter; nilai Rp1.455.477
+[ok] total rupiah = jumlah rupiah seluruh dokter
+[ok] diserahkan + belum = jumlah resep
+
+  Jumlah resep : 50
+  Baris obat : 235 (1.435 satuan)
+  Racikan : 2
+
+  Sudah diserahkan : 36
+  Belum diserahkan : 14
+
+  *Nilai obat : Rp1.455.477*
+
+  *Rincian per dokter:*
+  - dr. (nama disamarkan) : 50 resep, 235 baris obat, 2 racikan, Rp1.455.477
+```
+
+Rp1.455.477 cocok persis dengan pengukuran SQL langsung di atas.
+
+### Pagar privasi dibuktikan MENGGIGIT
+
+`MAX(ro.no_rawat) AS no_rawat` ditambahkan ke daftar SELECT dengan sengaja:
+
+```
+kolom yang benar-benar terbaca: ..., no_rawat, nilai_obat
+[BOCOR] kolom terlarang terbaca: no_rawat -- lihat komentar pembuka khanza/farmasiStaf.ts
+exit=1
+```
+
+Dikembalikan sesudahnya.
+
+### Unit test dibuktikan MENGGIGIT (dua arah)
+
+```
+1. bagian.push(formatRupiah(...))  ->  if (b.nilaiObat > 0) bagian.push(...)
+   x SELALU menyebut rupiah, termasuk saat nol
+   Tests: 1 failed, 22 passed
+
+2. total diganti penurunan terpisah yang menyimpang (x2)
+   x menjumlahkan keempat sisi per dokter
+   x menghitung resep sekali per RESEP, bukan sekali per baris obat
+   x tidak membuang sisi nilai yang dokternya tidak ada di header
+   x menerima angka yang datang sebagai string dari mysql2
+   x menjamin total rupiah = jumlah rupiah seluruh dokter
+   Tests: 5 failed, 18 passed
+```
+
+Keduanya dikembalikan; 23 uji `core/resepRekap` lolos.
+
+### Gerbang penuh
+
+```
+npm run typecheck    -> bersih
+npm run lint         -> bersih
+npm test             -> Test Suites: 48 passed, Tests: 808 passed
+npm run verify:db    -> sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK -- lolos
+npm run verify:plans -> lolos
+npm run build        -> Compiled successfully in 7.3s
+```
+
+### Pemasangan
+
+`farmasi.resep_rekap_enabled` = `1` SEBELUM pekerjaan ini -- fiturnya sudah
+berjalan, `resep_rekap_last_run` = `2026-08-12`. Jadi worker WAJIB dimulai ulang,
+bukan boleh ditunda: template sudah memuat `{nilai_obat}` sementara kode lama tidak
+mengenalnya.
+
+```
+pm2 restart wakhanza-web                     -> online
+pm2 stop wakhanza-worker                     -> ok
+Get-CimInstance ... chrome.exe *wwebjs_auth* -> Chromium sesi BERSIH, nol proses tersisa
+pm2 start wakhanza-worker                    -> ok
+wa_session: status ready - umur denyut 3 detik - last_error null
+```
+
+### JEBAKAN PENGUKURAN yang ikut terkoreksi: `CONVERT_TZ` bergantung pada KLIEN
+
+CLAUDE.md sebelumnya menyatakan koreksi 25.200 detik itu **"SELALU"** perlu.
+Terukur, itu keliru -- dan menerapkannya lewat Sequelize menghasilkan galat 7 jam
+yang sama persis dengan tanda terbalik:
+
+```
+@@global.time_zone   SYSTEM
+@@session.time_zone  +00:00        <- Sequelize menyetelnya sendiri
+hb_mentah            2026-08-12T14:08:44.000Z
+now_mariadb          2026-08-12T14:08:47.000Z
+umur_mentah          3             <- BENAR
+umur_convert         -25197        <- worker seolah berdenyut 7 jam di masa depan
+```
+
+Lewat CLI `mysql` sesinya `SYSTEM` (WIB) sehingga `CONVERT_TZ` memang perlu; lewat
+Sequelize kedua sisinya sudah UTC. Kalimatnya di CLAUDE.md diperbaiki jadi tabel
+per-klien.
+
+### Yang TIDAK dikerjakan, sengaja
+
+- **Sakelar `farmasi.resep_rekap_nilai`** -- ditolak, lihat CLAUDE.md; sakelar yang
+  memutus angka agregat menyisakan `*Nilai obat : *` yang menggantung (pelajaran 031).
+- **`{embalase}` / `{tuslah}` sebagai variabel sendiri** -- nol pada seluruh 33.198
+  baris setahun; sudah terhitung di dalam `total`.
+- **Modal/margin (`h_beli`)** -- terbaca Rp996.336 pada hari contoh, dan sengaja
+  tidak diambil: itu harga beli dari pemasok, pertanyaan dagang tersendiri yang
+  sudah punya tempatnya di PENGADAAN (`farmasi.pengadaan_harga`).
+
+
+## Rekap resep dikirim manual di luar jadwal (12 Agustus 2026)
+
+Atas permintaan eksplisit pemilik sistem, rekap resep hari itu dikirim di luar
+jadwalnya supaya bentuk barunya (rupiah, migrations/043) terlihat malam itu juga
+alih-alih menunggu jadwal besok.
+
+**Kenapa tidak bisa sekadar memundurkan penandanya:** rekap hari itu SUDAH
+terkirim pukul 20.48 WIB, tujuh belas menit SEBELUM migrations/043 diterapkan
+pukul 21.05 -- jadi isinya memang belum memuat `{nilai_obat}`, dan itu benar
+menurut urutan waktunya, bukan cacat kode:
+
+```
+schema_migrations : 2026-08-12T21:05:26  043_resep_rekap_nilai.sql  (WIB, ditulis NOW() MariaDB)
+outbox #44112     : 2026-08-12T13:48:47Z (UTC, ditulis Sequelize) = 20:48 WIB
+  -> body memuat 'Nilai obat' : TIDAK
+```
+
+Dua tabel di database yang sama, dua zona berbeda -- jebakan yang sama dengan
+`heartbeat_at`, dan sebabnya sama: yang satu ditulis `NOW()` MariaDB di sesi WIB,
+yang satu ditulis Sequelize di sesi ber-`timezone: '+00:00'`.
+
+Kunci idempoten rekap sengaja TIDAK memuat waktu (satu hari = satu rekap,
+ditegakkan `uq_idem`), jadi mengulanginya dengan kunci yang sama akan ditolak
+diam-diam. Yang dipakai: rantai fungsi PRODUKSI yang sama persis
+(`muatTargetAktif` -> `susunRekapResepHarian` -> `loadFarmasiContext` ->
+`enqueueMessage`) dengan satu bagian stempel waktu ditambahkan ke kuncinya --
+pola yang sama dipakai tombol "Kirim uji". **Tidak satu pun baris `outbox` yang
+sudah ada dihapus atau diubah**, dan `farmasi.resep_rekap_last_run` sengaja tidak
+disentuh supaya jadwal besok berjalan normal. Tercatat `audit_log` dengan aktor
+`cli:resep_rekap_manual`, dibedakan dari `system:resep_rekap` milik worker.
+
+Penghalangnya ternyata sesi, bukan kodenya. Riwayat `wa_session_event`
+memperlihatkan pola normal `ready -> authenticating -> ready` yang selalu selesai
+dalam 1-2 detik (penyuntikan ulang biasa), lalu satu yang tidak:
+
+```
+#62 2026-08-12T14:24:12Z ready -> authenticating     <- tersangkut
+#61 2026-08-12T14:08:17Z authenticating -> ready     (2 detik)
+#60 2026-08-12T14:08:15Z ready -> authenticating
+#59 2026-08-12T13:38:49Z authenticating -> ready     (1 detik)
+```
+
+Denyutnya sehat sepanjang itu (berputar bersih 0->30 detik), jadi yang tersangkut
+sesi WhatsApp-nya, bukan prosesnya -- pembedaan yang cuma bisa dibaca dari DUA
+kolom sekaligus, bukan dari `status` saja.
+
+**Watchdog sengaja TIDAK didahului restart manual.** Ambang 15 menit itu hasil
+pengamatan bahwa penautan ulang terlalu sering justru memperlambat sinkronisasi
+WhatsApp; restart di menit ke-6 adalah persis ketidaksabaran yang sudah tercatat
+merugikan. Sesinya pulih SENDIRI pukul 14:35:44Z, sebelum watchdog (14:39:12Z)
+sempat bertindak:
+
+```
+  2026-08-12T14:35:34.904Z  status=authenticating denyut=23s
+  2026-08-12T14:35:39.909Z  status=authenticating denyut=0s
+  2026-08-12T14:35:44.916Z  status=ready denyut=0s
+[ok] sesi READY dan denyutnya segar
+```
+
+Pratinjau lebih dulu (`npm run dryrun:resep`, tidak mengirim apa pun):
+
+```
+kolom yang benar-benar terbaca: kd_dokter, nm_dokter, jml_resep, jml_serah,
+                                jml_baris, jml_obat, jml_racikan, nilai_obat
+[ok] PAGAR PRIVASI -- tidak satu pun kolom pasien, obat, atau dosis terbaca
+31 resep, 141 baris obat (785 satuan), 4 racikan; 26 diserahkan, 5 belum;
+1 dokter; nilai Rp860.362
+[ok] total rupiah = jumlah rupiah seluruh dokter
+[ok] diserahkan + belum = jumlah resep
+```
+
+Lalu dikirim, dan sampai pada percobaan PERTAMA:
+
+```
+#44211 status=sent percobaan=1 kirim=2026-08-12T14:37:05.000Z ack=1
+send_log:
+  percobaan 1 sent 201 ms
+```
+
+Isi yang benar-benar terkirim -- angkanya cocok persis dengan pratinjau:
+
+```
+*Rekap Resep Harian*
+...
+Jumlah resep : 31
+Baris obat : 141 (785 satuan)
+Racikan : 4
+
+Sudah diserahkan : 26
+Belum diserahkan : 5
+
+*Nilai obat : Rp860.362*
+
+*Rincian per dokter:*
+- dr. (nama disamarkan) : 31 resep, 141 baris obat, 4 racikan, Rp860.362
+```
+
+Ini sekaligus kiriman pertama yang membawa `{nilai_obat}` ke penerima sungguhan.
+

@@ -102,6 +102,13 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // pemberitahuan yang gagal sampai ke pasien -- penerimanya memang staf.
   FARMASI_VALIDASI: 'Apotek: resep divalidasi',
   FARMASI_PENYERAHAN: 'Apotek: obat diserahkan',
+  // Rekap harian atas KEDUA baris di atasnya (042). Labelnya menyebut "rekap"
+  // dan "harian" sekaligus, dengan alasan yang sama yang memisahkan bunyi
+  // FARMASI_PENJUALAN dari FARMASI_PENJUALAN_REKAP: tiga baris apotek yang
+  // berdampingan di Antrean harus bisa dibedakan sekali baca, dan yang
+  // membedakan ketiganya bukan isinya melainkan APAKAH ia satu kejadian atau
+  // sehari penuh.
+  FARMASI_RESEP_REKAP: 'Apotek: rekap resep harian',
   FARMASI_UJI: 'Apotek: pesan uji',
   FARMASI_STOK_DARURAT: 'Apotek: persediaan menipis',
   // Keempat NOTA BARANG, diurutkan seperti tabnya di /farmasi. Labelnya

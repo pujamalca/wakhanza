@@ -490,6 +490,72 @@ export const REKAP_PENJUALAN_TEMPLATE_VARIABLES = [
   'kontak_rs',
 ] as const;
 
+/**
+ * REKAP HARIAN RESEP (`/farmasi?tab=resep`, migrations/042) -- agregat sehari
+ * penuh atas resep yang DITULIS DOKTER, dikirim ke tujuan yang sama dengan
+ * notifikasi resep per kejadian.
+ *
+ * TERPISAH dari `FARMASI_TEMPLATE_VARIABLES` dengan alasan yang sama yang
+ * memisahkan rekap penjualan dari nota penjualan: hampir seluruh variabel di
+ * sana menyebut SATU resep (`{no_resep}`, `{nama_pasien}`, `{no_rm}`,
+ * `{nama_poli}`) dan tidak punya arti pada agregat sehari. Digabung, staf bisa
+ * menyimpan rekap yang memuat `{no_resep}` lalu menerimanya kosong setiap hari
+ * tanpa satu pun galat.
+ *
+ * Dan di sini pemisahan itu memikul lebih dari kerapian. Daftar farmasi memang
+ * punya `{nama_pasien}`/`{no_rm}` -- itulah yang membuat `farmasi.enabled` jadi
+ * keputusan privasi terberat di halaman Farmasi. Rekap ini tidak punya satu pun
+ * di antaranya, dan tidak bisa punya: query-nya tidak menyentuh `reg_periksa`
+ * maupun `pasien` sama sekali (§5.2). Jadi daftar yang terpisah inilah yang
+ * membuat "rekap tidak menyebut pasien" jadi sifat yang ditegakkan, bukan
+ * kebiasaan yang bisa berubah saat seseorang menambah satu variabel.
+ *
+ * `{jumlah_belum_serah}` DITURUNKAN dari `{jumlah_resep}` - `{jumlah_diserahkan}`,
+ * bukan di-query sendiri, sehingga ketiganya dijamin berjumlah secara aritmetika
+ * dan pembaca bisa menjumlahkannya sendiri di layar.
+ *
+ * Yang TIDAK ada, dan keduanya karena diukur: `{status_resep}` (`resep_obat.status`
+ * bernilai 'ralan' pada SELURUH 12.422 baris) dan `{jumlah_divalidasi}` (validasi
+ * apotek terjadi pada praktis setiap resep -- 2024 1.782/1.782, 2025 6.130/6.130,
+ * 2026 4.440/4.441 -- sehingga angkanya akan selalu sama dengan `{jumlah_resep}`).
+ * Rincian yang selamanya mengatakan hal yang sama mengajari pembacanya berhenti
+ * membaca; yang justru bergerak adalah PENYERAHAN, dan itulah yang masuk.
+ *
+ * `{rincian_dokter}` masuk MULTILINE_VARIABLES di bawah -- aman HANYA karena
+ * `core/resepRekap.ts` memanggil sanitizeValue() sendiri untuk tiap `nm_dokter`,
+ * dipatok unit test tersendiri di `resepRekap.test.ts`.
+ */
+export const REKAP_RESEP_TEMPLATE_VARIABLES = [
+  'tanggal_rekap',
+  'jumlah_resep',
+  'jumlah_item',
+  'jumlah_obat',
+  'jumlah_racikan',
+  'jumlah_diserahkan',
+  'jumlah_belum_serah',
+  /**
+   * Rupiah yang SUDAH masuk penagihan atas resep hari itu (migrations/043).
+   *
+   * Bukan harga katalog: ia dijumlahkan dari `detail_pemberian_obat.total`, yang
+   * dibekukan Khanza saat apotek memvalidasi -- jadi rekap tanggal lampau tetap
+   * menyebut angka yang benar-benar ditagihkan. Lihat
+   * `khanza/farmasiStaf.ts`'s `buildRekapResepNilaiSql()` untuk kenapa katalog
+   * ditolak.
+   *
+   * Sengaja TIDAK dipecah jadi `{embalase}`/`{tuslah}`: keduanya nol pada seluruh
+   * 33.198 baris setahun di sini, dan variabel yang selamanya berbunyi "Rp0"
+   * mengajari pembacanya melewati bagian itu. Keduanya sudah ikut terhitung di
+   * dalam angka ini.
+   */
+  'nilai_obat',
+  'rincian_dokter',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
 
 /**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
@@ -565,6 +631,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...PENGADAAN_TEMPLATE_VARIABLES,
     ...PENJUALAN_TEMPLATE_VARIABLES,
     ...REKAP_PENJUALAN_TEMPLATE_VARIABLES,
+    ...REKAP_RESEP_TEMPLATE_VARIABLES,
     ...HIBAH_TEMPLATE_VARIABLES,
     ...PEMESANAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
@@ -582,6 +649,7 @@ export type TemplateVariable =
   | (typeof PENGADAAN_TEMPLATE_VARIABLES)[number]
   | (typeof PENJUALAN_TEMPLATE_VARIABLES)[number]
   | (typeof REKAP_PENJUALAN_TEMPLATE_VARIABLES)[number]
+  | (typeof REKAP_RESEP_TEMPLATE_VARIABLES)[number]
   | (typeof HIBAH_TEMPLATE_VARIABLES)[number]
   | (typeof PEMESANAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
@@ -650,6 +718,14 @@ const MULTILINE_VARIABLES = new Set<string>([
   // memanggil sanitizeValue() sendiri untuk tiap nama `jns_jual` -- patokannya
   // ada di penjualanRekap.test.ts, sesuai kewajiban di atas.
   'rincian_jenis',
+  // Rekap harian resep (042). Dirakit `core/resepRekap.ts`, yang memanggil
+  // sanitizeValue() sendiri untuk tiap `nm_dokter` -- input bebas petugas
+  // Khanza. Patokannya ada di resepRekap.test.ts, dan sengaja berbentuk uji
+  // PERILAKU (daftar tiga dokter yang harus tetap tiga baris sesudah
+  // renderTemplate) alih-alih memeriksa keanggotaan himpunan ini: yang perlu
+  // dijaga adalah akibatnya, dan akibat itu gagal DIAM -- daftarnya cuma
+  // terlipat jadi satu baris lalu terpotong di 60 karakter.
+  'rincian_dokter',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

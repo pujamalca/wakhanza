@@ -1,0 +1,243 @@
+-- 042_resep_rekap.sql
+-- REKAP HARIAN RESEP -- satu pesan sehari berisi jumlah resep yang ditulis
+-- dokter hari itu, pada jam yang disetel staf, ke tujuan yang SAMA dengan
+-- notifikasi resep per kejadian (`farmasi_target.is_active`).
+--
+-- ===========================================================================
+-- Bentuknya meniru migrations/041, dan kenapa itu memang yang diminta
+-- ===========================================================================
+--
+-- Diminta persis begitu: "kan ada rekap penjualan saya mau juga ada rekap resep
+-- dokter mirip fitur dengan rekap penjualan". Jadi seluruh keputusan yang sudah
+-- dibayar di 041 berlaku apa adanya di sini, dan yang perlu ditulis ulang cuma
+-- yang BERBEDA -- karena yang berbeda itulah yang gagal diam kalau 041 disalin
+-- mentah-mentah.
+--
+-- Yang SAMA, dan sengaja tidak diperdebatkan lagi:
+--
+--   kelas pemicu     WAKTU. Tidak ada baris di `sik` yang "muncul" untuk
+--                    memicunya; yang memicunya adalah jam dinding melewati waktu
+--                    yang disetel staf, lalu keadaan hari itu dibaca apa adanya.
+--   bentuk runner    meniru `runBpjsKontrolIfDue()`, bukan siklus pindai. Sakelar
+--                    DAN jam dibaca ULANG tiap siklus, jadi staf yang mengubah
+--                    jamnya berlaku hari itu juga alih-alih menunggu worker
+--                    dimulai ulang (pelajaran `startScheduler()`/BOOK_REMIND).
+--   penanda          `farmasi.resep_rekap_last_run` CUMA penghemat query. Yang
+--                    mencegah kirim ganda adalah kunci idempoten, ditegakkan
+--                    `uq_idem` di mesin database. Dimajukan SESUDAH berhasil,
+--                    tidak pernah sebelum (pelajaran `bpjs.kontrol_last_run`).
+--   jam tenang       DILEWATI, karena jamnya dipilih staf sendiri. Menundukkannya
+--                    berarti diam-diam mengabaikan setelan yang baru saja dibuat.
+--   daftar tolak     tidak berlaku -- tidak ada nomor pasien untuk dicocokkan.
+--   lantai aktivasi  TIDAK ADA, dan itu bukan kelalaian: lantai menahan ARSIP,
+--                    dan rekap harian hanya pernah membaca SATU hari. Pagar yang
+--                    tidak menahan apa pun mengajari pembacanya bahwa pagar boleh
+--                    dekoratif.
+--
+-- ===========================================================================
+-- Sakelarnya BERDIRI SENDIRI dari `farmasi.enabled` -- keputusan paling menentukan
+-- ===========================================================================
+--
+-- Sama seperti 041 terhadap `farmasi.penjualan_enabled`, dan alasannya identik.
+-- Rekap adalah ALTERNATIF dari kabar per kejadian, bukan tambahannya: RS yang
+-- cuma ingin tahu "hari ini ada berapa resep" harus bisa mendapatkannya TANPA
+-- lebih dulu menyalakan notifikasi tiap resep divalidasi dan tiap obat
+-- diserahkan -- yaitu dua pesan per resep, puluhan kali sehari.
+--
+-- Dan di sini bedanya bahkan LEBIH tajam daripada di penjualan. `farmasi.enabled`
+-- menyalakan pesan yang memuat NAMA PASIEN, NOMOR REKAM MEDIS, dan POLI ke sebuah
+-- grup WhatsApp -- keputusan privasi paling berat di halaman Farmasi, dan
+-- satu-satunya alasan sakelar itu default MATI sejak awal. Menjadikan rekap ini
+-- bertingkat di bawahnya akan memaksa RS mengambil keputusan privasi itu hanya
+-- untuk mendapatkan satu pesan berisi ANGKA. Itu kebalikan persis dari yang
+-- diminta, dan kebalikan dari yang benar.
+--
+-- Keduanya boleh menyala bersama, dan itu sah. Halaman mengatakan keduanya
+-- berdiri sendiri supaya kombinasi itu DIPILIH, bukan terjadi karena tidak
+-- sengaja.
+--
+-- ===========================================================================
+-- Harinya ditentukan `tgl_peresepan`, dan prefiks `no_resep` EKSAK terhadapnya
+-- ===========================================================================
+--
+-- `resep_obat` punya tiga pasang kolom waktu (lihat `khanza/farmasiStaf.ts`):
+-- peresepan, validasi apotek, penyerahan. Yang menentukan "hari" di rekap ini
+-- adalah PERESEPAN -- kapan dokter menulisnya -- karena itulah yang ditanyakan
+-- ("rekap resep dokter"), dan karena prefiks `no_resep` menyandikan persis itu.
+--
+-- Diukur atas seluruh 12.422 baris:
+--
+--   LEFT(no_resep,8) vs tgl_peresepan    12.353 cocok, 0 menyimpang
+--                                        (69 sisanya `tgl_peresepan` kosong)
+--   DATEDIFF keduanya                    0 hari pada SELURUH 12.353 baris
+--   LEFT(no_resep,8) vs tgl_perawatan    94 menyimpang -- validasi memang bisa
+--                                        jatuh di hari lain
+--
+-- Nol menyimpang ke KEDUA arah menempatkannya sekelas `nota_jual` (16.787 dari
+-- 16.787) dan `skdp_bpjs.tahun` -- bukan sekelas `no_faktur` pengadaan (9 dari
+-- 910 menyimpang) apalagi `nobooking` pembatalan BPJS (144 dari 1.808, yang
+-- justru membuatnya tidak boleh dipakai sama sekali). Jadi tidak ada margin yang
+-- perlu ditambahkan, dan rentang satu hari jatuh sebagai `range` pada PRIMARY KEY.
+--
+-- ===========================================================================
+-- Jam bawaannya 22:00, dan ia BUKAN 21:00 milik penjualan -- ini terukur
+-- ===========================================================================
+--
+-- Sebaran `jam_peresepan` 90 hari terakhir:
+--
+--   jam 07    1     jam 12   49     jam 17  312   <- puncaknya
+--   jam 08  120     jam 13  140     jam 18  246
+--   jam 09  116     jam 14  205     jam 19  243
+--   jam 10  104     jam 15  139     jam 20   25
+--   jam 11   64     jam 16  174     jam 21    1
+--
+-- Dan ekornya sepanjang 2,5 tahun: jam 20 = 325, jam 21 = 12, jam 22 = 2,
+-- jam 23 = 1. Peresepan paling malam yang pernah tercatat 23:11:10.
+--
+-- Bedanya dari penjualan menentukan angkanya. Di sana pukul 21:00 adalah jam
+-- PERTAMA yang benar-benar NOL sepanjang 90 hari, jadi rekap 21:00 tidak pernah
+-- melewatkan apa pun. Di sini tidak ada jam yang nol sama sekali -- resep punya
+-- ekor tipis yang menembus tengah malam. Yang bisa dipilih cuma seberapa tipis
+-- ekor yang direlakan:
+--
+--   rekap 21:00   melewatkan 15 dari 12.422 resep  (~6 setahun)
+--   rekap 22:00   melewatkan  3 dari 12.422 resep  (~1 setahun)
+--
+-- 22:00 dipilih, dan penyimpangannya dari 21:00 milik penjualan disengaja: dua
+-- rekap yang berangkat dari data berbeda tidak boleh diseragamkan jamnya hanya
+-- supaya terlihat rapi berdampingan. Yang diseragamkan justru cara memilihnya --
+-- diukur dari sebaran jam sungguhan, bukan dari dugaan "sore, sesudah jam kerja".
+--
+-- Yang TIDAK bisa dihilangkan sepenuhnya: selama offsetnya 0, rekap jam berapa
+-- pun bisa melewatkan resep yang ditulis sesudahnya. RS yang tidak mau melewatkan
+-- satu pun memilih offset 1 dengan jam pagi -- hari kemarin selalu sudah lengkap.
+-- Halamannya mengatakan ini, bukan cuma berkas ini.
+--
+-- ===========================================================================
+-- Yang TIDAK ada di rekap ini, dan semuanya karena diukur
+-- ===========================================================================
+--
+-- `{status_resep}` (ralan/ranap) -- `resep_obat.status` bernilai 'ralan' pada
+--   SELURUH 12.422 baris, satu-satunya nilai yang pernah ada. Persis alasan
+--   `{status_bayar}` ditolak di 041: kolom yang selamanya mengatakan hal yang
+--   sama mengajari pembacanya berhenti membaca. Kalau suatu saat RS ini membuka
+--   rawat inap, ia layak ditambahkan -- tapi menambahkannya SEKARANG berarti
+--   satu baris mati di setiap pesan selama bertahun-tahun.
+--
+-- `{jumlah_divalidasi}` -- ditolak lewat sebab yang sama, dan pengukurannya
+--   bahkan lebih telak: 2024 1.782/1.782, 2025 6.130/6.130, 2026 4.440/4.441.
+--   Validasi apotek terjadi pada praktis SETIAP resep, jadi angkanya akan selalu
+--   sama dengan `{jumlah_resep}`. Yang justru bergerak adalah PENYERAHAN (2024
+--   51%, 2025 91%, 2026 90%) -- itulah yang masuk.
+--
+-- Nama obat, jumlah per obat, aturan pakai, nama racikan, nama pasien, nomor
+--   rekam medis, poli -- lihat seksi privasi di bawah. Bukan "belum", melainkan
+--   tidak akan.
+--
+-- ===========================================================================
+-- Privasi: pagarnya LEBIH ketat daripada 041, dan itu bukan kehati-hatian
+-- ===========================================================================
+--
+-- `resep_obat` adalah tabel yang seluruh proyek ini jaga sejak Fase 0. Komentar
+-- pembuka `khanza/stokObat.ts` melarang katalog barang digabung dengannya, dan
+-- `FARMASI_TEMPLATE_VARIABLES` sengaja tidak punya variabel nama obat justru
+-- supaya tidak ada alasan pertama untuk mulai mengambilnya.
+--
+-- Rekap ini tidak melonggarkan satu pun dari itu:
+--
+--   * `reg_periksa` dan `pasien` TIDAK di-JOIN sama sekali. Bukan "di-JOIN lalu
+--     kolomnya tidak dipilih" -- tabelnya memang tidak disebut, sehingga tidak
+--     ada jalan apa pun dari query ini menuju seorang pasien. Ini lebih ketat
+--     daripada 041, tempat `penjualan` sendiri memang membawa kolom pasiennya.
+--   * `resep_dokter` dan `resep_dokter_racikan` cuma di-COUNT dan di-SUM(jml).
+--     `kode_brng`, `aturan_pakai`, dan `nama_racik` tidak pernah di-SELECT.
+--     `nama_racik` khususnya: ia nama racikan yang diketik dokter dan bisa
+--     menyebut indikasinya.
+--   * Yang tersisa dari sebuah resep di dalam pesan ini cuma ANGKA, plus nama
+--     DOKTER -- yaitu staf, bukan pasien.
+--
+-- Sifat agregatnya BUKAN yang menjaga. Yang menjaga tetap daftar SELECT yang
+-- tidak pernah memuatnya (ARCHITECTURE §5.2), dan `npm run dryrun:resep`
+-- memeriksanya pada `Object.keys()` baris hasilnya -- bukan dengan membaca SQL.
+--
+-- ===========================================================================
+-- `{rincian_dokter}` DIPERTAHANKAN walau saat ini selalu satu baris
+-- ===========================================================================
+--
+-- Terukur: `resep_obat.kd_dokter` punya TEPAT SATU nilai berbeda sepanjang
+-- seluruh 12.422 baris, dan setiap hari dalam 14 hari terakhir dilayani satu
+-- dokter yang sama. Jadi hari ini `{rincian_dokter}` selalu satu baris.
+--
+-- Itu terlihat seperti alasan membuangnya -- dan bukan, karena bedanya dengan
+-- `{status_resep}` di atas nyata: `status` adalah keadaan alur kerja yang tidak
+-- akan pernah berubah selama RS ini hanya melayani rawat jalan, sementara jumlah
+-- dokter berubah pada hari seorang dokter kedua mulai praktik. Yang diminta pun
+-- menyebutnya: "rekap resep DOKTER".
+--
+-- Diperlakukan seperti `{rincian_jenis}` di 041 (terukur 'Jual Bebas' 15.999 dari
+-- 16.793, jadi kebanyakan hari isinya juga satu baris): dibiarkan sebagai
+-- VARIABELNYA SENDIRI, bukan dilebur ke badan pesan, supaya RS yang menganggapnya
+-- mubazir bisa menghapus dua barisnya tanpa kehilangan angka totalnya. Halaman
+-- mengatakan angka satu dokter itu di depan staf, supaya keputusan menghapusnya
+-- diambil sadar-sadar.
+
+-- ---------------------------------------------------------------------------
+-- Pengaturan rekap resep
+-- ---------------------------------------------------------------------------
+INSERT IGNORE INTO app_setting (k, v) VALUES
+
+-- Sakelar utama. MATI, dan berdiri sendiri dari `farmasi.enabled` (lihat kepala
+-- berkas). Dinyalakan lewat `/farmasi?tab=resep`, yang mencatatnya ke `audit_log`
+-- sebagai peristiwanya sendiri alih-alih tenggelam sebagai satu nama kunci di
+-- dalam `settings_update`.
+('farmasi.resep_rekap_enabled', '0'),
+
+-- Jam kirim, HH:MM. Bawaannya 22:00 -- diukur, lihat kepala berkas. Sengaja
+-- BERBEDA dari `farmasi.penjualan_rekap_jam` (21:00), karena sebaran jamnya
+-- memang berbeda.
+('farmasi.resep_rekap_jam', '22:00'),
+
+-- Hari mana yang direkap, dihitung mundur dari hari saat rekapnya dikirim.
+-- 0 = hari itu juga (pasangan wajar untuk jam malam), 1 = kemarin (untuk jam
+-- pagi, dan satu-satunya cara menjamin tidak ada resep yang terlewat).
+('farmasi.resep_rekap_offset_hari', '0'),
+
+-- Penanda "sudah jalan pada tanggal ini" (YYYY-MM-DD lokal). Kosong = belum
+-- pernah. BUKAN penentu kebenaran -- lihat kepala berkas.
+('farmasi.resep_rekap_last_run', ''),
+
+-- Isi pesan rekap.
+--
+-- `{jumlah_belum_serah}` ditaruh berdampingan dengan `{jumlah_diserahkan}` karena
+-- keduanya baru berarti sebagai pasangan: 36 diserahkan tidak mengatakan apa-apa
+-- sampai diketahui dari berapa. Dan keduanya dijamin berjumlah `{jumlah_resep}` --
+-- pembaca bisa menjumlahkannya sendiri, dan itu yang membuat angkanya bisa
+-- dipercaya.
+--
+-- `{jumlah_racikan}` dipisah dari `{jumlah_item}` karena keduanya menghitung hal
+-- yang berbeda: yang satu baris obat jadi, yang satu racikan yang harus diramu.
+-- Terukur 223 racikan sepanjang 2026 berbanding puluhan ribu baris obat, jadi
+-- pada kebanyakan hari angkanya nol atau satu -- kecil, dan justru itu yang
+-- membuatnya berguna: hari dengan lima racikan adalah hari kerja yang berbeda.
+('farmasi.template_resep_rekap',
+ '*Rekap Resep Harian*\n{nama_rs}\n\nTanggal : {tanggal_rekap}\n\nJumlah resep : {jumlah_resep}\nBaris obat : {jumlah_item} ({jumlah_obat} satuan)\nRacikan : {jumlah_racikan}\n\nSudah diserahkan : {jumlah_diserahkan}\nBelum diserahkan : {jumlah_belum_serah}\n\n*Rincian per dokter:*\n{rincian_dokter}\n\nDikirim : {tanggal} {jam}'),
+
+-- Isi pesan saat hari itu TIDAK ADA resep sama sekali.
+--
+-- KOSONG = sengaja DIAM, dan bawaannya memang kosong. Alasannya sama persis
+-- dengan `farmasi.template_penjualan_rekap_kosong`, `farmasi.template_darurat_kosong`,
+-- dan `autoreply.fallback_body`: pesan harian yang isinya "tidak ada apa-apa"
+-- berhenti dibaca dalam seminggu, dan sejak itu yang sungguhan ikut tidak terbaca.
+--
+-- Diisi, ia jadi tanda hidup harian yang berguna -- dan di sini lebih berguna
+-- daripada di penjualan: apotek yang biasanya menerima 25-30 resep sehari lalu
+-- mendapat "tidak ada resep" tahu ada yang perlu diperiksa.
+--
+-- Tapi yang mengisinya harus tahu satu hal yang terukur: HARI MINGGU nol resep
+-- pada SELURUH 90 hari terakhir (13 hari Minggu, nol baris -- Senin 511, Selasa
+-- 314, Rabu 279, Kamis 340, Jumat 332, Sabtu 163). Jadi mengisinya berarti
+-- menerima satu pesan "tidak ada resep" setiap pekan, selamanya. Itu persis laju
+-- yang membuat pesan berhenti dibaca -- dan begitu berhenti dibaca, hari Selasa
+-- yang nol resep pun ikut lewat tanpa ada yang menyadarinya. Kosongkan, kecuali
+-- ada yang benar-benar memeriksanya tiap hari.
+('farmasi.template_resep_rekap_kosong', '');

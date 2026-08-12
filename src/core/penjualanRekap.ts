@@ -191,64 +191,35 @@ export function formatRincianJenis(rows: BarisJenis[]): string {
     .join('\n');
 }
 
-export interface JamRekap {
-  jam: number;
-  menit: number;
-}
+/**
+ * Matematika jam dan tanggalnya PINDAH ke `core/rekapJadwal.ts` saat rekap harian
+ * KEDUA (resep, migrations/042) dibuat -- ketiganya sama sekali tidak tahu apa
+ * yang sedang direkap, dan dua salinan `hariRekap()` berarti dua rekap yang tidak
+ * sepakat tanggal berapa "kemarin", dikirim ke grup yang sama, pada malam yang
+ * sama, tanpa satu pun galat.
+ *
+ * Di-RE-EXPORT dari sini supaya tidak satu pun impor yang sudah ada berubah:
+ * `penjualanRekapRunner.ts` dan `penjualanActions.ts` tetap mengimpornya dari
+ * modul ini, dan fitur yang sedang berjalan di produksi tidak tersentuh sama
+ * sekali oleh pemindahannya.
+ */
+export {
+  bacaJamRekap,
+  tulisJamRekap,
+  hariRekap,
+  type JamRekap,
+} from './rekapJadwal';
 
-/** Jam kirim bawaan bila pengaturannya kosong atau tidak terbaca. Lihat migrations/041. */
+import type { JamRekap } from './rekapJadwal';
+
+/**
+ * Jam kirim bawaan bila pengaturannya kosong atau tidak terbaca.
+ *
+ * TIDAK ikut pindah ke `rekapJadwal.ts`, dan itu disengaja: angka ini hasil
+ * pengukuran atas `penjualan` SAJA -- sepanjang 90 hari tidak ada satu pun
+ * transaksi setelah pukul 20:00, sehingga 21:00 adalah jam pertama yang benar-benar
+ * nol. Peresepan punya sebaran yang berbeda (ekor tipis sampai 23:11) dan karena
+ * itu jam bawaannya sendiri. Menyatukan keduanya jadi satu konstanta berarti satu
+ * pengukuran diam-diam dipakai untuk membenarkan yang lain. Lihat migrations/041.
+ */
 export const JAM_REKAP_BAWAAN: JamRekap = { jam: 21, menit: 0 };
-
-/**
- * Baca "HH:MM" dari pengaturan.
- *
- * Mengembalikan `null` untuk apa pun yang tidak berbentuk jam yang sah, dan
- * PEMANGGIL yang memutuskan artinya -- dua pemanggilnya memang harus berbeda:
- *
- * - Server action saat MENYIMPAN menolaknya di depan orang yang bisa
- *   memperbaikinya seketika.
- * - Worker, yang berjalan tengah malam tanpa siapa-siapa untuk diberi tahu,
- *   jatuh ke `JAM_REKAP_BAWAAN` dan mencatat `warn`. Menolak diam berarti
- *   rekapnya berhenti selamanya tanpa satu pun tanda -- kegagalan senyap yang
- *   sama jenisnya dengan sakelar menyala tanpa tujuan tercentang.
- *
- * Bentuk `H:M` (satu digit) diterima; `24:00` tidak, karena tidak ada waktu
- * seperti itu dalam sehari dan menerimanya berarti jadwal yang tidak pernah
- * jatuh tempo.
- */
-export function bacaJamRekap(raw: string | null | undefined): JamRekap | null {
-  if (!raw) return null;
-  const cocok = /^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})\s*$/.exec(raw);
-  if (!cocok) return null;
-  const jam = Number(cocok[1]);
-  const menit = Number(cocok[2]);
-  if (!Number.isInteger(jam) || !Number.isInteger(menit)) return null;
-  if (jam < 0 || jam > 23 || menit < 0 || menit > 59) return null;
-  return { jam, menit };
-}
-
-/** Bentuk normal untuk disimpan kembali ke pengaturan. */
-export function tulisJamRekap(j: JamRekap): string {
-  return `${String(j.jam).padStart(2, '0')}:${String(j.menit).padStart(2, '0')}`;
-}
-
-/**
- * Tanggal yang direkap, dihitung mundur dari hari saat rekapnya dikirim.
- *
- * `setDate` dipakai apa adanya (bukan aritmetika milidetik) supaya pergantian
- * bulan, tahun, dan tahun kabisat ditangani Node, bukan oleh kita -- pola yang
- * sama dengan `sasaranKontrol()` di `core/bpjs.ts`.
- *
- * Offset negatif dianggap 0: "merekap hari besok" tidak punya arti, dan
- * membiarkannya lewat berarti rekap yang selamanya kosong.
- */
-export function hariRekap(sekarang: Date, offsetHari: number): string {
-  const n = Number.isFinite(offsetHari) ? Math.max(0, Math.floor(offsetHari)) : 0;
-  const d = new Date(sekarang);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - n);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}

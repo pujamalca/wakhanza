@@ -19,6 +19,7 @@ import { runSuratOtomatisCycle } from './suratRunner';
 import { runPengadaanCycle } from './pengadaanRunner';
 import { runPenjualanCycle } from './penjualanRunner';
 import { runPenjualanRekapIfDue } from './penjualanRekapRunner';
+import { runResepRekapIfDue } from './resepRekapRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
@@ -517,6 +518,27 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('penjualan-rekap', runPenjualanRekapIfDue, scanIntervalMs);
+  /**
+   * REKAP HARIAN RESEP -- siklus TERPISAH dari `farmasi` (FARMASI_VALIDASI /
+   * FARMASI_PENYERAHAN), lewat pembedaan yang sama persis dengan pasangan
+   * penjualan di atas: yang itu kelas SISIP (watermark, dipicu baris yang
+   * melewati kursornya), yang ini kelas WAKTU.
+   *
+   * Sakelarnya berdiri sendiri (`farmasi.resep_rekap_enabled` BUKAN anak dari
+   * `farmasi.enabled`), dan di sini alasannya lebih berat daripada di penjualan:
+   * `farmasi.enabled` menyalakan pesan yang memuat nama pasien, nomor rekam
+   * medis, dan poli ke sebuah grup. Siklus gabungan akan membuat rekap berisi
+   * ANGKA mustahil didapat tanpa lebih dulu mengambil keputusan privasi itu.
+   *
+   * Interval pindai, bukan poller: yang dikerjakan tiap siklus cuma membaca satu
+   * pengaturan dan membandingkan jam. Pembacaan `sik` yang sesungguhnya baru
+   * terjadi pada siklus yang benar-benar jatuh tempo, dan penandanya dimajukan
+   * sesudahnya supaya itu sekali sehari alih-alih tiap siklus.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('resep-rekap', runResepRekapIfDue, scanIntervalMs);
   void dispatcherLoop();
   /**
    * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan

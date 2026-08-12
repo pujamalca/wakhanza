@@ -1,0 +1,209 @@
+-- 043_resep_rekap_nilai.sql
+-- NILAI RUPIAH pada REKAP HARIAN RESEP (migrations/042).
+--
+-- Diminta persis begitu: "di notifikasi resep kita ada fitur rekap resep harian
+-- saya mau juga dengan total uang di resep juga dikirimkan".
+--
+-- TIDAK ada tabel baru, TIDAK ada kunci pengaturan baru, TIDAK ada sakelar baru.
+-- Yang bertambah cuma satu variabel template (`{nilai_obat}`), satu query agregat
+-- di `khanza/farmasiStaf.ts`, dan satu kolom rupiah pada `{rincian_dokter}`.
+--
+-- ===========================================================================
+-- Yang WAJIB diketahui sebelum menjalankan migrasi ini
+-- ===========================================================================
+--
+-- `farmasi.resep_rekap_enabled` di mesin ini bernilai '1' -- fitur ini SEDANG
+-- BERJALAN, dan `farmasi.resep_rekap_last_run` menunjukkan ia benar-benar terkirim
+-- hari ini. Jadi migrasi ini BUKAN penambahan yang menunggu dinyalakan: ia
+-- mengubah isi pesan yang berangkat pada jadwal berikutnya.
+--
+-- Itu memang yang diminta. Yang perlu disadari cuma bahwa tidak ada langkah
+-- "nyalakan dulu" yang menahannya, dan bahwa worker HARUS dimulai ulang -- kalau
+-- tidak, `{nilai_obat}` yang baru masuk ke template akan dirender oleh kode lama
+-- yang tidak mengenalnya, dan hasilnya baris kosong. Lihat catatan pemasangan di
+-- akhir berkas ini.
+--
+-- ===========================================================================
+-- TANPA sakelar, dan itu keputusan -- bukan kelalaian
+-- ===========================================================================
+--
+-- Setiap fitur farmasi yang membawa rupiah punya sakelarnya sendiri
+-- (`farmasi.penjualan_harga`, `pengadaan_harga`, `pemesanan_harga`,
+-- `hibah_nilai`), jadi menambahkan `farmasi.resep_rekap_nilai` terasa seperti
+-- keseragaman yang wajar. Ditolak, dan yang membantahnya adalah migrations/031
+-- sendiri.
+--
+-- Di sana `farmasi.hibah_nilai` semula ikut memutus KEDUA total header, dengan
+-- alasan yang terdengar lebih ketat. Alasan itu runtuh begitu hasilnya dilihat:
+-- label totalnya ditulis di template sebagai baris tersendiri, jadi mematikan
+-- sakelarnya menghasilkan `Total nilai hibah :` -- baris menggantung yang terbaca
+-- sebagai sistem rusak, dan sejak itu angka yang benar pun tidak dipercaya.
+--
+-- Di sini SELURUH nilainya agregat; tidak ada "nilai per barang" yang bisa
+-- diputus sendirian. Jadi sakelar apa pun menghasilkan persis baris menggantung
+-- itu -- `*Nilai obat : *` -- dan satu-satunya jalan keluarnya adalah menyuruh
+-- staf ikut menyunting templatenya. Invarian dua-langkah semacam itu adalah yang
+-- berulang kali terbukti gagal DIAM di proyek ini.
+--
+-- Jalan keluarnya karena itu sama dengan yang sudah dipilih 031 untuk total
+-- header: RS yang tidak ingin satu angka pun beredar MENGHAPUS baris
+-- `{nilai_obat}` dari templatenya -- satu tindakan yang terlihat di halaman yang
+-- sedang dibukanya. Dan yang menahan seluruhnya tetap
+-- `farmasi.resep_rekap_enabled`.
+--
+-- ===========================================================================
+-- Kenapa REPLACE() dan bukan UPDATE yang menimpa
+-- ===========================================================================
+--
+-- Sama seperti migrations/041 saat memperbaiki label "Ongkir" jadi
+-- "Pembulatan/ongkir": staf boleh sudah menyunting templatenya, dan menimpanya
+-- membuang pekerjaan orang. Yang disisipkan cuma dua baris, ditambatkan pada teks
+-- yang sudah ada.
+--
+-- --------------------------------------------------------------------------
+-- JEBAKAN yang membuat bentuk 041 TIDAK BISA disalin apa adanya: CRLF
+-- --------------------------------------------------------------------------
+--
+-- Migrasi 042 menyemai templatenya dengan `\n` (LF). Nilai yang BENAR-BENAR
+-- tersimpan di mesin ini memakai `\r\n` (CRLF) -- karena staf menyimpannya lewat
+-- form di `/farmasi?tab=resep`, dan `<textarea>` mengirimkan CRLF sesuai spesifikasi
+-- HTML. Terbukti: nilai tersimpannya CRLF, dan `farmasi.resep_rekap_jam` sudah
+-- bukan bawaan '22:00'.
+--
+-- Akibatnya REPLACE yang menambatkan diri pada teks BERISI baris baru gaya LF
+-- tidak akan cocok sama sekali. Ia tidak menghasilkan galat; ia cuma tidak
+-- mengubah apa pun, dan rekapnya berangkat malam itu tanpa satu angka rupiah pun
+-- sementara migrasinya tercatat "berhasil".
+--
+-- Dua pagar terhadap itu:
+--
+--   1. Jangkarnya TANPA baris baru -- 'Belum diserahkan : {jumlah_belum_serah}'
+--      adalah satu potongan utuh yang bentuknya sama pada CRLF maupun LF.
+--   2. Baris baru yang DISISIPKAN mengikuti gaya yang sudah dipakai baris itu,
+--      lewat IF(v LIKE '%\r\n%'). Mencampur keduanya tidak merusak WhatsApp, tapi
+--      ia membuat pembaca berikutnya mengira ada yang rusak.
+--
+-- `AND v NOT LIKE '%{nilai_obat}%'` membuatnya idempoten -- dijalankan dua kali,
+-- yang kedua tidak melakukan apa-apa.
+--
+-- Kalau staf sudah menghapus `{jumlah_belum_serah}` dari templatenya, jangkarnya
+-- tidak ketemu dan TIDAK ADA yang berubah. Itu memang perilaku yang benar --
+-- template buatan staf tidak boleh ditimpa -- tapi ia gagal diam, jadi jalan
+-- masuknya disediakan di tempat lain: `{nilai_obat}` muncul sendiri di daftar
+-- "+ Sisipkan variabel" pada editor pesan, karena ia terdaftar di
+-- `REKAP_RESEP_TEMPLATE_VARIABLES`.
+
+UPDATE app_setting
+SET v = REPLACE(
+      v,
+      'Belum diserahkan : {jumlah_belum_serah}',
+      CONCAT(
+        'Belum diserahkan : {jumlah_belum_serah}',
+        IF(v LIKE '%\r\n%', '\r\n\r\n', '\n\n'),
+        '*Nilai obat : {nilai_obat}*'
+      )
+    )
+WHERE k = 'farmasi.template_resep_rekap'
+  AND v LIKE '%{jumlah_belum_serah}%'
+  AND v NOT LIKE '%{nilai_obat}%';
+
+-- ===========================================================================
+-- Angkanya dari mana, dan kenapa BUKAN dari daftar harga
+-- ===========================================================================
+--
+-- `resep_dokter` TIDAK PUNYA SATU PUN KOLOM HARGA. Isinya `no_resep`,
+-- `kode_brng`, `jml`, `aturan_pakai` -- itu saja. Jadi pertanyaan "berapa rupiah
+-- resep hari ini" tidak bisa dijawab dari ketiga query milik 042, dan harus
+-- datang dari tabel lain. Ada dua kandidat, dan pilihannya diukur:
+--
+--   (A) KATALOG: `databarang.ralan` x `jml`, plus bahan racikan dari
+--       `resep_dokter_racikan_detail`. DITOLAK.
+--   (B) YANG DITAGIHKAN: `SUM(detail_pemberian_obat.total)`. DIPAKAI.
+--
+-- Pada 2026-08-10 (50 resep, hari tersibuk bulan itu):
+--
+--     A. katalog                244 baris   Rp1.471.826
+--     B. benar-benar ditagihkan 245 baris   Rp1.455.477
+--
+-- A sudah meleset hari ini juga. Tapi yang benar-benar mematikannya bukan selisih
+-- itu melainkan WAKTU: `databarang` menyimpan harga HARI INI, sementara
+-- `farmasi.resep_rekap_offset_hari` boleh diisi 1 dan `npm run dryrun:resep`
+-- menerima tanggal apa pun. Satu perubahan harga membuat rekap kemarin menyebut
+-- angka yang tidak pernah ditagihkan ke siapa pun -- tanpa galat, dan dengan hasil
+-- yang tetap masuk akal. Itu kelas kegagalan yang paling mahal di proyek ini.
+--
+-- A juga menuntut pilihan kolom harga menurut kelas kamar pasien
+-- (`ralan`/`kelas1`/`kelas2`/`kelas3`/`utama`/`vip`/`vvip`). Di sini
+-- `resep_obat.status` = 'ralan' pada SELURUH 12.422 baris sehingga `ralan` kebetulan
+-- benar, tapi RS yang melayani rawat inap harus membaca `reg_periksa` untuk
+-- memilihnya -- yaitu tabel yang rekap ini justru ada untuk TIDAK disentuh.
+--
+-- `total` diambil apa adanya, tidak dihitung ulang dari
+-- `biaya_obat * jml + embalase + tuslah`: 21 dari 9.076 baris (90 hari) menyimpang
+-- dari rumus itu, jadi kolomnya yang berwenang. Embalase dan tuslah nol pada
+-- seluruh 33.198 baris setahun di sini, dan keduanya sudah ikut terhitung di dalam
+-- `total` tanpa perlu variabel sendiri -- variabel yang selamanya berbunyi "Rp0"
+-- cuma mengajari pembacanya melewati bagian itu (pelajaran `{status_resep}` di 042).
+--
+-- ===========================================================================
+-- PRIVASI: ini tidak melebarkan apa pun, dan itu bisa diperiksa
+-- ===========================================================================
+--
+-- `detail_pemberian_obat` di-JOIN lewat `(tgl_perawatan, jam, no_rawat)`, dan
+-- `no_rawat` terdengar seperti jalan menuju pasien. Bukan, dan bedanya nyata:
+--
+--   - `resep_obat` -- penggerak query rekap sejak 042 -- SUDAH memuat `no_rawat`,
+--     dan `resep_dokter` sudah dijoinkan padanya. Hubungan "pasien -> obat" sudah
+--     terbentang di modul ini sebelum migrasi ini ada. Yang ditambahkan
+--     `detail_pemberian_obat` cuma HARGA, bukan hubungan baru.
+--   - `reg_periksa` dan `pasien` tetap tidak disebut sama sekali.
+--   - `no_rawat` dan `kode_brng` dipakai sebagai kunci join dan TIDAK pernah masuk
+--     daftar SELECT. Yang keluar cuma satu angka per dokter.
+--
+-- Ditegakkan sebagaimana biasa di sini: bukan dengan membaca SQL, melainkan pada
+-- `Object.keys()` baris hasilnya lewat `npm run dryrun:resep`, yang memberi kode
+-- keluar 1 bila ada satu pun kolom terlarang terbaca.
+--
+-- Mustahil dobel hitung: kalau satu `(tgl_perawatan, jam, no_rawat)` dipakai DUA
+-- resep, baris penagihannya terhitung dua kali. Diukur atas 365 hari -- NOL
+-- kombinasi dipakai lebih dari satu resep.
+--
+-- Biayanya `ref PRIMARY` (key_len 25; ketiga kolom itu tiga kolom terdepan PRIMARY
+-- KEY `detail_pemberian_obat`) dengan `resep_obat` sebagai penggerak lewat
+-- `range PRIMARY`. Terukur 31 ms pada hari tersibuk. Tanpa izin pindai penuh.
+--
+-- ===========================================================================
+-- Yang masih perlu keputusan rumah sakit
+-- ===========================================================================
+--
+-- 042 menutup dengan satu keputusan terbuka: `{rincian_dokter}` menyebut NAMA
+-- DOKTER berikut jumlah resep yang ditulisnya -- angka kinerja tentang seseorang
+-- yang punya nama, dikirim ke grup yang keanggotaannya diatur di luar sistem ini.
+-- Waktu itu ia hampir tidak berbunyi: terukur hanya ada SATU dokter peresep
+-- sepanjang 12.422 baris, jadi barisnya tidak membandingkan siapa pun.
+--
+-- Migrasi ini MENAJAMKANNYA. Baris per dokter kini membawa rupiah, jadi pada hari
+-- dokter kedua mulai praktik ia berhenti menjadi daftar dan menjadi PERBANDINGAN
+-- PENDAPATAN antar dokter yang dikirim tiap malam tanpa ada yang memintanya.
+--
+-- Jalan keluarnya tetap satu tindakan yang terlihat di halaman yang sedang dibuka,
+-- dan sekarang ada DUA tingkat:
+--
+--   hapus baris `{rincian_dokter}`  -> tidak ada angka per dokter sama sekali;
+--                                      `{nilai_obat}` total tetap utuh
+--   hapus baris `{nilai_obat}` juga -> tidak ada satu angka rupiah pun beredar
+--
+-- ===========================================================================
+-- Catatan pemasangan
+-- ===========================================================================
+--
+-- `wakhanza-worker` WAJIB dimulai ulang sesudah migrasi ini. Berbeda dari fitur
+-- bersakelar yang bisa menunggu, di sini templatenya berubah SEKARANG sementara
+-- kode yang merendernya masih yang lama -- dan `{nilai_obat}` yang tidak dikenal
+-- dirender sebagai teks kosong. Gejalanya baris `*Nilai obat : *` yang menggantung
+-- di pesan sungguhan, bukan galat.
+--
+-- Prosedurnya tiga langkah dan urutannya mengikat (lihat CLAUDE.md "Operasi
+-- produksi"): `pm2 stop wakhanza-worker` -> pastikan Chromium sesi bersih ->
+-- `pm2 start wakhanza-worker`. `wakhanza-web` cukup `pm2 restart` sesudah
+-- `npm run build`.
