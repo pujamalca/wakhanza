@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { daftarPengguna, hitungAdminAktif, hitungPengguna } from '@/lib/userAdmin';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
-import { PageHeader, Pagination } from '@/components/ui';
+import { Callout, PageHeader, Pagination } from '@/components/ui';
 import { UserTable } from './UserTable';
 
 export default async function PenggunaPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
@@ -61,20 +61,25 @@ export default async function PenggunaPage({ searchParams }: { searchParams: Pro
         unit="akun"
       />
 
-      <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+      {/* Judulnya memuat KESIMPULANNYA -- itu bagian yang harus terbaca tanpa
+          dibuka, karena orang yang menonaktifkan akun saat ini juga akan mengira
+          pekerjaannya sudah selesai. Alasannya yang pindah ke balik lipatan. */}
+      <Callout
+        collapsible
+        className="mt-4"
+        title="Menonaktifkan, menghapus, atau menurunkan peran TIDAK memutus sesi yang sedang berjalan"
+      >
         <p>
-          <span className="font-medium text-foreground">Menonaktifkan maupun menghapus tidak memutus sesi yang sedang
-          berjalan.</span> Sesi dashboard tidak disimpan di database, jadi tidak ada tempat untuk mencabutnya di tengah
-          jalan. Akun yang dinonaktifkan atau dihapus ditolak pada login BERIKUTNYA, sementara jendela yang sudah
-          terbuka tetap bisa dipakai sampai sesinya kedaluwarsa. Untuk memutus seseorang saat itu juga, hubungi
-          pengembang &mdash; caranya membatalkan sesi semua orang sekaligus.
+          Sesi dashboard tidak disimpan di database, jadi tidak ada tempat untuk mencabutnya di tengah jalan. Akun yang
+          dinonaktifkan atau dihapus ditolak pada login <span className="font-medium text-foreground">berikutnya</span>,
+          sementara jendela yang sudah terbuka tetap bisa dipakai sampai sesinya kedaluwarsa. Untuk memutus seseorang
+          saat itu juga, hubungi pengembang &mdash; caranya membatalkan sesi semua orang sekaligus.
         </p>
-        <p>
-          <span className="font-medium text-foreground">Menurunkan peran juga baru berlaku pada login berikutnya</span>,
-          karena alasan yang sama. Admin yang baru diturunkan jadi operator masih bisa membuka halaman admin sampai
-          sesinya habis.
+        <p className="mt-2">
+          Berlaku sama untuk penurunan peran: admin yang baru diturunkan jadi operator masih bisa membuka halaman admin
+          sampai sesinya habis.
         </p>
-      </div>
+      </Callout>
     </div>
   );
 }

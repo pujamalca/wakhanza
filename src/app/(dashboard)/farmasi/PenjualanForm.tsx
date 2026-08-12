@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import Link from 'next/link';
-import { Button, Input, MessageEditor } from '@/components/ui';
+import { Button, Input, MessageEditor, Petunjuk } from '@/components/ui';
 import { PENJUALAN_TEMPLATE_VARIABLES } from '@/core/template';
 import {
   simpanPenjualanAction,
@@ -111,7 +111,14 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
           </label>
 
           <div className={`mt-3 ${kabarHapus ? '' : 'opacity-50'}`}>
-            <label className="mb-1 block text-xs font-medium">Isi pesan &mdash; nota dibatalkan</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Isi pesan &mdash; nota dibatalkan</label>
+              <Petunjuk untuk="Isi pesan nota dibatalkan">
+                Sengaja tanpa isi nota. Satu-satunya sumber angkanya adalah pesan lama yang sudah kita kirim sendiri,
+                dan mencetaknya ulang berarti nota yang dibatalkan beredar untuk kedua kalinya lengkap dengan isinya —
+                kebalikan dari yang dibutuhkan.
+              </Petunjuk>
+            </div>
             <MessageEditor
               name="template_penjualan_hapus"
               defaultValue={nilai.templateHapus}
@@ -120,17 +127,20 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
               disabled={simpanPending}
               hint="Hanya {no_nota}, {tanggal}, dan {jam} yang terisi di sini — barisnya sudah tidak ada di Khanza saat pesan ini dirakit, jadi daftar barang dan angkanya tidak bisa dibaca lagi."
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Sengaja tanpa isi nota. Satu-satunya sumber angkanya adalah pesan lama yang sudah kita kirim sendiri, dan
-              mencetaknya ulang berarti nota yang dibatalkan beredar untuk kedua kalinya lengkap dengan isinya —
-              kebalikan dari yang dibutuhkan.
-            </p>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium">Jendela pindai (hari)</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Jendela pindai (hari)</label>
+              <Petunjuk untuk="Jendela pindai">
+                Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang
+                diperiksa ulang tiap siklus. Angka ini <span className="font-medium text-foreground">juga</span>{' '}
+                menentukan berapa lama sebuah nota masih dipantau untuk pembatalan: nota yang lebih tua dari jendela
+                tidak diperiksa lagi, jadi penghapusannya tidak dikabarkan.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="penjualan_lookback_hari"
@@ -140,15 +150,17 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang diperiksa
-              ulang tiap siklus. Angka ini <span className="font-medium text-foreground">juga</span> menentukan berapa
-              lama sebuah nota masih dipantau untuk pembatalan: nota yang lebih tua dari jendela tidak diperiksa lagi,
-              jadi penghapusannya tidak dikabarkan.
-            </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Maksimal nota per siklus</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Maksimal nota per siklus</label>
+              <Petunjuk untuk="Maksimal nota per siklus">
+                Dibagi bersama antara nota baru dan pembatalan, dan{' '}
+                <span className="font-medium text-foreground">pembatalan didahulukan</span> — sebuah koreksi tidak
+                boleh mengantre di belakang puluhan nota baru. Kelebihannya dikirim pada siklus berikutnya, tidak
+                dibuang.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="penjualan_max_per_siklus"
@@ -158,11 +170,6 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Dibagi bersama antara nota baru dan pembatalan, dan{' '}
-              <span className="font-medium text-foreground">pembatalan didahulukan</span> — sebuah koreksi tidak boleh
-              mengantre di belakang puluhan nota baru. Kelebihannya dikirim pada siklus berikutnya, tidak dibuang.
-            </p>
           </div>
         </div>
 
@@ -178,11 +185,13 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
       {/* Pratinjau                                                          */}
       {/* ------------------------------------------------------------------ */}
       <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Lihat pesan atas nota terakhir</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Membaca nota terakhir yang ada di jendela lewat jalur yang sama persis dipakai worker, lalu merendernya dengan
-          isi pesan <span className="font-medium text-foreground">yang sudah tersimpan</span> — bukan yang sedang
-          diketik di atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium">
+          Lihat pesan atas nota terakhir
+          <Petunjuk untuk="Pratinjau nota terakhir">
+            Membaca nota terakhir yang ada di jendela lewat jalur yang sama persis dipakai worker, lalu merendernya
+            dengan isi pesan <span className="font-medium text-foreground">yang sudah tersimpan</span> — bukan yang
+            sedang diketik di atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+          </Petunjuk>
         </p>
         <Button type="submit" variant="secondary" size="sm" disabled={pratinjauPending}>
           {pratinjauPending ? 'Membaca...' : 'Tampilkan pratinjau'}

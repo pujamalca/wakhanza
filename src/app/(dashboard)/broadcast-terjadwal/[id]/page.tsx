@@ -18,6 +18,7 @@ import {
   Badge,
   EmptyState,
   Pagination,
+  Petunjuk,
   WaPreview,
   outboxStatusLabel,
   outboxStatusVariant,
@@ -240,13 +241,15 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-2 font-medium">Isi pesan</h2>
+        <h2 className="mb-2 flex items-center gap-1 font-medium">
+          Isi pesan
+          <Petunjuk untuk="Isi pesan jadwal">
+            Variabel seperti <span className="font-mono">{'{nama_pasien}'}</span> diisi per pasien saat jadwal jalan,
+            dan satu baris kode pengiriman yang berbeda untuk tiap pesan ditambahkan otomatis di akhir.
+          </Petunjuk>
+        </h2>
         <p className="whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm">
           <WaPreview text={schedule.messageBody} />
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Variabel seperti <span className="font-mono">{'{nama_pasien}'}</span> diisi per pasien saat jadwal jalan, dan satu
-          baris kode pengiriman yang berbeda untuk tiap pesan ditambahkan otomatis di akhir.
         </p>
       </Card>
 
@@ -360,11 +363,13 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-1 font-medium">Riwayat pengiriman</h2>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Satu baris per kali jadwal ini benar-benar jalan. Jumlahnya dihitung langsung dari antrean pesan saat halaman dibuka,
-          bukan dari penghitung tersimpan yang bisa basi. Menampilkan 20 terakhir.
-        </p>
+        <h2 className="mb-3 flex items-center gap-1 font-medium">
+          Riwayat pengiriman
+          <Petunjuk untuk="Riwayat pengiriman">
+            Satu baris per kali jadwal ini benar-benar jalan. Jumlahnya dihitung langsung dari antrean pesan saat
+            halaman dibuka, bukan dari penghitung tersimpan yang bisa basi. Menampilkan 20 terakhir.
+          </Petunjuk>
+        </h2>
         <div className={tableWrapperClass}>
           <table className="w-full text-sm">
             <thead className={theadClass}>
@@ -427,11 +432,14 @@ export default async function DetailJadwalPage({
 
       {bukaKampanye && (
         <Card>
-          <h2 className="mb-1 font-medium">Penerima kampanye #{campaignId}</h2>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Ini yang BENAR-BENAR dikirimi saat itu, apa adanya dari antrean pesan &mdash; bukan dihitung ulang dari
-            penyaringnya, yang hasilnya hari ini bisa berbeda. Baris yang lebih tua dari masa simpan 90 hari sudah dipangkas.
-          </p>
+          <h2 className="mb-3 flex items-center gap-1 font-medium">
+            Penerima kampanye #{campaignId}
+            <Petunjuk untuk="Penerima kampanye">
+              Ini yang BENAR-BENAR dikirimi saat itu, apa adanya dari antrean pesan &mdash; bukan dihitung ulang dari
+              penyaringnya, yang hasilnya hari ini bisa berbeda. Baris yang lebih tua dari masa simpan 90 hari sudah
+              dipangkas.
+            </Petunjuk>
+          </h2>
           <div className={tableWrapperClass}>
             <table className="w-full text-sm">
               <thead className={theadClass}>

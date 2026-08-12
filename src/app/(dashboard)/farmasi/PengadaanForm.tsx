@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import Link from 'next/link';
-import { Button, Input, MessageEditor } from '@/components/ui';
+import { Button, Input, MessageEditor, Petunjuk } from '@/components/ui';
 import { PENGADAAN_TEMPLATE_VARIABLES } from '@/core/template';
 import {
   simpanPengadaanAction,
@@ -83,7 +83,14 @@ export function PengadaanForm({ nilai, adaTujuan }: { nilai: NilaiPengadaan; ada
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium">Jendela pindai (hari)</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Jendela pindai (hari)</label>
+              <Petunjuk untuk="Jendela pindai">
+                Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang
+                diperiksa ulang tiap siklus. Ke depan juga, karena nomor faktur mengikuti tanggal beli yang dipilih
+                staf — nota bertanggal pekan depan bernomor lebih besar daripada hari ini.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="pengadaan_lookback_hari"
@@ -93,14 +100,15 @@ export function PengadaanForm({ nilai, adaTujuan }: { nilai: NilaiPengadaan; ada
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang diperiksa
-              ulang tiap siklus. Ke depan juga, karena nomor faktur mengikuti tanggal beli yang dipilih staf — nota
-              bertanggal pekan depan bernomor lebih besar daripada hari ini.
-            </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Maksimal faktur per siklus</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Maksimal faktur per siklus</label>
+              <Petunjuk untuk="Maksimal faktur per siklus">
+                Kelebihannya dikirim pada siklus berikutnya, tidak dibuang. Ini yang menahan entri borongan setelah
+                libur panjang berubah jadi belasan pesan beruntun ke grup yang sama.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="pengadaan_max_per_siklus"
@@ -110,10 +118,6 @@ export function PengadaanForm({ nilai, adaTujuan }: { nilai: NilaiPengadaan; ada
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Kelebihannya dikirim pada siklus berikutnya, tidak dibuang. Ini yang menahan entri borongan setelah libur
-              panjang berubah jadi belasan pesan beruntun ke grup yang sama.
-            </p>
           </div>
         </div>
 
@@ -129,12 +133,13 @@ export function PengadaanForm({ nilai, adaTujuan }: { nilai: NilaiPengadaan; ada
       {/* Pratinjau                                                          */}
       {/* ------------------------------------------------------------------ */}
       <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Lihat pesan atas faktur terakhir</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Membaca pembelian terakhir yang ada di jendela lewat jalur yang sama persis dipakai worker, lalu
-          merendernya dengan isi pesan{' '}
-          <span className="font-medium text-foreground">yang sudah tersimpan</span> — bukan yang sedang diketik di
-          atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium">
+          Lihat pesan atas faktur terakhir
+          <Petunjuk untuk="Pratinjau faktur terakhir">
+            Membaca pembelian terakhir yang ada di jendela lewat jalur yang sama persis dipakai worker, lalu
+            merendernya dengan isi pesan <span className="font-medium text-foreground">yang sudah tersimpan</span> —
+            bukan yang sedang diketik di atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+          </Petunjuk>
         </p>
         <Button type="submit" variant="secondary" size="sm" disabled={pratinjauPending}>
           {pratinjauPending ? 'Membaca...' : 'Tampilkan pratinjau'}

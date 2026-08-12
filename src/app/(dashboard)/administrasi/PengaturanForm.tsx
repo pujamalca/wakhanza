@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
-import { Button, Card, cardClassName, Callout, Input, MessageEditor, Textarea } from '@/components/ui';
+import { Button, Card, cardClassName, Callout, Input, MessageEditor, Petunjuk, Textarea } from '@/components/ui';
 import {
   toggleAdministrasiAction,
   toggleDiagnosaAction,
@@ -237,11 +237,13 @@ export function AutoSwitch({
           </Button>
         </div>
 
-        <p className="mt-2 text-xs text-muted-foreground">
-          Jendela dihitung ke <strong>dua arah</strong> dari hari ini: nomor surat Khanza mengikuti tanggal mulai
-          istirahat, jadi surat yang ditulis hari ini untuk istirahat pekan depan bernomor lebih besar daripada hari
-          ini. Batasnya tidak pernah turun di bawah tanggal sakelar ini dinyalakan. Kelebihan kuota tidak dibuang —
-          dikirim pada pemeriksaan berikutnya.
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          Jendela dihitung ke dua arah dari hari ini
+          <Petunjuk untuk="Jendela dua arah">
+            Nomor surat Khanza mengikuti tanggal mulai istirahat, jadi surat yang ditulis hari ini untuk istirahat
+            pekan depan bernomor lebih besar daripada hari ini. Batasnya tidak pernah turun di bawah tanggal sakelar
+            ini dinyalakan. Kelebihan kuota tidak dibuang — dikirim pada pemeriksaan berikutnya.
+          </Petunjuk>
         </p>
 
         {state.error && <p className="mt-3 text-sm text-destructive">{state.error}</p>}
@@ -269,11 +271,14 @@ export function TeksForm({
     // membungkusnya dengan <div> hanya demi gaya akan memisahkan tombol Simpan
     // dari form-nya.
     <form action={action} className={`${cardClassName} mt-6`}>
-        <h2 className="font-medium">Teks pengantar dan catatan kaki</h2>
-        <p className="mt-1 mb-4 text-sm text-muted-foreground">
-          Pesan pengantar adalah keterangan yang menyertai berkas di WhatsApp. Karena ada lampiran, WhatsApp
-          membatasinya <strong>1.024 karakter</strong> — jauh lebih pendek daripada pesan biasa.
-        </p>
+        <h2 className="mb-4 flex items-center gap-1 font-medium">
+          Teks pengantar dan catatan kaki
+          <Petunjuk untuk="Teks pengantar dan catatan kaki">
+            Pesan pengantar adalah keterangan yang menyertai berkas di WhatsApp. Karena ada lampiran, WhatsApp
+            membatasinya <span className="font-medium text-foreground">1.024 karakter</span> — jauh lebih pendek
+            daripada pesan biasa.
+          </Petunjuk>
+        </h2>
 
         <div className="space-y-5">
           <div>
@@ -299,15 +304,17 @@ export function TeksForm({
           </div>
 
           <div>
-            <label htmlFor="catatan_kaki" className="mb-1 block text-sm font-medium">
-              Catatan kaki di dalam surat
-            </label>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Dicetak kecil di kaki halaman PDF. Padanan blok &quot;ditandatangani secara elektronik&quot; milik Khanza.
-              Boleh memakai <code>{'{nama_rs}'}</code> dan <code>{'{kontak_rs}'}</code>. Dikosongkan pun tetap ada
-              bentuk bawaannya — sebuah berkas yang beredar tanpa menyebut asalnya tidak bisa dibedakan dari berkas yang
-              disunting siapa pun.
-            </p>
+            <div className="mb-1 flex items-center gap-1">
+              <label htmlFor="catatan_kaki" className="text-sm font-medium">
+                Catatan kaki di dalam surat
+              </label>
+              <Petunjuk untuk="Catatan kaki di dalam surat">
+                Dicetak kecil di kaki halaman PDF. Padanan blok &quot;ditandatangani secara elektronik&quot; milik
+                Khanza. Boleh memakai <code>{'{nama_rs}'}</code> dan <code>{'{kontak_rs}'}</code>. Dikosongkan pun
+                tetap ada bentuk bawaannya — sebuah berkas yang beredar tanpa menyebut asalnya tidak bisa dibedakan
+                dari berkas yang disunting siapa pun.
+              </Petunjuk>
+            </div>
             <Textarea id="catatan_kaki" name="catatan_kaki" defaultValue={catatanKaki} rows={3} />
           </div>
         </div>

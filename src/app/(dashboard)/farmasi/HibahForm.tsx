@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import Link from 'next/link';
-import { Button, Input, MessageEditor } from '@/components/ui';
+import { Button, Input, MessageEditor, Petunjuk } from '@/components/ui';
 import { HIBAH_TEMPLATE_VARIABLES } from '@/core/template';
 import { simpanHibahAction, pratinjauHibahAction, type HasilHibah, type HasilPratinjauHibah } from './hibahActions';
 
@@ -82,7 +82,14 @@ export function HibahForm({ nilai, adaTujuan }: { nilai: NilaiHibah; adaTujuan: 
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium">Jendela pindai (hari)</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Jendela pindai (hari)</label>
+              <Petunjuk untuk="Jendela pindai">
+                Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang
+                diperiksa ulang tiap siklus. Ke depan juga, karena nomor hibah mengikuti tanggal yang dipilih staf —
+                penerimaan bertanggal pekan depan bernomor lebih besar daripada hari ini.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="hibah_lookback_hari"
@@ -92,14 +99,15 @@ export function HibahForm({ nilai, adaTujuan }: { nilai: NilaiHibah; adaTujuan: 
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Berapa hari ke belakang <span className="font-medium text-foreground">dan ke depan</span> yang diperiksa
-              ulang tiap siklus. Ke depan juga, karena nomor hibah mengikuti tanggal yang dipilih staf — penerimaan
-              bertanggal pekan depan bernomor lebih besar daripada hari ini.
-            </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Maksimal nota per siklus</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Maksimal nota per siklus</label>
+              <Petunjuk untuk="Maksimal nota per siklus">
+                Kelebihannya dikirim pada siklus berikutnya, tidak dibuang. Ini yang menahan entri borongan berubah
+                jadi belasan pesan beruntun ke grup yang sama.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="hibah_max_per_siklus"
@@ -109,10 +117,6 @@ export function HibahForm({ nilai, adaTujuan }: { nilai: NilaiHibah; adaTujuan: 
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Kelebihannya dikirim pada siklus berikutnya, tidak dibuang. Ini yang menahan entri borongan berubah jadi
-              belasan pesan beruntun ke grup yang sama.
-            </p>
           </div>
         </div>
 
@@ -128,11 +132,13 @@ export function HibahForm({ nilai, adaTujuan }: { nilai: NilaiHibah; adaTujuan: 
       {/* Pratinjau                                                          */}
       {/* ------------------------------------------------------------------ */}
       <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Lihat pesan atas penerimaan terakhir</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Membaca penerimaan terakhir lewat jalur yang sama persis dipakai worker, lalu merendernya dengan isi pesan{' '}
-          <span className="font-medium text-foreground">yang sudah tersimpan</span> — bukan yang sedang diketik di
-          atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium">
+          Lihat pesan atas penerimaan terakhir
+          <Petunjuk untuk="Pratinjau penerimaan terakhir">
+            Membaca penerimaan terakhir lewat jalur yang sama persis dipakai worker, lalu merendernya dengan isi pesan{' '}
+            <span className="font-medium text-foreground">yang sudah tersimpan</span> — bukan yang sedang diketik di
+            atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+          </Petunjuk>
         </p>
         <Button type="submit" variant="secondary" size="sm" disabled={pratinjauPending}>
           {pratinjauPending ? 'Membaca...' : 'Tampilkan pratinjau'}

@@ -5,6 +5,7 @@ import { InboundMessage, WaGroup, WaSession, getSettingBool, getSettingNumber } 
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import {
   PageHeader,
+  Callout,
   FilterChip,
   Badge,
   CopyButton,
@@ -286,24 +287,26 @@ export default async function PesanMasukPage({
         />
       </section>
 
-      <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+      <Callout
+        collapsible
+        className="mt-4"
+        title="Pesan grup dicatat tapi tidak pernah dibalas, dan status kontak tidak ikut dicatat"
+      >
         <p>
-          <span className="font-medium text-foreground">Pesan grup dicatat tapi tidak pernah dibalas otomatis.</span>{' '}
-          Membalas di dalam grup berarti seluruh anggota menerima jawaban atas pertanyaan satu orang, dan satu percakapan
-          ramai bisa memicu balasan beruntun — pola yang membuat nomor rumah sakit diblokir WhatsApp.
+          Membalas di dalam grup berarti seluruh anggota menerima jawaban atas pertanyaan satu orang, dan satu
+          percakapan ramai bisa memicu balasan beruntun — pola yang membuat nomor rumah sakit diblokir WhatsApp.
         </p>
-        <p>
-          <span className="font-medium text-foreground">Status kontak dan saluran tidak ikut dicatat.</span> Nomor rumah
-          sakit menerima status dari setiap kontaknya; memasukkannya ke sini berarti ribuan baris sehari yang tidak
-          seorang pun cari.
+        <p className="mt-2">
+          Status kontak dan saluran ditinggalkan karena nomor rumah sakit menerima status dari setiap kontaknya;
+          memasukkannya ke sini berarti ribuan baris sehari yang tidak seorang pun cari.
         </p>
-        {barisLama > 0 && (
-          <p>
-            {barisLama.toLocaleString('id-ID')} baris sudah melewati {hariSimpan} hari dan akan dihapus pada pembersihan
-            berkala berikutnya (02:00).
-          </p>
-        )}
-      </div>
+      </Callout>
+      {barisLama > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {barisLama.toLocaleString('id-ID')} baris sudah melewati {hariSimpan} hari dan akan dihapus pada pembersihan
+          berkala berikutnya (02:00).
+        </p>
+      )}
     </div>
   );
 }

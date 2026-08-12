@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
-import { Button, Card, cardClassName, Callout, Modal, MessageEditor, Textarea } from '@/components/ui';
+import { Button, Card, cardClassName, Callout, Modal, MessageEditor, Petunjuk, Textarea } from '@/components/ui';
 import type { JenisDokumen } from '@/core/dokumenDoc';
 import { toggleDokumenAction, toggleRincianObatAction, simpanTeksDokumenAction, type HasilForm } from './actions';
 
@@ -178,12 +178,14 @@ export function RincianObatSwitch({ aktif, notaAktif }: { aktif: boolean; notaAk
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="font-medium">Nama obat pada nota</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Saat dimatikan, baris obat diringkas jadi satu <strong>Subtotal</strong>. Angkanya tetap terhitung penuh dan
-            totalnya tetap sama — yang disembunyikan hanya namanya, dan notanya mengatakan bahwa rinciannya sengaja
-            tidak dicantumkan.
-          </p>
+          <h2 className="flex items-center gap-1 font-medium">
+            Nama obat pada nota
+            <Petunjuk untuk="Nama obat pada nota">
+              Saat dimatikan, baris obat diringkas jadi satu <span className="font-medium text-foreground">Subtotal</span>.
+              Angkanya tetap terhitung penuh dan totalnya tetap sama — yang disembunyikan hanya namanya, dan notanya
+              mengatakan bahwa rinciannya sengaja tidak dicantumkan.
+            </Petunjuk>
+          </h2>
         </div>
         <Button
           variant={aktif ? 'secondary' : 'primary'}
@@ -224,16 +226,21 @@ export function TeksDokumenForm({
   return (
     <form action={formAction} className={`space-y-4 ${cardClassName}`}>
       <div>
-        <h2 className="font-medium">Pesan pengantar &amp; catatan kaki</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pesan ini <strong>menggantikan</strong> teks template pemicunya, dan hanya saat berkasnya benar-benar ikut.
-          Kalau lampirannya gagal dibuat, pesan yang terkirim tetap teks template biasa — jadi kalimat &ldquo;silakan
-          ambil di loket&rdquo; di sana masih tetap benar dan sengaja dibiarkan.
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Pesan berlampiran dibatasi 1.024 karakter oleh WhatsApp, termasuk baris kode pengiriman yang ditambahkan
-          otomatis. Yang melebihi ditolak saat disimpan, bukan saat kirim.
-        </p>
+        <h2 className="flex items-center gap-1 font-medium">
+          Pesan pengantar &amp; catatan kaki
+          <Petunjuk untuk="Pesan pengantar dan catatan kaki">
+            <p>
+              Pesan ini <span className="font-medium text-foreground">menggantikan</span> teks template pemicunya, dan
+              hanya saat berkasnya benar-benar ikut. Kalau lampirannya gagal dibuat, pesan yang terkirim tetap teks
+              template biasa — jadi kalimat &ldquo;silakan ambil di loket&rdquo; di sana masih tetap benar dan sengaja
+              dibiarkan.
+            </p>
+            <p className="mt-2">
+              Pesan berlampiran dibatasi 1.024 karakter oleh WhatsApp, termasuk baris kode pengiriman yang ditambahkan
+              otomatis. Yang melebihi ditolak saat disimpan, bukan saat kirim.
+            </p>
+          </Petunjuk>
+        </h2>
       </div>
 
       <div className="space-y-1">
@@ -252,15 +259,17 @@ export function TeksDokumenForm({
       </div>
 
       <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="catatan_kaki_dokumen">
-          Catatan kaki di dalam berkas
-        </label>
-        <p className="text-xs text-muted-foreground">
-          Dicetak kecil di kaki dokumen, di bawah tanda tangan. Dikosongkan = memakai kalimat bawaan; ia tidak bisa
-          dihilangkan sama sekali, karena berkas yang beredar lepas harus tetap menyebut asalnya.{' '}
-          <span className="font-mono">{'{nama_rs}'}</span> dan <span className="font-mono">{'{kontak_rs}'}</span>{' '}
-          diganti otomatis.
-        </p>
+        <div className="flex items-center gap-1">
+          <label className="text-sm font-medium" htmlFor="catatan_kaki_dokumen">
+            Catatan kaki di dalam berkas
+          </label>
+          <Petunjuk untuk="Catatan kaki di dalam berkas">
+            Dicetak kecil di kaki dokumen, di bawah tanda tangan. Dikosongkan = memakai kalimat bawaan; ia tidak bisa
+            dihilangkan sama sekali, karena berkas yang beredar lepas harus tetap menyebut asalnya.{' '}
+            <span className="font-mono">{'{nama_rs}'}</span> dan <span className="font-mono">{'{kontak_rs}'}</span>{' '}
+            diganti otomatis.
+          </Petunjuk>
+        </div>
         <Textarea id="catatan_kaki_dokumen" name="catatan_kaki_dokumen" defaultValue={catatanKaki} rows={3} className="w-full" />
       </div>
 

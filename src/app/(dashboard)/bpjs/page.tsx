@@ -198,13 +198,13 @@ async function TabTujuan({
     <section>
       <MasterSwitch enabled={enabled} adaTujuan={adaTujuan} />
 
-      <p className="mb-3 text-sm text-muted-foreground">
-        Satu daftar, dipakai kedua fitur di tab sebelah. Dua centang di tiap baris menjawab dua pertanyaan yang berbeda:{' '}
+      <Callout collapsible className="mb-4" title="Satu daftar tujuan, dipakai kedua fitur di tab sebelah">
+        Dua centang di tiap baris menjawab dua pertanyaan yang berbeda:{' '}
         <span className="font-medium text-foreground">Terima pembatalan</span> menerima pemberitahuan saat pasien
         membatalkan lewat Mobile JKN, dan{' '}
         <span className="font-medium text-foreground">Terima salinan kontrol</span> menerima tembusan pengingat yang
         dikirim ke pasien.
-      </p>
+      </Callout>
 
       <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
       <Pagination
@@ -268,12 +268,11 @@ async function TabBatal({ enabled, adaPenerima }: { enabled: boolean; adaPenerim
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
+      <Callout collapsible className="mb-4" title="Penerimanya LOKET, bukan pasien — supaya slot kosong bisa ditawarkan lagi">
         Dibaca dari <span className="font-mono">referensi_mobilejkn_bpjs_batal</span> milik SIMRS Khanza — pembatalan
         yang dilakukan pasien <span className="font-medium text-foreground">sendiri lewat aplikasi Mobile JKN</span>.
-        Penerimanya loket, bukan pasien: ia sudah tahu, ia yang menekan tombolnya. Gunanya supaya slot yang jadi kosong
-        bisa ditawarkan ke pasien lain.
-      </p>
+        Pasiennya sudah tahu, ia yang menekan tombolnya.
+      </Callout>
 
       <BatalSwitch enabled={enabled} adaPenerima={adaPenerima} />
 
@@ -328,11 +327,10 @@ async function TabKontrol({
 
   return (
     <section>
-      <p className="mb-3 text-sm text-muted-foreground">
+      <Callout collapsible className="mb-4" title="Dipicu WAKTU — sekali sehari pada jam yang dipilih di bawah">
         Dibaca dari <span className="font-mono">bridging_surat_kontrol_bpjs</span> — rencana kunjungan berikutnya yang
-        sudah dijadwalkan saat pasien pulang, sering berminggu-minggu di muka. Dipicu{' '}
-        <span className="font-medium text-foreground">WAKTU</span>: sekali sehari pada jam yang dipilih di bawah.
-      </p>
+        sudah dijadwalkan saat pasien pulang, sering berminggu-minggu di muka.
+      </Callout>
 
       <KontrolSwitch enabled={enabled} kePasien={kePasien} adaPenerima={adaPenerima} />
 

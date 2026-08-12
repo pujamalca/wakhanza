@@ -50,25 +50,29 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
       />
 
       {uniqueCodeFooter && (
-        <p className="mb-6 text-xs text-muted-foreground">
-          Satu baris kode unik ditambahkan otomatis di akhir setiap pesan (mis. <span className="font-mono">{uniqueCodeFooter}</span>
-          ), berbeda untuk setiap pesan — supaya kiriman massal tidak berisi teks yang identik, yang terbaca sebagai spam oleh
-          WhatsApp. Tidak perlu ditulis di template. Atur atau matikan di Pengaturan.
-        </p>
+        <Callout collapsible className="mb-6" title="Satu baris kode unik ditambahkan otomatis di akhir setiap pesan">
+          Bentuknya <span className="font-mono">{uniqueCodeFooter}</span>, berbeda untuk setiap pesan — supaya kiriman
+          massal tidak berisi teks yang identik, yang terbaca sebagai spam oleh WhatsApp. Tidak perlu ditulis di
+          template. Atur atau matikan di Pengaturan.
+        </Callout>
       )}
 
       <h2 className="mb-1 font-medium">Template pemicu otomatis</h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Template di bawah dipakai <span className="font-medium">otomatis oleh worker</span> saat kejadiannya terdeteksi di
-        Khanza. Staf tidak pernah memilihnya — satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru.
-        Di bawah tiap nama tertulis <span className="font-medium">tabel Khanza yang dibaca</span> dan{' '}
-        <span className="font-medium">kapan pesannya berbunyi</span>; keterangan lengkapnya muncul saat tombol Ubah ditekan.
-        Sistem ini hanya <span className="font-medium">membaca</span> — tidak pernah menulis apa pun ke database Khanza.
-      </p>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Tombol <span className="font-medium">Tujuan</span> mengatur ke mana pesannya dikirim. Bawaannya hanya ke nomor pasien
-        yang bersangkutan; bisa ditambah (atau diganti) grup WhatsApp / nomor petugas — sama seperti notifikasi farmasi.
-      </p>
+      <Callout collapsible className="mb-3" title="Dipakai otomatis oleh worker — staf tidak pernah memilihnya">
+        <p>
+          Satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru. Di bawah tiap nama tertulis{' '}
+          <span className="font-medium text-foreground">tabel Khanza yang dibaca</span> dan{' '}
+          <span className="font-medium text-foreground">kapan pesannya berbunyi</span>; keterangan lengkapnya muncul
+          saat tombol Ubah ditekan. Sistem ini hanya{' '}
+          <span className="font-medium text-foreground">membaca</span> — tidak pernah menulis apa pun ke database
+          Khanza.
+        </p>
+        <p className="mt-2">
+          Tombol <span className="font-medium text-foreground">Tujuan</span> mengatur ke mana pesannya dikirim.
+          Bawaannya hanya ke nomor pasien yang bersangkutan; bisa ditambah (atau diganti) grup WhatsApp / nomor
+          petugas — sama seperti notifikasi farmasi.
+        </p>
+      </Callout>
 
       {/*
         Peringatan tabrakan KONTROL_ULANG x BOOK_REMIND.
@@ -138,12 +142,11 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
       />
 
       <h2 className="mb-1 mt-8 font-medium">Template broadcast</h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Berbeda dari yang di atas: ini <span className="font-medium">dipilih manual</span> saat menyusun Broadcast atau Broadcast
-        terjadwal, supaya pesan yang sering dipakai tidak diketik ulang. Boleh sebanyak yang diperlukan. Variabelnya lebih
-        sedikit karena satu broadcast bisa merentang banyak kunjungan, sehingga hal seperti nomor antrian atau nama poli tidak
-        punya arti tunggal.
-      </p>
+      <Callout collapsible className="mb-3" title="Dipilih MANUAL saat menyusun broadcast — kebalikan dari yang di atas">
+        Gunanya supaya pesan yang sering dipakai tidak diketik ulang; boleh sebanyak yang diperlukan. Variabelnya lebih
+        sedikit karena satu broadcast bisa merentang banyak kunjungan, sehingga hal seperti nomor antrian atau nama
+        poli tidak punya arti tunggal.
+      </Callout>
       <BroadcastTemplateTable
         readOnly={readOnly}
         rows={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body, isActive: t.isActive }))}

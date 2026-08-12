@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import Link from 'next/link';
-import { Button, Input, MessageEditor } from '@/components/ui';
+import { Button, Input, MessageEditor, Petunjuk } from '@/components/ui';
 import { REKAP_PENJUALAN_TEMPLATE_VARIABLES } from '@/core/template';
 import {
   simpanRekapPenjualanAction,
@@ -106,7 +106,14 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
       <form action={simpanAction} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium">Jam kirim</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Jam kirim</label>
+              <Petunjuk untuk="Jam kirim rekap">
+                Bawaannya <span className="font-medium text-foreground">21.00</span>, dan itu diukur: sepanjang 90 hari
+                terakhir tidak ada satu pun transaksi setelah pukul 20.00, sementara pukul 19.00 justru jam tersibuk.
+                Rekap pukul 18.00 akan rutin melewatkan jam paling ramai.
+              </Petunjuk>
+            </div>
             <Input
               type="time"
               name="penjualan_rekap_jam"
@@ -115,14 +122,16 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Bawaannya <span className="font-medium text-foreground">21.00</span>, dan itu diukur: sepanjang 90 hari
-              terakhir tidak ada satu pun transaksi setelah pukul 20.00, sementara pukul 19.00 justru jam tersibuk.
-              Rekap pukul 18.00 akan rutin melewatkan jam paling ramai.
-            </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Hari yang direkap</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Hari yang direkap</label>
+              <Petunjuk untuk="Hari yang direkap">
+                Dihitung mundur dari hari saat rekapnya dikirim.{' '}
+                <span className="font-medium text-foreground">0</span> = hari itu juga,{' '}
+                <span className="font-medium text-foreground">1</span> = kemarin.
+              </Petunjuk>
+            </div>
             <Input
               type="number"
               name="penjualan_rekap_offset_hari"
@@ -133,18 +142,21 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
               fieldSize="sm"
               disabled={simpanPending}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Dihitung mundur dari hari saat rekapnya dikirim.{' '}
-              <span className="font-medium text-foreground">0</span> = hari itu juga,{' '}
-              <span className="font-medium text-foreground">1</span> = kemarin.
-            </p>
           </div>
         </div>
 
         <Akibat jam={jam} offset={offset} />
 
         <div>
-          <label className="mb-1 block text-xs font-medium">Isi pesan rekap</label>
+          <div className="mb-1 flex items-center gap-1">
+            <label className="text-xs font-medium">Isi pesan rekap</label>
+            <Petunjuk untuk="Isi pesan rekap">
+              Variabelnya <span className="font-medium text-foreground">berbeda</span> dari isi pesan nota di atas:
+              semuanya angka sehari penuh, bukan satu nota. Yang menyebut satu transaksi ({'{no_nota}'},{' '}
+              {'{daftar_barang}'}) memang tidak tersedia di sini &mdash; pada agregat sehari, keduanya tidak punya
+              arti.
+            </Petunjuk>
+          </div>
           <MessageEditor
             name="template_penjualan_rekap"
             defaultValue={nilai.template}
@@ -153,17 +165,24 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
             disabled={simpanPending}
             hint="Rincian per jenis penjualan dirakit sistem dan dipasang ke {rincian_jenis} — satu baris per jenis, berisi jumlah nota dan totalnya."
           />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Variabelnya <span className="font-medium text-foreground">berbeda</span> dari isi pesan nota di atas:
-            semuanya angka sehari penuh, bukan satu nota. Yang menyebut satu transaksi ({'{no_nota}'},{' '}
-            {'{daftar_barang}'}) memang tidak tersedia di sini &mdash; pada agregat sehari, keduanya tidak punya arti.
-          </p>
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-medium">
-            Isi pesan saat tidak ada penjualan sama sekali <span className="text-muted-foreground">(opsional)</span>
-          </label>
+          <div className="mb-1 flex items-center gap-1">
+            <label className="text-xs font-medium">
+              Isi pesan saat tidak ada penjualan sama sekali <span className="text-muted-foreground">(opsional)</span>
+            </label>
+            {/* Kosong = diam, dan bawaannya memang kosong -- alasan yang sama
+                dengan `farmasi.template_darurat_kosong`. Tapi mengisinya punya
+                guna yang nyata, dan itu perlu tetap bisa dibaca supaya
+                "opsional" tidak terbaca sebagai "tidak berguna". */}
+            <Petunjuk untuk="Isi pesan saat tidak ada penjualan">
+              Dikosongkan, hari tanpa penjualan lewat tanpa pesan &mdash; pesan harian yang isinya &ldquo;tidak ada
+              apa-apa&rdquo; berhenti dibaca dalam seminggu, dan sejak itu yang sungguhan ikut tidak terbaca. Diisi, ia
+              jadi tanda hidup: apotek yang biasanya ramai lalu menerima &ldquo;tidak ada penjualan&rdquo; tahu ada
+              yang perlu diperiksa.
+            </Petunjuk>
+          </div>
           <MessageEditor
             name="template_penjualan_rekap_kosong"
             defaultValue={nilai.templateKosong}
@@ -172,16 +191,6 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
             disabled={simpanPending}
             hint="Dibiarkan kosong = sistem DIAM pada hari tanpa penjualan."
           />
-          {/* Kosong = diam, dan bawaannya memang kosong -- alasan yang sama
-              dengan `farmasi.template_darurat_kosong`. Tapi mengisinya punya
-              guna yang nyata, dan itu perlu dikatakan supaya "opsional" tidak
-              terbaca sebagai "tidak berguna". */}
-          <p className="mt-1 text-xs text-muted-foreground">
-            Dikosongkan, hari tanpa penjualan lewat tanpa pesan &mdash; pesan harian yang isinya &ldquo;tidak ada
-            apa-apa&rdquo; berhenti dibaca dalam seminggu, dan sejak itu yang sungguhan ikut tidak terbaca. Diisi, ia
-            jadi tanda hidup: apotek yang biasanya ramai lalu menerima &ldquo;tidak ada penjualan&rdquo; tahu ada yang
-            perlu diperiksa.
-          </p>
         </div>
 
         {simpan.error && <p className="text-sm text-destructive">{simpan.error}</p>}
@@ -196,11 +205,13 @@ export function RekapForm({ nilai, adaTujuan }: { nilai: NilaiRekap; adaTujuan: 
       {/* Pratinjau                                                          */}
       {/* ------------------------------------------------------------------ */}
       <form action={pratinjauAction} className="rounded-lg border border-border/60 p-3">
-        <p className="mb-2 text-xs font-medium">Lihat rekap hari yang akan dibaca</p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          Membaca penjualan lewat jalur yang sama persis dipakai worker, lalu merendernya dengan isi pesan{' '}
-          <span className="font-medium text-foreground">yang sudah tersimpan</span> &mdash; bukan yang sedang diketik di
-          atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium">
+          Lihat rekap hari yang akan dibaca
+          <Petunjuk untuk="Pratinjau rekap harian">
+            Membaca penjualan lewat jalur yang sama persis dipakai worker, lalu merendernya dengan isi pesan{' '}
+            <span className="font-medium text-foreground">yang sudah tersimpan</span> &mdash; bukan yang sedang diketik
+            di atas, jadi simpan dulu untuk melihat perubahan. Tidak mengirim apa pun.
+          </Petunjuk>
         </p>
         <Button type="submit" variant="secondary" size="sm" disabled={pratinjauPending}>
           {pratinjauPending ? 'Membaca...' : 'Tampilkan pratinjau'}

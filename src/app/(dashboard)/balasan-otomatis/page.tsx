@@ -12,7 +12,7 @@ import {
 } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { hitungKataTakTerjawab } from '@/core/pertanyaanTakTerjawab';
-import { PageHeader, Card, Pagination } from '@/components/ui';
+import { PageHeader, Card, Callout, Pagination } from '@/components/ui';
 import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
 import { RuleTable } from './RuleTable';
@@ -215,32 +215,36 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
         <TestBox />
         <Card>
           <div className="space-y-3 text-sm">
-            <h3 className="font-medium">Cara kerjanya</h3>
-            <ol className="ml-4 list-decimal space-y-1.5 text-muted-foreground">
-              <li>
-                Pasien mengirim pesan ke nomor WhatsApp rumah sakit. Permintaan{' '}
-                <span className="font-mono text-xs">Berhenti Kirim Otomatis</span> selalu diperiksa lebih dulu dan tidak pernah
-                bisa disandera aturan di bawah.
-              </li>
-              <li>
-                Aturan diperiksa berurutan dari <span className="font-medium">urutan terkecil</span>. Yang pertama cocok yang
-                dipakai — satu pesan hanya pernah dibalas satu kali.
-              </li>
-              <li>
-                Balasannya masuk ke antrean kirim yang sama dengan notifikasi lain, jadi ikut tercatat di Antrean dan Log. Jam
-                tenang <span className="font-medium">tidak berlaku</span> di sini: pasien sedang menunggu jawaban atas pesannya
-                sendiri.
-              </li>
-              <li>
-                Pasien yang meminta <span className="font-mono text-xs">Berhenti Kirim Otomatis</span>{' '}
-                <span className="font-medium">tetap dibalas di sini</span> — yang ia hentikan adalah pemberitahuan otomatis
-                (antrian, hasil, obat, tagihan, pengingat jadwal), bukan jawaban atas pesan yang ia kirim sendiri.
-              </li>
-            </ol>
+            {/* Peringatan medis TIDAK dilipat: ia batas tanggung jawab yang harus
+                terbaca sebelum aturan pertama ditulis, bukan sesudahnya. Urutan
+                kerjanya di bawahnya dilipat -- itu dibaca sekali lalu tidak lagi. */}
             <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5 text-xs">
               <span className="font-medium">Bukan untuk pertanyaan medis.</span> Sistem ini hanya mencocokkan kata kunci — tidak
               memahami keluhan. Pesan yang tidak cocok sengaja dibiarkan tanpa jawaban supaya tetap dibaca petugas.
             </div>
+            <Callout collapsible title="Cara kerjanya: aturan pertama yang cocok menang, satu pesan satu balasan">
+              <ol className="ml-4 list-decimal space-y-1.5">
+                <li>
+                  Pasien mengirim pesan ke nomor WhatsApp rumah sakit. Permintaan{' '}
+                  <span className="font-mono text-xs">Berhenti Kirim Otomatis</span> selalu diperiksa lebih dulu dan tidak pernah
+                  bisa disandera aturan di bawah.
+                </li>
+                <li>
+                  Aturan diperiksa berurutan dari{' '}
+                  <span className="font-medium text-foreground">urutan terkecil</span>. Yang pertama cocok yang dipakai.
+                </li>
+                <li>
+                  Balasannya masuk ke antrean kirim yang sama dengan notifikasi lain, jadi ikut tercatat di Antrean dan Log. Jam
+                  tenang <span className="font-medium text-foreground">tidak berlaku</span> di sini: pasien sedang menunggu jawaban
+                  atas pesannya sendiri.
+                </li>
+                <li>
+                  Pasien yang meminta <span className="font-mono text-xs">Berhenti Kirim Otomatis</span>{' '}
+                  <span className="font-medium text-foreground">tetap dibalas di sini</span> — yang ia hentikan adalah pemberitahuan
+                  otomatis (antrian, hasil, obat, tagihan, pengingat jadwal), bukan jawaban atas pesan yang ia kirim sendiri.
+                </li>
+              </ol>
+            </Callout>
             <p className="text-xs text-muted-foreground">
               Pesan cadangan saat tidak ada yang cocok: {adaFallback ? 'aktif' : <span className="font-medium">tidak ada (diam)</span>}
               . Menyimpan teks pesan pasien untuk penyetelan kata kunci:{' '}

@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { Button, Input, Select, MessageEditor, Badge, Modal, ConfirmDialog, EmptyState } from '@/components/ui';
+import { Button, Input, Select, MessageEditor, Badge, Modal, ConfirmDialog, EmptyState, Petunjuk } from '@/components/ui';
 import { tableWrapperClass, theadClass, rowClass, cellClass } from '@/components/ui';
 import { DARURAT_TEMPLATE_VARIABLES } from '@/core/template';
 import { MIN_INTERVAL_DAYS, MAX_INTERVAL_DAYS, type RepeatKindPeriodik } from '@/core/schedule';
@@ -363,19 +363,21 @@ export function DaruratForm({
             </span>
           </label>
           <div className="mt-3">
-            <label className="mb-1 block text-xs font-medium">Frasa pertanyaan</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Frasa pertanyaan</label>
+              <Petunjuk untuk="Frasa pertanyaan rekap">
+                Dipisah koma, dicocokkan sebagai frasa utuh. Sengaja bukan kata tunggal seperti &ldquo;stok&rdquo; —
+                itu milik balasan stok satu obat di tab Balasan stok, dan memakainya di sini membuat setiap pertanyaan
+                tentang satu obat dijawab daftar ratusan barang. Pesan yang masih menyebut nama obat (&ldquo;stok habis
+                paracetamol&rdquo;) tetap diteruskan ke sana.
+              </Petunjuk>
+            </div>
             <Input
               name="darurat_keywords"
               defaultValue={nilai.frasa}
               disabled={pesanPending}
               placeholder="darurat stok,stok menipis,rekap stok"
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Dipisah koma, dicocokkan sebagai frasa utuh. Sengaja bukan kata tunggal seperti &ldquo;stok&rdquo; — itu
-              milik balasan stok satu obat di tab Balasan stok, dan memakainya di sini membuat setiap pertanyaan
-              tentang satu obat dijawab daftar ratusan barang. Pesan yang masih menyebut nama obat (&ldquo;stok habis
-              paracetamol&rdquo;) tetap diteruskan ke sana.
-            </p>
           </div>
         </div>
 
@@ -538,12 +540,14 @@ function JadwalDialog({
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Batas baris</label>
+            <div className="mb-1 flex items-center gap-1">
+              <label className="text-xs font-medium">Batas baris</label>
+              <Petunjuk untuk="Batas baris">
+                0 = seluruh barang yang di bawah ambang. Daftar yang terlalu panjang untuk satu pesan WhatsApp dipecah
+                jadi beberapa pesan berturut-turut — tidak ada barang yang dibuang.
+              </Petunjuk>
+            </div>
             <Input name="max_baris" type="number" min={0} max={BATAS_KERAS_BARIS} defaultValue={jadwal?.maxBaris ?? 0} />
-            <p className="mt-1 text-xs text-muted-foreground">
-              0 = seluruh barang yang di bawah ambang. Daftar yang terlalu panjang untuk satu pesan WhatsApp dipecah
-              jadi beberapa pesan berturut-turut — tidak ada barang yang dibuang.
-            </p>
           </div>
         </div>
 
