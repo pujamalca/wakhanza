@@ -3,9 +3,16 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
-import { fetchSegmentUntukJadwal, isFollowupSchedule, isPilihSchedule } from '@/khanza/broadcastSchedule';
+import {
+  fetchSegmentUntukJadwal,
+  isFollowupSchedule,
+  isPilihSchedule,
+  type ScheduleFilterConfig,
+} from '@/khanza/broadcastSchedule';
 import { findUnknownVariables, BROADCAST_TEMPLATE_VARIABLES } from '@/core/template';
 import { computeNextRunAt, type RepeatKind } from '@/core/schedule';
+import { hapusPenerima } from '@/core/penerimaJadwal';
+import { MAX_PILIHAN_PASIEN } from '@/core/pilihanPasien';
 import { BroadcastSchedule, logAudit } from '@/models';
 import { parseScheduleFilters, type RawFilterInput } from './filters';
 
@@ -170,6 +177,66 @@ export async function toggleScheduleAction(id: number, isActive: boolean): Promi
     schedule.name,
   );
   revalidatePath('/broadcast-terjadwal');
+}
+
+/**
+ * Membuang SEORANG penerima dari sebuah jadwal, dari halaman detailnya.
+ *
+ * Kebutuhannya lahir dari pemakaian sungguhan: jadwal yang dimaksudkan untuk
+ * satu pasien dibuat dengan mengetik namanya di kotak cari, lalu
+ * `LIKE '%nama%'` ternyata cocok dengan dua orang. Sampai aksi ini ada,
+ * satu-satunya jalan membetulkannya adalah menghapus jadwalnya lalu menyusun
+ * ulang dari nol.
+ *
+ * Penerimanya DIBACA ULANG di sini lewat `fetchSegmentUntukJadwal()` -- pintu
+ * yang sama dipakai worker -- bukan diterima dari klien. Halaman detail hanya
+ * menyerahkan SATU no. RM yang mau dibuang; daftar acuannya selalu dihitung
+ * server. Aturan "hasil pratinjau tidak pernah jadi sumber kebenaran" berlaku
+ * utuh, dan di sini taruhannya lebih tinggi daripada biasa: daftar yang
+ * dipercaya dari klien akan menjadi daftar penerima yang tersimpan permanen.
+ */
+export async function hapusPenerimaJadwalAction(
+  scheduleId: number,
+  noRkmMedis: string,
+): Promise<{ error?: string }> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const schedule = await BroadcastSchedule.findByPk(scheduleId);
+  if (!schedule) return { error: 'Jadwal tidak ditemukan.' };
+
+  let config: ScheduleFilterConfig;
+  try {
+    config = JSON.parse(schedule.filterJson) as ScheduleFilterConfig;
+  } catch {
+    return { error: 'filter_json jadwal ini tidak bisa diurai -- hapus lalu buat ulang jadwalnya.' };
+  }
+
+  const penerima = await fetchSegmentUntukJadwal(config);
+  const hasil = hapusPenerima({
+    config,
+    penerimaSekarang: penerima.map((r) => r.no_rkm_medis),
+    buang: noRkmMedis,
+    maxPilihan: MAX_PILIHAN_PASIEN,
+  });
+  if (!hasil.boleh) return { error: hasil.alasan };
+
+  // Filter aslinya (cari/wilayah/cara bayar) sengaja TIDAK dihapus walau sejak
+  // sekarang tidak dipakai: ia satu-satunya catatan tentang bagaimana daftar
+  // ini dulu disusun, dan halaman detail menandainya "tidak dipakai" supaya
+  // tidak terbaca sebagai penyaring yang masih menggigit.
+  const baru: ScheduleFilterConfig = { ...config, mode: 'pilih', noRkmMedis: hasil.sisa };
+  await schedule.update({ filterJson: JSON.stringify(baru) });
+
+  await logAudit(
+    session!.user.username,
+    'broadcast_schedule_hapus_penerima',
+    String(scheduleId),
+    `no. RM ${noRkmMedis} dibuang; sisa ${hasil.sisa.length} penerima${hasil.konversi ? ' (jadwal berubah jadi daftar tetap)' : ''}`,
+  );
+  revalidatePath(`/broadcast-terjadwal/${scheduleId}`);
+  revalidatePath('/broadcast-terjadwal');
+  return {};
 }
 
 export async function deleteScheduleAction(id: number): Promise<void> {

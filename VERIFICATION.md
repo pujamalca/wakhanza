@@ -2812,3 +2812,74 @@ wa_session       ready   heartbeat umur 19 detik
 **Halaman detail belum pernah dibuka atas jadwal sungguhan.** Query penerimanya adalah `fetchSegmentUntukJadwal()` yang sama dipakai worker dan sudah berjalan atas keenam jadwal itu; yang belum terbukti adalah perakitan tampilannya. Kegagalan di situ berisik (galat render), bukan diam.
 
 **Jadwal dengan `lookbackDays: 0` belum pernah benar-benar dieksekusi worker.** Keenam jadwal yang ada menyimpan angka jendelanya sendiri (30 dan 180) dan tidak tersentuh perubahan ini; nilai 0 baru muncul pada jadwal yang dibuat sesudah ini. Yang sudah dibuktikan adalah keputusan turunannya (`dateFrom === null`, uji unit) dan bahwa bentuk query yang lahir dari situ sudah dijaga rencananya.
+
+## Mengeluarkan seorang penerima dari sebuah jadwal (`core/penerimaJadwal.ts`)
+
+### Keempat pagarnya diuji unit
+
+```
+npx jest src/core/penerimaJadwal
+PASS src/core/penerimaJadwal.test.ts
+Tests: 11 passed, 11 total
+```
+
+Sebelas uji menutup: konversi dari jadwal berfilter, pengurangan biasa pada jadwal yang sudah berdaftar, urutan sisa yang dipertahankan, penolakan penerima terakhir (pada KEDUA bentuk jadwal), penolakan tindak lanjut, `windowMode: 'followup'` yang TIDAK menghalangi jadwal yang sudah berdaftar, penolakan no. RM yang tidak ada, penolakan segmen kelewat besar, batas yang tidak berlaku pada jadwal yang sudah berdaftar, dan urutan menang antar-penolakan.
+
+### Dua pagar dibuktikan MENGGIGIT
+
+```
+# 1. pagar "penerima terakhir" dilepas
+Tests: 2 failed, 9 passed
+  x hapusPenerima > penerima terakhir DITOLAK, dan alasannya menyebut akibatnya
+  x hapusPenerima > penerima terakhir DITOLAK juga pada jadwal yang sudah berdaftar
+
+# 2. pagar tindak lanjut dilepas
+Tests: 1 failed, 10 passed
+  x hapusPenerima > jadwal tindak lanjut DITOLAK, dan diarahkan ke daftar tolak
+```
+
+Yang pertama itulah yang paling mahal kalau hilang, dan bentuk kegagalannya perlu dinyatakan: daftar `pilih` yang KOSONG membuat `isPilihSchedule()` mengembalikan false, sehingga jadwalnya jatuh kembali menjadi jadwal berfilter. Mengeluarkan orang terakhir karena itu bukan menghasilkan "jadwal tanpa penerima" melainkan "jadwal yang mengirim lagi ke SELURUH hasil filter aslinya" -- kebalikan persis dari yang diminta, tanpa satu pun galat.
+
+### Gerbang lengkap
+
+```
+npm test
+Test Suites: 44 passed, 44 total
+Tests:       726 passed, 726 total
+```
+
+(dari 43 suite / 715 uji sebelum penambahan ini: +1 suite `penerimaJadwal`, +11 uji)
+
+```
+npm run typecheck   -> bersih
+npm run lint        -> bersih
+npm run build       -> sukses
+```
+
+### Terpasang dan tetap dijaga gerbang autentikasi
+
+```
+pm2 restart wakhanza-web  -> online, restart 2
+/broadcast-terjadwal      -> 307  http://127.0.0.1:3100/login
+/broadcast-terjadwal/37   -> 307  http://127.0.0.1:3100/login
+```
+
+Penanda di build:
+
+```
+grep -rl "<penanda>" .next/server
+[4] Keluarkan
+[4] berisi pasien yang tersisa
+[4] berhenti menjaring pasien baru
+[4] broadcast_schedule_hapus_penerima
+[2] Mengeluarkan...
+[9] tidak dipakai lagi
+```
+
+`broadcast_schedule_hapus_penerima` layak disebut tersendiri: itu nama peristiwa `audit_log`-nya, jadi keberadaannya di build membuktikan jalur pencatatannya ikut terpasang -- bukan cuma tampilannya.
+
+### Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
+
+**Tombolnya belum pernah ditekan atas jadwal sungguhan.** Menekannya berarti mengubah salah satu dari enam jadwal aktif milik RS -- pada jadwal berfilter perubahannya TIDAK bisa dikembalikan lewat tombol mana pun, jadi itu keputusan staf atas jadwalnya sendiri, bukan efek samping verifikasi. Yang bisa gagal DIAM sudah dipagari dari sisi lain: seluruh keputusannya ada di fungsi murni yang diuji berikut bukti menggigitnya, daftar acuannya dibaca ulang server lewat pintu yang sama dipakai worker, dan `broadcast_schedule` sudah punya grant `UPDATE` sejak `migrations/006` (dibuktikan berjalan oleh `toggleScheduleAction` yang memakai kolom lain di tabel yang sama).
+
+**Konversi `semua` -> `pilih` belum pernah dijalankan worker.** Yang sesudah konversi dipakai adalah `fetchPatientsByRm()`, jalur yang sudah berjalan di produksi untuk broadcast manual bermode centang.

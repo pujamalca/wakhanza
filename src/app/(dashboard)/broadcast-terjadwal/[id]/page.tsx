@@ -1,14 +1,16 @@
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { QueryTypes } from 'sequelize';
 import { auth } from '@/auth';
 import { db } from '@/db/wakhanza';
 import { BroadcastSchedule, BroadcastCampaign, Outbox, type OutboxStatus } from '@/models';
-import { fetchSegmentUntukJadwal, isPilihSchedule } from '@/khanza/broadcastSchedule';
+import { fetchSegmentUntukJadwal, isFollowupSchedule, isPilihSchedule } from '@/khanza/broadcastSchedule';
 import { fetchRegionOptions, fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { scheduleActor } from '@/core/schedule';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { summarizeSegment } from '../../broadcast/segment';
 import { bacaFilterJson, describeRepeat, describeWindowConfig, jelaskanSasaran } from '../deskripsi';
+import { HapusPenerima } from './HapusPenerima';
 import {
   PageHeader,
   Card,
@@ -130,6 +132,15 @@ export default async function DetailJadwalPage({
   }
 
   const modePilih = isPilihSchedule(config);
+  /**
+   * Tombol "Keluarkan" tidak ditampilkan pada jadwal tindak lanjut, dan itu
+   * bukan penyederhanaan tampilan: `hapusPenerima()` memang menolaknya, dan
+   * tombol yang selalu menjawab galat lebih buruk daripada tombol yang tidak
+   * ada -- ia mengundang staf menekannya berulang lalu menyimpulkan fiturnya
+   * rusak. Pemeriksaan sebenarnya tetap di server; ini cuma menghindari
+   * menawarkan sesuatu yang pasti ditolak.
+   */
+  const bolehKeluarkan = modePilih || !isFollowupSchedule(config);
 
   const [recipients, regionOptions, paymentOptions, campaigns] = await Promise.all([
     // Pintu yang SAMA dipakai worker saat jadwalnya jatuh tempo -- kalau
@@ -209,6 +220,17 @@ export default async function DetailJadwalPage({
       <Card className="mb-4">
         <h2 className="mb-2 font-medium">Sasaran &mdash; {describeWindowConfig(config)}</h2>
         <p className="mb-3 text-sm text-muted-foreground">{jelaskanSasaran(config)}</p>
+        {/* Filter yang tertinggal pada jadwal berdaftar WAJIB ditandai mati.
+            Ia sengaja tidak dihapus -- ia satu-satunya catatan tentang
+            bagaimana daftarnya dulu disusun -- tapi dibiarkan polos ia terbaca
+            sebagai penyaring yang masih menggigit, dan staf lalu membetulkan
+            sesuatu yang tidak berpengaruh apa-apa. */}
+        {modePilih && (config.cari || config.kdKab?.length || config.kdKec?.length || config.kdPj?.length) ? (
+          <p className="mb-3 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
+            Penyaring di bawah <strong>tidak dipakai lagi</strong> — daftar pasien menggantikannya, bukan menyaringnya.
+            Ditampilkan apa adanya sebagai catatan bagaimana daftar ini dulu disusun.
+          </p>
+        ) : null}
         <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Baris label="Pencarian pasien">{config.cari || <Kosong>tidak dipakai</Kosong>}</Baris>
           <Baris label="Kabupaten/kota">{wilayahKab || <Kosong>semua</Kosong>}</Baris>
@@ -239,6 +261,34 @@ export default async function DetailJadwalPage({
             : 'Dihitung ULANG dari jendela tanggal relatif setiap kali jadwal jalan, jadi daftar ini bisa berbeda besok. Ia menjawab "apakah sasarannya masih benar", bukan "siapa yang sudah dikirimi".'}
         </p>
 
+        {/* Kalimat ini menjelaskan tombol yang ada di tiap baris, jadi ia harus
+            ada SEBELUM tabelnya -- bukan sesudah, tempat ia baru terbaca oleh
+            orang yang sudah terlanjur menekan. */}
+        <p className="mb-3 text-xs text-muted-foreground">
+          {bolehKeluarkan ? (
+            modePilih ? (
+              <>
+                Salah sasaran? Tekan <strong>Keluarkan</strong> di baris pasien yang tidak dimaksudkan.
+              </>
+            ) : (
+              <>
+                Salah sasaran &mdash; misalnya pencarian nama ternyata cocok dengan dua orang? Tekan{' '}
+                <strong>Keluarkan</strong> di baris yang tidak dimaksudkan. Jadwalnya akan berubah dari &ldquo;siapa pun yang
+                cocok dengan filter&rdquo; menjadi <strong>daftar tetap</strong> berisi pasien yang tersisa.
+              </>
+            )
+          ) : (
+            <>
+              Penerima jadwal tindak lanjut berganti tiap hari, jadi tidak ada daftar yang bisa dikurangi di sini. Untuk
+              menghentikan seorang pasien secara permanen, tambahkan nomornya di{' '}
+              <Link href="/daftar-tolak" className="underline hover:text-foreground">
+                Daftar tolak
+              </Link>
+              .
+            </>
+          )}
+        </p>
+
         <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Angka label="Bisa dihubungi" value={summary.reachable} />
           <Angka label="Tanpa nomor valid" value={summary.noContact} />
@@ -256,6 +306,7 @@ export default async function DetailJadwalPage({
                 <th className={cellClass}>Cara bayar</th>
                 <th className={cellClass}>Kunjungan terakhir</th>
                 <th className={cellClass}>Nomor</th>
+                {bolehKeluarkan && <th className={cellClass}></th>}
               </tr>
             </thead>
             <tbody>
@@ -274,11 +325,21 @@ export default async function DetailJadwalPage({
                       </Badge>
                     )}
                   </td>
+                  {bolehKeluarkan && (
+                    <td className={cellClass}>
+                      <HapusPenerima
+                        scheduleId={scheduleId}
+                        noRkmMedis={row.no_rkm_medis}
+                        nama={row.nm_pasien}
+                        konversi={!modePilih}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
               {barisPenerima.length === 0 && (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={bolehKeluarkan ? 7 : 6}>
                     <EmptyState>
                       Tidak ada pasien yang cocok saat ini. Untuk jadwal tindak lanjut ini sering wajar (jendelanya satu hari
                       kalender); untuk jendela berjalan, periksa kembali penyaringnya.

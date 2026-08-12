@@ -427,6 +427,30 @@ Yang kedua tidak bisa disimpulkan dari yang pertama: segmen dihitung ULANG tiap 
 
 **`filter_json` yang tidak bisa diurai punya kalimatnya sendiri**, bukan halaman kosong: baris seperti itu hanya lahir dari suntingan SQL langsung, dan halaman yang diam membuatnya terlihat seperti jadwal tanpa penerima alih-alih jadwal yang rusak.
 
+### Mengeluarkan seorang penerima dari sebuah jadwal (`core/penerimaJadwal.ts`)
+
+Kebutuhannya dari pemakaian sungguhan, bukan dari perancangan: staf membuat jadwal untuk SATU pasien dengan mengetik namanya di kotak cari, lalu `LIKE '%nama%'` ternyata cocok dengan dua orang. Sampai tombol **Keluarkan** di halaman detail ada, satu-satunya jalan membetulkannya adalah menghapus jadwalnya lalu menyusun ulang dari nol.
+
+**Yang membuatnya tidak sepele: pada jadwal bermode `semua` tidak ada baris yang bisa dihapus.** Penerimanya bukan daftar melainkan HASIL FILTER -- yang ada cuma filter yang menghasilkan orang itu. Karena itu mengeluarkan seseorang dari jadwal semacam itu berarti **mengubah bentuknya**: dari "siapa pun yang cocok" menjadi "orang-orang ini" (`mode: 'pilih'`).
+
+**Bentuk yang satunya -- daftar PENGECUALIAN yang dikurangkan dari hasil filter -- sengaja ditolak**, dan alasannya bukan selera: ia menaruh cara KEDUA menentukan penerima di jalur terpanas proyek ini (`fetchSegmentUntukJadwal`, dipakai worker + pratinjau + pemeriksaan simpan), dan satu tempat yang lupa mengurangkannya berarti pasien yang sudah dikeluarkan tetap dikirimi tanpa satu pun galat. Konversi ke `pilih` memakai jalur yang SUDAH ADA dan sudah teruji -- nol semantik baru, dan `isPilihSchedule`/`fetchPatientsByRm`/runner tidak berubah sama sekali.
+
+**Empat pagar, urutannya MENGIKAT, dan satu di antaranya menghasilkan kebalikan persis dari yang diminta kalau hilang:**
+
+1. **Tindak lanjut ditolak.** Daftar tetap dan tindak lanjut saling meniadakan (`isFollowupSchedule` mengembalikan false begitu modenya `pilih`), jadi mengubahnya jadi daftar akan DIAM-DIAM mematikan kunci idempoten per-kunjungan -- orang yang sama mulai menerima pesan tiap kali jadwal jalan. Lagi pula penerimanya di sana berganti tiap hari. Diarahkan ke `/daftar-tolak`, dan tombolnya memang tidak ditampilkan di sana: tombol yang selalu menjawab galat lebih buruk daripada tombol yang tidak ada.
+2. **Yang tidak ada di daftar ditolak** -- menjaga tekan-ganda dan halaman basi. Tanpa ini, penekanan kedua melaporkan berhasil sambil menulis ulang konversinya, sehingga "berhasil" berarti dua hal berbeda.
+3. **PENERIMA TERAKHIR ditolak, dan inilah yang paling mahal kalau hilang.** `isPilihSchedule()` menuntut daftarnya berisi; daftar KOSONG membuatnya mengembalikan false, sehingga jadwalnya **jatuh kembali menjadi jadwal berfilter** -- mengirim lagi ke SELURUH orang yang cocok dengan filter aslinya. Membuang orang terakhir akan menghasilkan kebalikan persis dari yang diminta, tanpa satu pun galat.
+4. **Segmen di atas `MAX_PILIHAN_PASIEN` tidak bisa dibekukan jadi daftar** -- batas itu milik bentuk daftarnya sendiri, dan menyimpan lebih banyak berarti sisanya dipotong DIAM saat dibaca kembali.
+
+**Daftar acuannya DIBACA ULANG di server** lewat `fetchSegmentUntukJadwal()`, pintu yang sama dipakai worker. Halaman detail cuma menyerahkan SATU no. RM. Aturan "hasil pratinjau tidak pernah jadi sumber kebenaran" berlaku utuh, dan taruhannya lebih tinggi daripada biasa: daftar yang dipercaya dari klien akan menjadi daftar penerima yang **tersimpan permanen**.
+
+**Filter aslinya sengaja TIDAK dihapus** walau sejak konversi tidak dipakai -- ia satu-satunya catatan tentang bagaimana daftar itu dulu disusun. Tapi ia WAJIB ditandai mati di layar: dibiarkan polos, ia terbaca sebagai penyaring yang masih menggigit, dan staf lalu membetulkan sesuatu yang tidak berpengaruh apa-apa.
+
+**Konfirmasinya `ConfirmDialog`, bukan form server-action telanjang seperti tombol Jeda/Hapus di tabel daftar**, dan alasannya bukan keseragaman melainkan KETERBALIKAN: pada jadwal berfilter, tindakan ini mengubah bentuk jadwalnya dan itu tidak bisa dikembalikan lewat tombol mana pun. Galatnya tampil DI DALAM dialog -- selama `<dialog>` terbuka seluruh halaman di belakangnya inert, jadi pesan yang dirender di baris tabel ada di layar tapi tertutup backdrop.
+
+**Yang TIDAK ikut dibatalkan, dan dikatakan di dialognya**: pesan yang sudah terlanjur masuk `outbox`. Mengeluarkan seseorang mengubah siapa yang dikirimi LAIN KALI, bukan menarik kembali antrean -- dan `/antrean` memang belum punya pembatalan.
+
+**Riwayat pengiriman sengaja tidak bisa dihapus.** `broadcast_campaign` insert-only sebagai jejak akuntabilitas, dan pesan yang sudah terkirim tidak bisa ditarik kembali dari WhatsApp -- menyediakan tombol hapus di sana cuma menghapus buktinya, bukan akibatnya.
 ### Variabel BROADCAST (`core/broadcastVars.ts`) -- satu pemetaan, dan yang sengaja tetap tidak ada
 
 Daftar "+ Sisipkan variabel" di `/broadcast` dan `/broadcast-terjadwal` dulu cuma berisi lima -- jauh lebih sempit daripada `/template`, dan sebagian kesempitan itu ternyata tidak punya alasan. Yang ditemukan saat memperbaikinya lebih penting daripada variabelnya sendiri.
