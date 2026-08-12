@@ -19,10 +19,16 @@ export function WindowModeFields({
 }: {
   presets: { key: string; label: string }[];
   defaultMode: 'rolling' | 'followup';
+  /** 0 = seluruh riwayat kunjungan (LOOKBACK_SEMUA_WAKTU), dan itu bawaannya. */
   defaultLookback: number;
   defaultOffset: number;
 }) {
   const [mode, setMode] = useState(defaultMode);
+  // Dikendalikan state (bukan defaultValue) semata supaya arti angka 0 terbaca
+  // SAAT diketik. Kotak angka yang diam-diam berarti "semua waktu" adalah
+  // kotak yang artinya baru ketahuan setelah jadwalnya berjalan.
+  const [lookback, setLookback] = useState(String(defaultLookback));
+  const semuaWaktu = Number(lookback) <= 0 || lookback.trim() === '';
 
   return (
     <div className="space-y-2">
@@ -69,16 +75,28 @@ export function WindowModeFields({
           <input
             type="number"
             name="lookback"
-            min={1}
-            defaultValue={defaultLookback}
+            min={0}
+            value={lookback}
+            onChange={(e) => setLookback(e.target.value)}
             disabled={mode !== 'rolling'}
             className="w-16 rounded-md border bg-background px-2 py-0.5 text-xs text-foreground disabled:opacity-40"
           />{' '}
-          hari terakhir.
+          hari terakhir {semuaWaktu ? <span className="font-medium">(0 = seluruh riwayat kunjungan)</span> : null}.
           <span className="block text-xs text-muted-foreground">
             Pasien yang sama tetap masuk kriteria selama masih di dalam jendela, jadi ia menerima pesan LAGI setiap kali jadwal
             jalan. Cocok untuk pengumuman berkala, bukan untuk tindak lanjut.
           </span>
+          {/* Bawaannya 0 supaya kotak cari di bawah bisa menjangkau pasien yang
+              sudah lama tidak datang -- justru pasien itulah yang paling sering
+              dicari untuk dicentang. Yang perlu dikatakan di sini adalah
+              batasnya, karena tanpa penyaring pasien segmennya nol baris dan
+              jadwalnya tidak bisa disimpan sama sekali. */}
+          {mode === 'rolling' && semuaWaktu && (
+            <span className="block text-xs text-warning">
+              Tanpa batas tanggal, wajib ada penyaring pasien: pencarian nama/no. RM, atau wilayah. Cara bayar saja tidak cukup
+              — ia menyaring kunjungan, bukan pasien.
+            </span>
+          )}
           {mode === 'rolling' && (
             <span className="mt-1 flex flex-wrap items-center gap-1.5">
               {presets.map((p) => (
@@ -89,7 +107,7 @@ export function WindowModeFields({
                   value={p.key}
                   className="rounded-full border px-2 py-0.5 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
-                  {p.label} terakhir
+                  {p.label}
                 </button>
               ))}
             </span>

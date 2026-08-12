@@ -80,7 +80,13 @@ export function parseFilters(input: RawFilterInput): PatientSegmentFilters {
   } else if (preset && DATE_PRESETS[preset]) {
     dateFrom = daysAgo(DATE_PRESETS[preset].days);
     dateTo = today;
-  } else if (input.dateFrom === undefined && input.dateTo === undefined) {
+  } else if (input.dateFrom === undefined && input.dateTo === undefined && !single(input.cari)?.trim()) {
+    // Pencarian yang ikut, TANPA kunci tanggal sama sekali, hanya lahir dari
+    // URL yang diketik/dibagikan tangan -- dan di sana jendela bawaan adalah
+    // kegagalan diam yang persis dijelaskan core/segmentScope.ts: pasien yang
+    // terakhir datang lebih dari sebulan lalu tidak muncul, dan yang terlihat
+    // cuma "tidak ada pasien yang cocok". Orang yang mengetik ?cari=... sedang
+    // mencari SEORANG PASIEN, bukan menyaring kunjungan sebulan terakhir.
     dateFrom = daysAgo(DEFAULT_LOOKBACK_DAYS);
     dateTo = today;
   } else {

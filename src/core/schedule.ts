@@ -1,6 +1,25 @@
 export type RepeatKind = 'once' | 'daily' | 'weekly' | 'monthly';
 
 /**
+ * `created_by` yang ditulis worker ke `broadcast_campaign` (dan `actor` di
+ * `audit_log`) tiap kali sebuah jadwal jalan: `system:broadcast_schedule:<id>`.
+ * Itu yang membedakan jalan otomatis dari kirim manual staf, yang memakai
+ * username asli.
+ *
+ * Tinggal di core, bukan sebagai const lokal di runner, karena sejak halaman
+ * detail jadwal ada ia dibaca dari DUA arah: worker MENULISnya, dashboard
+ * MENCARInya. Dua salinan string berarti riwayat pengiriman yang diam-diam
+ * kosong -- halamannya tampil wajar, cuma tidak pernah menemukan satu
+ * kampanye pun, dan tidak ada galat di mana pun. Bentuk kegagalan yang sama
+ * sudah dibayar di `respectsOptOut()` dan `kunciPesanMasuk()`.
+ */
+export const SCHEDULE_ACTOR = 'system:broadcast_schedule';
+
+export function scheduleActor(scheduleId: number): string {
+  return `${SCHEDULE_ACTOR}:${scheduleId}`;
+}
+
+/**
  * Pengulangan tiap N hari ("sekali tiga hari"), dipakai peringatan DARURAT STOK
  * dan sengaja TIDAK ditambahkan ke `RepeatKind`.
  *
@@ -62,11 +81,28 @@ export const DEFAULT_FOLLOWUP_OFFSET_DAYS = 3;
 
 export interface ScheduleWindowInput {
   windowMode?: ScheduleWindowMode;
-  /** Dipakai mode 'rolling'. */
+  /** Dipakai mode 'rolling'. 0 = TANPA batas bawah, lihat LOOKBACK_SEMUA_WAKTU. */
   lookbackDays: number;
   /** Dipakai mode 'followup'. 0 = pasien yang berkunjung hari ini juga. */
   offsetDays?: number;
 }
+
+/**
+ * `lookbackDays` yang berarti "seluruh riwayat kunjungan, tanpa batas bawah".
+ *
+ * Nol dipilih karena ia satu-satunya angka yang TIDAK punya arti lain di sini:
+ * jendela nol hari bukan jendela, jadi ia tidak menabrak nilai sah mana pun.
+ * (Bandingkan `offsetDays`, tempat 0 justru punya arti sendiri -- "pasien yang
+ * berkunjung hari ini juga" -- dan karena itu tidak bisa dipakai untuk ini.)
+ *
+ * Yang harus disadari saat memakainya: tanpa batas bawah, `segmentScope()`
+ * memindahkan query segmen ke BENTUK yang berbeda (berangkat dari `pasien`,
+ * bukan dari prefix `no_rawat`), dan tanpa satu pun penyaring pasien ia
+ * ditolak sebagai 'tanpa-batas' -> nol baris. Jadi jadwal berjendela semua-
+ * waktu yang tidak menyaring apa-apa TIDAK BISA disimpan; `createScheduleAction`
+ * menolaknya karena pratinjaunya kosong.
+ */
+export const LOOKBACK_SEMUA_WAKTU = 0;
 
 /**
  * Rentang tanggal kunjungan yang disasar, dihitung ULANG dari `now` setiap
@@ -75,14 +111,26 @@ export interface ScheduleWindowInput {
  *
  * Untuk 'followup', dateFrom == dateTo (satu hari kalender penuh, bukan
  * jendela kosong): pemanggilnya memangkas lewat prefix no_rawat [hari, hari+1).
+ *
+ * `dateFrom` null = tanpa batas bawah. Nilai itu diteruskan apa adanya ke
+ * `PatientSegmentFilters`, yang memang sudah menerimanya sejak rentang tanggal
+ * /broadcast jadi opsional -- jadi bentuk query yang benar dipilih oleh
+ * `segmentScope()` tanpa satu pun cabang tambahan di sisi jadwal.
  */
-export function resolveScheduleWindow(input: ScheduleWindowInput, now: Date): { dateFrom: Date; dateTo: Date } {
+export function resolveScheduleWindow(
+  input: ScheduleWindowInput,
+  now: Date,
+): { dateFrom: Date | null; dateTo: Date } {
   if (input.windowMode === 'followup') {
     const day = new Date(now);
     day.setDate(day.getDate() - (input.offsetDays ?? DEFAULT_FOLLOWUP_OFFSET_DAYS));
     day.setHours(0, 0, 0, 0);
     return { dateFrom: day, dateTo: new Date(day) };
   }
+
+  // <= 0, bukan === 0: angka negatif yang lolos dari mana pun berarti jendela
+  // yang membentang ke MASA DEPAN, dan itu tidak pernah bisa dimaksudkan.
+  if (input.lookbackDays <= LOOKBACK_SEMUA_WAKTU) return { dateFrom: null, dateTo: new Date(now) };
 
   const from = new Date(now);
   from.setDate(from.getDate() - input.lookbackDays);

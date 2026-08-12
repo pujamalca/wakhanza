@@ -18,6 +18,8 @@ export function ScheduleForm({
   uniqueCodeFooter,
   isFollowup,
   isPilih,
+  isSemuaWaktu = false,
+  belumDimuat = false,
   templates,
 }: {
   hiddenFilters: Record<string, string[]>;
@@ -29,6 +31,10 @@ export function ScheduleForm({
   isFollowup: boolean;
   /** Penerimanya daftar centang tetap, bukan segmen hasil filter. */
   isPilih: boolean;
+  /** Jendela berjalan tanpa batas bawah (LOOKBACK_SEMUA_WAKTU). */
+  isSemuaWaktu?: boolean;
+  /** Segmennya belum pernah dibaca -- lihat core/segmentGate.ts. */
+  belumDimuat?: boolean;
   /** Template broadcast tersimpan yang aktif (dikelola di /template). */
   templates: BroadcastTemplateOption[];
 }) {
@@ -204,6 +210,18 @@ export function ScheduleForm({
           akan dikirimi <span className="font-medium">setiap kali</span>{' '}
           jadwal jalan selama ia masih di dalam jendela. Untuk &ldquo;kirim sekali, sekian hari setelah kunjungan&rdquo;, pilih{' '}
           <span className="font-medium">Tindak lanjut</span> di filter di atas.
+          {/* Tanpa batas bawah, "selama masih di dalam jendela" berarti
+              SELAMANYA -- tidak ada tanggal yang bisa mengeluarkan seorang
+              pasien dengan sendirinya. Itu perbedaan derajat yang cukup besar
+              untuk dikatakan terpisah, bukan dibiarkan tersirat di kalimat
+              yang sama. */}
+          {isSemuaWaktu && (
+            <span className="mt-1 block">
+              Dan jendelanya <span className="font-medium">tanpa batas tanggal</span>, jadi tidak ada pasien yang akan keluar
+              dari segmen ini seiring waktu. Isi &ldquo;Berhenti otomatis setelah tanggal&rdquo; di bawah, atau pilih salah satu
+              jendela bertanggal.
+            </span>
+          )}
         </div>
       )}
 
@@ -222,10 +240,26 @@ export function ScheduleForm({
       {/* total === 0 tidak menghalangi mode tindak lanjut: jendelanya satu hari
           kalender, jadi nol hasil HARI INI sering wajar (hari libur) dan bukan
           tanda filternya keliru -- lihat createScheduleAction. */}
-      <Button type="submit" variant="primary" size="sm" disabled={isPending || (total === 0 && !isFollowup)}>
+      {/* `belumDimuat` MENGHALANGI keduanya, termasuk tindak lanjut: kelonggaran
+          di atas berlaku untuk segmen yang sudah dibaca dan kebetulan nol,
+          bukan untuk segmen yang belum pernah dijalankan sama sekali. Jadwal
+          yang disimpan tanpa seorang pun melihat penerimanya adalah persis apa
+          yang halaman ini ada untuk mencegah. */}
+      <Button
+        type="submit"
+        variant="primary"
+        size="sm"
+        disabled={isPending || belumDimuat || (total === 0 && !isFollowup)}
+      >
         {isPending ? 'Menyimpan...' : 'Simpan jadwal'}
       </Button>
-      {total === 0 && isFollowup && (
+      {belumDimuat && (
+        <p className="text-xs text-muted-foreground">
+          Tampilkan dulu daftar penerimanya di atas (tekan &ldquo;Terapkan filter&rdquo; atau cari pasien) supaya jelas siapa
+          saja yang akan dikirimi tiap kali jadwal ini jalan.
+        </p>
+      )}
+      {!belumDimuat && total === 0 && isFollowup && (
         <p className="text-xs text-muted-foreground">
           Nol pasien hari ini wajar untuk tindak lanjut — jendelanya satu hari kalender. Jadwal tetap bisa disimpan dan akan
           mengirim pada hari-hari yang ada kunjungannya.

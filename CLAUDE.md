@@ -380,6 +380,53 @@ Diukur di Chromium sungguhan atas replika struktur kedua halaman, bukan disimpul
 
 **Yang sengaja TIDAK diubah**: `/nomor-bermasalah` dan `/antrean` kotak carinya sudah tepat di bawah judul halaman dengan hanya chip saringan sebelum tabelnya, dan tombol Cari-nya tanpa `name` sehingga Enter di sana memang aman. Mengubahnya cuma demi keseragaman berarti menyentuh halaman yang tidak punya masalah.
 
+### Segmen pasien TIDAK dibaca sampai diminta (`core/segmentGate.ts`)
+
+`/broadcast` dan `/broadcast-terjadwal` dulu menjalankan `fetchPatientSegment()` pada SETIAP pemuatan, termasuk pemuatan pertama yang polos. Biayanya bukan satu query: `summarizeSegment()` lalu membaca `patient_contact` dan `opt_out` untuk seluruh barisnya, lewat kolam `sik` yang sengaja dibatasi `pool.max: 2` supaya tidak berebut dengan SIMRS yang sedang melayani pasien. Sekarang tidak ada satu baris pun dibaca sampai staf **mencari**, menekan **Terapkan filter**, atau menekan salah satu **tombol preset**.
+
+**Gerbangnya menyelesaikan DUA hal yang selama ini saling mengunci, dan itu inti perubahannya.** Jendela bawaan 30 hari ada JUSTRU untuk menahan biaya pemuatan otomatis tadi. Jendela itu pula yang membuat pencarian nama gagal DIAM untuk pasien yang terakhir datang lebih lama dari sebulan -- yang terlihat cuma "tidak ada pasien yang cocok", persis seperti kalau namanya salah ketik. Begitu pembacaannya ditunda, alasan jendela itu gugur sementara kerugiannya tetap. Karena itu keduanya berubah bersama: **tidak membaca apa pun secara bawaan, dan saat membaca, mencari tanpa dibatasi jendela.**
+
+- **`broadcast_schedule` bawaannya jadi `lookbackDays: 0` = `LOOKBACK_SEMUA_WAKTU`** (`core/schedule.ts`). Nol dipilih karena ia satu-satunya angka yang tidak punya arti lain di sini -- jendela nol hari bukan jendela. Bandingkan `offsetDays`, tempat 0 justru punya arti sendiri ("pasien yang berkunjung hari ini juga") sehingga tidak bisa dipakai untuk ini. Baris jadwal LAMA menyimpan angkanya sendiri di `filter_json` dan tidak tersentuh.
+- **Yang menahan penyalahgunaannya bukan angka bawaan melainkan `segmentScope()` yang sudah ada.** Tanpa batas bawah DAN tanpa penyaring pasien, segmennya `tanpa-batas` -> nol baris -> `createScheduleAction` menolak menyimpannya. Jadi jadwal "seluruh pasien yang pernah terdaftar, tiap hari" **tidak bisa dibuat sama sekali**, dan itu ditegakkan pagar yang sudah teruji, bukan pagar baru. Yang tetap mungkin adalah semua-waktu + penyaring wilayah/nama, dan untuk itu ada peringatan terbentang di `ScheduleForm` saat dipasangkan dengan pengulangan: tanpa batas tanggal, tidak ada pasien yang keluar dari segmen seiring waktu.
+- **`resolveScheduleWindow()` mengembalikan `dateFrom: Date | null`**, dan nilai null itu diteruskan APA ADANYA ke `PatientSegmentFilters` yang memang sudah menerimanya sejak rentang tanggal `/broadcast` jadi opsional. Jadi bentuk query yang benar dipilih `segmentScope()` tanpa satu pun cabang tambahan di sisi jadwal. Mengembalikan "tanggal sangat lampau" alih-alih null akan tetap memakai bentuk berjendela, yang prefix `no_rawat`-nya lalu merentang seluruh riwayat -- persis pemindaian yang §4.4 ada untuk mencegah.
+
+**Penandanya kunci TERSENDIRI (`tampil=1`), bukan disimpulkan dari "ada filter yang terisi".** Form GET kedua halaman selalu mengirim `dateFrom`/`dateTo`/`kab`/`kec`/`pj` walau kosong, jadi "ada filter" tidak bisa membedakan halaman yang baru dibuka dari filter yang sengaja dikosongkan -- pembedaan yang persis sama sudah dibayar di `parseFilters` ("kosong dan tidak ada itu beda"). Tombol "Terapkan filter" karena itu membawa `name`/`value`; ia **bukan** tombol bawaan form, jadi Enter di kotak cari tetap tidak menitipkan apa pun (lihat `TombolSubmitBawaan` di seksi sebelumnya).
+
+**Mode `pilih` SELALU dibaca, dan itu bukan pengecualian yang malas.** Tabelnya di sana adalah DAFTAR PENERIMANYA; tidak menampilkannya berarti pasien yang dicentang tidak bisa dilepas dari satu-satunya layar tempat ia terlihat. Biayanya pun beda jenis -- `fetchPatientsByRm` masuk lewat indeks `no_rkm_medis` untuk paling banyak `MAX_PILIHAN_PASIEN` no. RM.
+
+**Tombol Kirim dan Simpan jadwal MATI selama segmennya belum dibaca**, dan itu keuntungan yang tidak diminta tapi nyata: sebelumnya staf bisa membuka `/broadcast` dan langsung menekan Kirim ke segmen 30-hari yang tidak pernah ia lihat. `broadcast.max_recipients` menangkap yang kelewat besar, tapi SESUDAH pesannya disusun. Kelonggaran "nol hasil wajar untuk tindak lanjut" sengaja TIDAK berlaku di sini -- ia untuk segmen yang sudah dibaca dan kebetulan nol, bukan untuk yang belum pernah dijalankan.
+
+**Lima kotak angka disembunyikan, bukan diisi nol.** Nol pada segmen yang belum pernah dibaca terbaca sebagai "tidak ada yang cocok" -- kesimpulan yang salah, dan yang menyuruh staf melonggarkan filter yang sebenarnya belum dijalankan. Alasan yang sama membuat `jumlahCocok` diserahkan `null` (arti yang memang sudah dipunyai `PenerimaBar`: "tidak diketahui") alih-alih angka.
+
+**Satu celah diam ikut ditutup di `parseFilters`**: `?cari=Budi` TANPA kunci tanggal sama sekali -- bentuk yang cuma lahir dari URL yang diketik atau dibagikan tangan -- dulu jatuh ke jendela bawaan 30 hari. Orang yang mengetik `?cari=...` sedang mencari SEORANG PASIEN, bukan menyaring kunjungan sebulan terakhir. Rentang yang benar-benar dipilih staf tetap menang; yang berubah cuma keadaan "tidak ada tanggal sama sekali".
+
+### Detail jadwal tersimpan (`/broadcast-terjadwal/[id]`)
+
+Tabel "Jadwal tersimpan" cuma menyebut BENTUK sasarannya ("Jendela 30 hari", "Daftar pilihan, 5 pasien") -- tidak pernah SIAPA. Untuk jadwal yang berjalan sendiri tanpa ada yang meninjau tiap kali kirim, itu satu-satunya pertanyaan yang benar-benar perlu dijawab, dan sampai halaman ini ada jawabannya cuma bisa didapat lewat SQL langsung ke `outbox` -- yang justru dilarang untuk petugas (`RUNBOOK.md` §8).
+
+**Halaman tersendiri, bukan baris yang bisa dibentangkan**, dan itu bukan selera: penerimanya harus dibaca dari `sik`, jadi satu query per jadwal. Sebagai baris yang bisa dibentangkan, kedua puluh lima baris tabel akan dibaca sekaligus SETIAP kali halaman daftar dibuka -- kebalikan persis dari gerbang di seksi sebelumnya. Di sini query itu jalan hanya untuk jadwal yang benar-benar dibuka seseorang.
+
+**DUA sisi ditampilkan, dan keduanya perlu karena menjawab pertanyaan yang berbeda:**
+
+| | Menjawab | Dari mana |
+|---|---|---|
+| "Bila jalan sekarang" | apakah SASARANNYA masih benar | `fetchSegmentUntukJadwal()` -- pintu yang SAMA dipakai worker |
+| "Riwayat pengiriman" | siapa yang SUDAH terlanjur dikirimi | `broadcast_campaign` + `outbox` |
+
+Yang kedua tidak bisa disimpulkan dari yang pertama: segmen dihitung ULANG tiap kali jadwal jalan, jadi daftar hari ini sama sekali tidak memberitahu siapa yang menerima pesan minggu lalu. Dan yang pertama tidak bisa disimpulkan dari yang kedua pada jadwal yang belum pernah jalan.
+
+**`SCHEDULE_ACTOR` pindah ke `core/schedule.ts`**, dari const lokal di `broadcastScheduleRunner.ts`. Sejak halaman ini ada, string `system:broadcast_schedule:<id>` dibaca dari DUA arah: worker MENULISnya, dashboard MENCARInya. Dua salinan berarti riwayat pengiriman yang diam-diam kosong -- halamannya tampil wajar, cuma tidak pernah menemukan satu kampanye pun, tanpa galat di mana pun. Bentuk kegagalan yang sudah berkali-kali dibayar (`respectsOptOut()`, `kunciPesanMasuk()`, `core/tujuanPemicu.ts`).
+
+**Keterangan jadwal juga satu penurunan** (`broadcast-terjadwal/deskripsi.ts`, dipakai tabel daftar DAN halaman detail). Kolom "Sasaran" dan judul sasaran di detail menjawab pertanyaan yang sama; dua salinan berarti staf membaca dua keterangan untuk satu jadwal lalu tidak tahu mana yang benar.
+
+**Jumlah status kampanye DIHITUNG saat dibaca, satu query bergerombol untuk seluruh kampanye** (`GROUP BY campaign_id, status`, lewat `ix_campaign` dari `migrations/005`) -- bukan satu query per kampanye, dan bukan penghitung tersimpan. `broadcast_campaign` insert-only justru supaya angkanya tidak pernah bisa basi. Kampanye tanpa satu baris pun ditandai "kemungkinan sudah dipangkas (masa simpan 90 hari)": nol baris di sana TIDAK berarti nol pesan terkirim, dan diam di situ membuat kampanye lama terbaca seperti kampanye yang gagal.
+
+**Batas 30 baris milik pratinjau segmen TIDAK berlaku di sini** -- halaman ini ada justru untuk melihat semuanya, jadi `summarizeSegment` diberi seluruh barisnya dan paginasi yang mengurus panjangnya. Tabel kampanye memakai `cpage` sebagai nama parameter halamannya sendiri, bukan `page`: satu halaman dengan dua tabel yang berbagi satu nama parameter membuat tombol di satu tabel ikut menggeser tabel satunya (pelajaran `/pesan-masuk`).
+
+**Kode wilayah/cara bayar yang tidak ketemu di master ditampilkan APA ADANYA, bukan dibuang.** Wilayah yang dihapus dari Khanza sesudah jadwalnya dibuat tetap ikut menyaring di query, jadi menghilangkannya dari layar membuat penyaring yang aktif tampak tidak ada.
+
+**`filter_json` yang tidak bisa diurai punya kalimatnya sendiri**, bukan halaman kosong: baris seperti itu hanya lahir dari suntingan SQL langsung, dan halaman yang diam membuatnya terlihat seperti jadwal tanpa penerima alih-alih jadwal yang rusak.
+
 ### Variabel BROADCAST (`core/broadcastVars.ts`) -- satu pemetaan, dan yang sengaja tetap tidak ada
 
 Daftar "+ Sisipkan variabel" di `/broadcast` dan `/broadcast-terjadwal` dulu cuma berisi lima -- jauh lebih sempit daripada `/template`, dan sebagian kesempitan itu ternyata tidak punya alasan. Yang ditemukan saat memperbaikinya lebih penting daripada variabelnya sendiri.
@@ -398,7 +445,7 @@ Daftar "+ Sisipkan variabel" di `/broadcast` dan `/broadcast-terjadwal` dulu cum
 
 **Peringatan kosongnya ditulis SEKALI** (`HintVariabelBroadcast` di `broadcast/ComposeForm.tsx`) dan dipakai KETIGA pintu menuju daftar variabel yang sama: `/broadcast`, `/broadcast-terjadwal`, dan editor template broadcast di `/template`. Kalimat yang menjelaskan satu aturan di tiga tempat adalah kalimat yang cepat atau lambat berbeda di salah satunya, dan yang tertinggal biasanya halaman yang paling jarang disentuh.
 
-**Catatan pemasangan yang WAJIB diketahui**: perubahan ini menyentuh `worker/broadcastScheduleRunner.ts`, sementara `wakhanza-worker` di mesin ini **belum dimulai ulang** -- sengaja, karena `broadcast_schedule` berisi **0 baris** sehingga kode lamanya tidak punya apa pun untuk dijalankan, dan menyalakan ulang worker demi jalur berisi nol baris adalah risiko produksi (kaskade restart, Chromium yatim) tanpa imbalan. **Sebelum jadwal broadcast PERTAMA dibuat, worker harus dimulai ulang** (`pm2 stop wakhanza-worker` -> pastikan Chromium bersih -> `pm2 start wakhanza-worker`); kalau tidak, jadwal yang memakai keempat variabel baru akan mengirimkannya KOSONG tanpa satu pun galat. `wakhanza-web` sudah dimulai ulang, jadi ketiga halaman di atas sudah menampilkan daftar barunya.
+**Catatan pemasangan: SUDAH dikerjakan, dan penundaannya nyaris menggigit.** Klaim di tempat ini dulu berbunyi "worker belum dimulai ulang, sengaja, karena `broadcast_schedule` berisi 0 baris". Kedua bagiannya kini keliru: staf sudah membuat **enam jadwal aktif** (seluruhnya bermode `semua` dengan satu nama pasien di kotak cari), dan `broadcast_campaign` sudah berisi delapan baris -- jadi jalur yang dinilai "tidak punya apa pun untuk dijalankan" ternyata berjalan. Worker sudah dimulai ulang. Pelajarannya bukan soal variabel: **"aman ditunda karena tabelnya kosong" berumur sependek waktu yang dibutuhkan seseorang untuk memakai fiturnya**, dan tidak ada satu pun yang memberi tahu kalau tabel itu berhenti kosong.
 
 ### Kelas keempat: BALASAN OTOMATIS (dipicu PASIEN, arah berlawanan)
 

@@ -6,11 +6,8 @@ import { getHospitalIdentity } from '@/khanza/common';
 import { loadBroadcastContext, enqueueMessage, saringKunciBaru } from './pipeline';
 import { broadcastVars } from '@/core/broadcastVars';
 import { buildIdempotencyKey } from '@/core/idempotency';
-import { computeNextRunAt } from '@/core/schedule';
+import { computeNextRunAt, SCHEDULE_ACTOR, scheduleActor } from '@/core/schedule';
 import { logger, safeError } from '@/lib/logger';
-
-/** Dipakai sebagai `actor` di audit_log dan `created_by` di broadcast_campaign -- membedakan jalan otomatis dari kirim manual staf (username asli). */
-const SCHEDULE_ACTOR = 'system:broadcast_schedule';
 
 /**
  * Dipanggil periodik dari worker (index.ts). Ini bukan pemicu sisip/pindai
@@ -101,7 +98,7 @@ async function runOneSchedule(schedule: BroadcastSchedule, now: Date): Promise<v
     const ctx = await loadBroadcastContext(schedule.messageBody);
 
     const campaign = await BroadcastCampaign.create({
-      createdBy: `${SCHEDULE_ACTOR}:${schedule.id}`,
+      createdBy: scheduleActor(schedule.id),
       filterJson: schedule.filterJson,
       messageBody: schedule.messageBody,
       recipientCount: recipients.length,

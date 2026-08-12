@@ -18,6 +18,33 @@ describe('parseFilters', () => {
     expect(f.dateTo).toBeNull();
   });
 
+  /**
+   * `?cari=...` tanpa kunci tanggal sama sekali hanya lahir dari URL yang
+   * diketik atau dibagikan tangan. Jendela bawaan di sana adalah kegagalan
+   * diam: pasien yang terakhir datang lebih dari sebulan lalu tidak muncul,
+   * dan yang terlihat cuma "tidak ada pasien yang cocok" -- persis seperti
+   * kalau namanya salah ketik.
+   */
+  it('pencarian tanpa kunci tanggal = semua waktu, bukan jendela bawaan', () => {
+    const f = parseFilters({ cari: 'Budi' });
+    expect(f.dateFrom).toBeNull();
+    expect(f.dateTo).toBeNull();
+  });
+
+  it('pencarian KOSONG tetap jatuh ke jendela bawaan', () => {
+    const f = parseFilters({ cari: '   ' });
+    expect(f.dateFrom).not.toBeNull();
+    expect(selisihHari(f.dateFrom!, f.dateTo!)).toBe(DEFAULT_LOOKBACK_DAYS);
+  });
+
+  // Rentang yang benar-benar dipilih staf tetap menang atas pencarian --
+  // mencari "Budi di antara dua tanggal ini" adalah permintaan yang sah.
+  it('pencarian TIDAK membatalkan rentang tanggal yang dipilih staf', () => {
+    const f = parseFilters({ cari: 'Budi', dateFrom: '2026-01-01', dateTo: '2026-01-31' });
+    expect(f.dateFrom).not.toBeNull();
+    expect(f.dateFrom!.getMonth()).toBe(0);
+  });
+
   it('preset semua waktu mengosongkan kedua tanggal walau kotaknya masih terisi', () => {
     // Chip "Semua waktu" adalah tombol submit, jadi nilai kotak tanggal yang
     // sedang tampil IKUT terkirim -- preset harus menang atasnya.

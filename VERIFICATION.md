@@ -2644,3 +2644,171 @@ Keempat halaman tetap dijaga gerbang autentikasi sesudah pemasangan:
 ### Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
 
 Tampilan sesudah login tidak diuji lewat peramban -- itu menuntut akun admin berhak penuh pada sistem yang memegang data pasien. Yang bisa gagal DIAM di perubahan ini cuma dua, dan keduanya sudah ditutup dengan bukti tersendiri: perilaku Enter (diukur di Chromium atas replika strukturnya) dan perakitan URL "hapus pencarian" (uji unit yang dibuktikan menggigit). Sisanya -- letak kotak di dalam JSX, atribut `form=`, `readOnly` pada mode centang -- gagal BERISIK pada pemakaian pertama atau memang terlihat langsung di layar.
+
+## Segmen pasien TIDAK dibaca sampai diminta (`core/segmentGate.ts`)
+
+### Gerbangnya diuji unit, dan dibuktikan MENGGIGIT ke dua arah
+
+```
+npx jest src/core/segmentGate
+PASS src/core/segmentGate.test.ts
+Tests: 8 passed, 8 total
+```
+
+Delapan uji menutup: halaman polos tidak membaca apa pun, kunci filter yang ADA tapi kosong tetap bukan permintaan, pencarian membaca, Terapkan membaca, tombol preset membaca, mode pilih SELALU membaca, dan urutan menangnya (`pilih` > `cari` > `diminta`).
+
+Dua kerusakan disengaja, masing-masing menjatuhkan uji yang memang menjaganya:
+
+```
+# 1. terisi() dibuat selalu true (yaitu: "ada kuncinya" dianggap "diminta")
+Tests: 1 failed, 7 passed
+  x pemicuSegmen > kunci filter yang ada tapi KOSONG tetap bukan permintaan
+
+# 2. cabang modePilih dihapus
+Tests: 2 failed, 6 passed
+  x pemicuSegmen > mode pilih SELALU dibaca, walau tanpa pencarian maupun Terapkan
+  x pemicuSegmen > mode pilih menang atas pencarian
+```
+
+Kerusakan pertama itulah yang paling perlu dijaga: form GET kedua halaman selalu mengirim `dateFrom`/`dateTo`/`kab`/`kec`/`pj` walau kosong, jadi gerbang yang menyimpulkan "ada filter -> baca" akan selalu lolos pada pemuatan pertama dan fiturnya mati DIAM -- tidak ada yang berubah di layar, cuma query yang tetap jalan seperti sebelumnya.
+
+### `lookbackDays: 0` = tanpa batas bawah
+
+```
+npx jest src/core/schedule
+PASS src/core/schedule.test.ts
+Tests: 47 passed
+```
+
+Tiga uji baru: `lookbackDays: 0` menghasilkan `dateFrom === null` (dan `dateTo` tetap "sekarang" apa adanya), angka negatif diperlakukan sama, dan jendela bernilai tetap TIDAK berubah perilakunya. Ketiga puluh dua uji `resolveScheduleWindow`/`computeNextRunAt` yang sudah ada lolos tanpa satu asersi pun diubah -- yang berubah cuma penegasan non-null pada tipe barunya (`Date | null`).
+
+### Celah diam di `parseFilters`, dan buktinya menggigit
+
+```
+npx jest -t "pencarian"
+PASS src/app/(dashboard)/broadcast/filters.test.ts
+```
+
+Tiga uji baru: `?cari=Budi` tanpa kunci tanggal sama sekali menghasilkan semua-waktu; `?cari=` kosong tetap jatuh ke jendela bawaan; dan rentang yang benar-benar dipilih staf TIDAK dibatalkan oleh pencarian.
+
+Dibuktikan menggigit dengan mengembalikan kondisinya ke bentuk lama:
+
+```
+Tests: 1 failed
+  x parseFilters > pencarian tanpa kunci tanggal = semua waktu, bukan jendela bawaan
+```
+
+### Gerbang lengkap: seluruh suite
+
+```
+npm test
+Test Suites: 43 passed, 43 total
+Tests:       715 passed, 715 total
+```
+
+(dari 42 suite / 701 uji sebelum perubahan ini: +1 suite `segmentGate`, +14 uji)
+
+```
+npm run typecheck            -> bersih
+npm run lint                 -> bersih
+npm run verify:db            -> verify:db lolos.   (sik: tulis DITOLAK; audit_log: DELETE/UPDATE DITOLAK)
+npm run verify:plans         -> verify:plans lolos.
+npm run build                -> sukses, /broadcast-terjadwal/[id] terdaftar sebagai rute dinamis
+```
+
+`verify:plans` layak disebut tersendiri: bawaan jendela yang berubah jadi semua-waktu memindahkan bentuk query segmen dari `BROADCAST_SEGMENT` ke `BROADCAST_SEGMENT_SEMUA`, dan kedua bentuk itu sudah punya pemeriksaan rencananya masing-masing sejak rentang tanggal `/broadcast` jadi opsional. Tidak ada pemeriksaan baru yang perlu ditambahkan, dan itu KONFIRMASI bahwa perubahannya memang memakai jalan yang sudah dijaga alih-alih membuat jalan baru.
+
+### Penanda di build
+
+```
+grep -rl "<penanda>" .next/server
+[4 berkas]  Daftar pasien belum dibaca
+[6 berkas]  Tampilkan dulu penerimanya
+[2 berkas]  Jendela semua waktu
+[11 berkas] seluruh riwayat kunjungan
+```
+
+## Detail jadwal tersimpan (`/broadcast-terjadwal/[id]`)
+
+### Rute terdaftar dan tetap dijaga gerbang autentikasi
+
+```
+/broadcast              -> 307  http://127.0.0.1:3100/login
+/broadcast-terjadwal    -> 307  http://127.0.0.1:3100/login
+/broadcast-terjadwal/37 -> 307  http://127.0.0.1:3100/login
+/broadcast-terjadwal/999-> 307  http://127.0.0.1:3100/login
+```
+
+Id yang tidak ada (999) ikut diperiksa: ia harus di-redirect ke login SEBELUM `notFound()`, bukan membocorkan ada-tidaknya sebuah jadwal kepada yang belum masuk. Perannya sendiri (admin) diperiksa di dalam halaman lewat `session.user.role`, pola yang sama dengan `/audit` dan `/broadcast`.
+
+```
+grep -rl "<penanda>" .next/server
+[2 berkas] Bila jalan sekarang
+[2 berkas] Lihat penerima
+```
+
+### Penanda di build
+
+Halaman detail memakai `fetchSegmentUntukJadwal()` yang SAMA dipakai worker (`worker/broadcastScheduleRunner.ts`) dan `createScheduleAction`. Dibuktikan lewat pembacaan impor, bukan diasumsikan: ketiganya mengimpor dari `@/khanza/broadcastSchedule`, dan tidak ada cabang penerima kedua di mana pun.
+
+## Pemasangan: worker DAN web dimulai ulang -- dan penundaan sebelumnya nyaris menggigit
+
+Berbeda dari perubahan sebelumnya, kali ini worker WAJIB ikut: `resolveScheduleWindow()` berubah artinya untuk `lookbackDays: 0`. Kode LAMA menghitung `now - 0 hari` dan menghasilkan jendela SATU HARI; kode baru menghasilkan tanpa-batas. Jadwal yang disimpan lewat dashboard baru sementara worker masih memegang kode lama karena itu akan menyasar penerima yang sama sekali berbeda, tanpa satu pun galat.
+
+Karena itu urutannya WORKER DULU, baru web -- kalau terbalik, ada jendela waktu tempat staf bisa menyimpan jadwal yang worker lama salah tafsirkan.
+
+### Keadaan yang ditemukan, dan klaim `CLAUDE.md` yang terbukti basi
+
+Berkas itu menyatakan penundaan restart sebelumnya aman "karena `broadcast_schedule` berisi 0 baris". Diperiksa langsung lewat koneksi aplikasi sendiri:
+
+```
+broadcast_schedule : 6      (seluruhnya AKTIF)
+broadcast_campaign : 8
+```
+
+Keenamnya bermode `semua` dengan satu nama pasien di kotak cari -- yaitu persis alur kerja yang perubahan ini permudah. Jadi jalur yang dinilai "tidak punya apa pun untuk dijalankan" ternyata sudah berjalan. Klaimnya diperbaiki di `CLAUDE.md`.
+
+### Prosedur tiga langkah, dijalankan apa adanya
+
+```
+pm2 stop wakhanza-worker                       -> [PM2] [wakhanza-worker](5) v
+Get-CimInstance Win32_Process ... wwebjs_auth  -> Chromium sesi bersih: 0 proses
+pm2 start wakhanza-worker                      -> online
+pm2 restart wakhanza-web                       -> online
+```
+
+### Watchdog sesi terlihat bekerja UTUH untuk pertama kalinya
+
+Sesi tidak langsung mencapai `ready` sesudah start -- ia tersangkut `authenticating`, persis mode kegagalan yang `sessionWatchdog()` ada untuk menangani. Kali ini seluruh rangkaiannya terekam:
+
+```
+19:53:25  WhatsApp terautentikasi, menunggu ready          (pid 13960)
+19:54:24  sesi WhatsApp belum siap  diamDetik: 60
+   ...    (peringatan tiap 60 detik, naik terus)
+20:08:24  sesi WhatsApp belum siap  diamDetik: 720
+20:08:26  wakhanza-worker berhenti...  alasan: "sesi tidak mencapai ready"  exitCode: 1
+20:08:49  WhatsApp terautentikasi, menunggu ready          (pid 7272)
+20:08:49  WhatsApp siap                                     <- 517 ms kemudian
+```
+
+Tiga hal yang terbukti di sini, dan ketiganya sebelumnya cuma tertulis sebagai rancangan:
+
+1. **Ambang 15 menit benar-benar menyala** (900 detik; peringatan terakhir 720 detik lalu keluar).
+2. **Keluarnya lewat `shutdown()`, bukan `process.exit()`** -- terbukti dari baris `"wakhanza-worker berhenti..."` yang memang baris pertama fungsi itu. Inilah yang membuat state sesi tidak setengah tertulis, dan karena itu penggantinya mencapai `ready` dalam setengah detik alih-alih tersangkut lagi.
+3. **Tidak ada kaskade restart**: satu proses pengganti, satu kali. Penghitung restart 5 -> 6, bukan melompat.
+
+Keadaan akhir, diperiksa 85 detik sesudahnya dan stabil:
+
+```
+wakhanza-web     online  uptime 16m   restart 1
+wakhanza-worker  online  uptime 85s   restart 6
+wa_session       ready   heartbeat umur 19 detik
+```
+
+## Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
+
+**Tampilan sesudah login tidak diuji lewat peramban.** Itu menuntut akun admin berhak penuh pada sistem yang memegang data pasien sungguhan. Yang bisa gagal DIAM di perubahan ini sudah dipagari dari sisi lain: keputusan "baca atau tidak" seluruhnya di fungsi murni yang diuji unit berikut bukti menggigitnya, bentuk query yang dipilihnya dijaga `verify:plans`, dan penanda kalimatnya dibuktikan ada di build.
+
+**Halaman detail belum pernah dibuka atas jadwal sungguhan.** Query penerimanya adalah `fetchSegmentUntukJadwal()` yang sama dipakai worker dan sudah berjalan atas keenam jadwal itu; yang belum terbukti adalah perakitan tampilannya. Kegagalan di situ berisik (galat render), bukan diam.
+
+**Jadwal dengan `lookbackDays: 0` belum pernah benar-benar dieksekusi worker.** Keenam jadwal yang ada menyimpan angka jendelanya sendiri (30 dan 180) dan tidak tersentuh perubahan ini; nilai 0 baru muncul pada jadwal yang dibuat sesudah ini. Yang sudah dibuktikan adalah keputusan turunannya (`dateFrom === null`, uji unit) dan bahwa bentuk query yang lahir dari situ sudah dijaga rencananya.

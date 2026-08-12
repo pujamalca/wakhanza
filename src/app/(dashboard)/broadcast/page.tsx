@@ -4,6 +4,7 @@ import { fetchPatientSegment, fetchPatientsByRm, fetchRegionOptions, fetchPaymen
 import { getHospitalIdentity, formatSqlDate } from '@/khanza/common';
 import { segmentScope, PESAN_TANPA_BATAS } from '@/core/segmentScope';
 import { bacaModePenerima, bacaPilihanRm, MAX_PILIHAN_PASIEN } from '@/core/pilihanPasien';
+import { pemicuSegmen, PARAM_TAMPIL, PESAN_BELUM_DIMUAT } from '@/core/segmentGate';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
 import { broadcastVars } from '@/core/broadcastVars';
 import { Outbox, BroadcastCampaign, BroadcastTemplate } from '@/models';
@@ -18,6 +19,8 @@ interface SearchParams extends RawFilterInput {
   sent?: string;
   mode?: string | string[];
   rm?: string | string[];
+  /** Penanda "staf menekan Terapkan" -- lihat core/segmentGate.ts. */
+  tampil?: string | string[];
 }
 
 /** Satu id, dirujuk checkbox & radio yang letaknya di luar <form> lewat atribut `form=`. */
@@ -46,6 +49,10 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
   const modePilih = mode === 'pilih';
   const terpilih = new Set(pilihan.daftar);
 
+  // Segmen TIDAK dibaca sampai staf memintanya -- lihat core/segmentGate.ts.
+  const pemicu = pemicuSegmen({ modePilih, cari: filters.cari, tampil: sp.tampil, preset: sp.preset });
+  const belumDimuat = pemicu === null;
+
   const [regionOptions, paymentOptions, recipients, identity, broadcastTemplates] = await Promise.all([
     fetchRegionOptions(),
     fetchPaymentOptions(),
@@ -54,7 +61,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
     // query segmen tidak dijalankan sama sekali, jadi filter tanggal/wilayah
     // yang kebetulan masih terpasang tidak bisa diam-diam membuang pasien yang
     // dicentang staf sendiri.
-    modePilih ? fetchPatientsByRm(pilihan.daftar) : fetchPatientSegment(filters),
+    belumDimuat ? Promise.resolve([]) : modePilih ? fetchPatientsByRm(pilihan.daftar) : fetchPatientSegment(filters),
     getHospitalIdentity(),
     BroadcastTemplate.findAll({ where: { isActive: true }, order: [['name', 'ASC']] }),
   ]);
@@ -176,7 +183,12 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           </div>
         </div>
 
-        <Button type="submit" variant="secondary" size="sm">
+        {/* name/value WAJIB: inilah penanda "staf meminta" yang membedakan
+            halaman yang baru dibuka dari filter yang sengaja dikosongkan --
+            lihat core/segmentGate.ts. Tombol ini BUKAN tombol bawaan form
+            (TombolSubmitBawaan di atas lebih dulu dalam urutan dokumen), jadi
+            Enter di kotak cari tetap tidak menitipkan apa pun. */}
+        <Button type="submit" name={PARAM_TAMPIL} value="1" variant="secondary" size="sm">
           Terapkan filter
         </Button>
       </form>
@@ -187,10 +199,13 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
       {/* Keduanya menjelaskan BENTUK query segmen, jadi tidak berlaku pada mode
           pilih -- di sana query itu memang tidak dijalankan. Menampilkannya
           tetap akan menyuruh staf membetulkan filter yang sedang tidak dipakai. */}
-      {!modePilih && scope === 'tanpa-batas' && (
+      {/* Keduanya juga tidak berlaku sebelum segmennya dibaca: keterangan
+          cakupan atas query yang belum pernah dijalankan menyuruh staf
+          membetulkan sesuatu yang belum terjadi. */}
+      {!modePilih && !belumDimuat && scope === 'tanpa-batas' && (
         <div className="mb-4 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">{PESAN_TANPA_BATAS}</div>
       )}
-      {!modePilih && scope === 'semua-waktu' && (
+      {!modePilih && !belumDimuat && scope === 'semua-waktu' && (
         <p className="mb-4 text-xs text-muted-foreground">
           Tanpa batas rentang kunjungan &mdash; mencari di seluruh riwayat, disaring filter lain di atas.
         </p>
@@ -204,19 +219,24 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
         // sudah dipakai pemanggil hrefHalaman.
         params={{ ...sp }}
         mode={mode}
-        jumlahCocok={modePilih ? null : summary.total}
+        jumlahCocok={modePilih || belumDimuat ? null : summary.total}
         dicentang={pilihan.daftar.length}
         ditemukan={modePilih ? summary.total : null}
         terpotong={pilihan.terpotong}
       />
 
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Stat label={modePilih ? 'Dipilih' : 'Cocok'} value={summary.total} />
-        <Stat label="Bisa dihubungi" value={summary.reachable} />
-        <Stat label="Tanpa nomor valid" value={summary.noContact} />
-        <Stat label="Sudah berhenti" value={summary.optedOut} />
-        <Stat label="Layanan sensitif" value={summary.sensitive} />
-      </div>
+      {/* Lima angka nol pada segmen yang belum pernah dibaca terbaca sebagai
+          "tidak ada yang cocok" -- kesimpulan yang salah, dan yang menyuruh
+          staf melonggarkan filter yang sebenarnya belum dijalankan. */}
+      {!belumDimuat && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <Stat label={modePilih ? 'Dipilih' : 'Cocok'} value={summary.total} />
+          <Stat label="Bisa dihubungi" value={summary.reachable} />
+          <Stat label="Tanpa nomor valid" value={summary.noContact} />
+          <Stat label="Sudah berhenti" value={summary.optedOut} />
+          <Stat label="Layanan sensitif" value={summary.sensitive} />
+        </div>
+      )}
 
       <CariPasien
         formId={FORM_FILTER}
@@ -267,9 +287,11 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
               <tr>
                 <td colSpan={7}>
                   <EmptyState>
-                    {modePilih
-                      ? 'Belum ada pasien yang dicentang. Kembali ke "Semua yang cocok dengan filter" untuk memilihnya dari tabel.'
-                      : 'Tidak ada pasien yang cocok dengan filter ini.'}
+                    {belumDimuat
+                      ? PESAN_BELUM_DIMUAT
+                      : modePilih
+                        ? 'Belum ada pasien yang dicentang. Kembali ke "Semua yang cocok dengan filter" untuk memilihnya dari tabel.'
+                        : 'Tidak ada pasien yang cocok dengan filter ini.'}
                   </EmptyState>
                 </td>
               </tr>
@@ -288,7 +310,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
           berubah arti: bukan lagi jumlah yang cocok, melainkan jumlah yang
           sempat terbaca. Diam di sini membuat segmen yang terpotong terlihat
           persis seperti segmen yang utuh. */}
-      {!modePilih && summary.total >= SEGMENT_LIMIT && (
+      {!modePilih && !belumDimuat && summary.total >= SEGMENT_LIMIT && (
         <p className="mt-1 text-xs text-warning">
           Hasil dipotong di {SEGMENT_LIMIT} pasien pertama (kunjungan terbaru lebih dulu) &mdash; yang cocok kemungkinan
           lebih banyak. Persempit filter supaya jelas siapa saja yang dikirimi.
@@ -317,6 +339,7 @@ export default async function BroadcastPage({ searchParams }: { searchParams: Pr
         total={summary.total}
         reachable={summary.reachable}
         modePilih={modePilih}
+        belumDimuat={belumDimuat}
         uniqueCodeFooter={uniqueCodeFooter}
         templates={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
       />

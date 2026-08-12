@@ -55,6 +55,7 @@ export function ComposeForm({
   uniqueCodeFooter,
   templates,
   modePilih = false,
+  belumDimuat = false,
 }: {
   hiddenFilters: Record<string, string[]>;
   sampleVars: Partial<Record<TemplateVariable, string>> | null;
@@ -62,6 +63,13 @@ export function ComposeForm({
   reachable: number;
   /** True bila penerimanya daftar centang, bukan segmen hasil filter. */
   modePilih?: boolean;
+  /**
+   * Segmennya belum pernah dibaca (core/segmentGate.ts). Tombol Kirim WAJIB
+   * mati di sini, dan bukan cuma karena angkanya nol: mengirim ke segmen yang
+   * belum pernah dilihat siapa pun adalah persis bentuk kegagalan yang
+   * `broadcast.max_recipients` ada untuk menangkap SETELAH terlambat.
+   */
+  belumDimuat?: boolean;
   /** Contoh baris kode unik yang ditambahkan otomatis; null bila fitur dimatikan. */
   uniqueCodeFooter: string | null;
   /** Template broadcast tersimpan yang aktif (dikelola di /template). */
@@ -184,9 +192,20 @@ export function ComposeForm({
 
       {state.error && <p className="text-xs text-destructive">{state.error}</p>}
 
-      <Button type="submit" variant="primary" size="xs" disabled={isPending || total === 0 || lampiranBermasalah}>
-        {isPending ? 'Mengirim...' : `Kirim ke ${total} pasien`}
+      <Button
+        type="submit"
+        variant="primary"
+        size="xs"
+        disabled={isPending || belumDimuat || total === 0 || lampiranBermasalah}
+      >
+        {isPending ? 'Mengirim...' : belumDimuat ? 'Tampilkan dulu penerimanya' : `Kirim ke ${total} pasien`}
       </Button>
+      {belumDimuat && (
+        <p className="text-xs text-muted-foreground">
+          Daftar penerima belum dibaca. Tekan &ldquo;Terapkan filter&rdquo; di atas, atau cari pasien, supaya jelas siapa saja
+          yang akan menerima pesan ini.
+        </p>
+      )}
     </form>
   );
 }
