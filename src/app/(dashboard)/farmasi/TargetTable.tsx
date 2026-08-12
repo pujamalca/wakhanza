@@ -30,6 +30,7 @@ import { toggleTerimaDaruratAction } from './daruratActions';
 import { toggleTerimaPengadaanAction } from './pengadaanActions';
 import { toggleTerimaHibahAction } from './hibahActions';
 import { toggleTerimaPemesananAction } from './pemesananActions';
+import { toggleTerimaPenjualanAction } from './penjualanActions';
 
 export interface TargetRow {
   id: number;
@@ -46,6 +47,7 @@ export interface TargetRow {
   terimaHibah: boolean;
   /** Menerima nota SURAT PEMESANAN -- barang yang DIPESAN, belum datang (migrations/030). */
   terimaPemesanan: boolean;
+  terimaPenjualan: boolean;
 }
 
 export interface GrupRow {
@@ -218,6 +220,18 @@ export function TargetTable({
                           onChange={() => jalankan(() => toggleTerimaPemesananAction(t.id, !t.terimaPemesanan))}
                         />
                         <span className="text-xs text-muted-foreground">Pemesanan</span>
+                      </label>
+                      <label
+                        className="flex cursor-pointer items-center gap-2"
+                        title="Menerima nota penjualan apotek, dan kabar saat sebuah nota dibatalkan — jauh lebih ramai daripada nota barang lain (16-46 per hari)"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={t.terimaPenjualan}
+                          disabled={pending}
+                          onChange={() => jalankan(() => toggleTerimaPenjualanAction(t.id, !t.terimaPenjualan))}
+                        />
+                        <span className="text-xs text-muted-foreground">Penjualan</span>
                       </label>
                     </div>
                   </td>

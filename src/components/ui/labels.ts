@@ -104,6 +104,11 @@ export const TRIGGER_LABEL: Record<string, string> = {
   FARMASI_PENYERAHAN: 'Apotek: obat diserahkan',
   FARMASI_UJI: 'Apotek: pesan uji',
   FARMASI_STOK_DARURAT: 'Apotek: persediaan menipis',
+  // Sepasang, dan labelnya sengaja BERLAWANAN BUNYI. Keduanya menyangkut nota
+  // yang sama pada dua saat yang berbeda, jadi baris berdampingan di Antrean
+  // harus bisa dibedakan sekali baca -- pelajaran KONTROL_ULANG/KONTROL_TERBIT.
+  FARMASI_PENJUALAN: 'Apotek: nota penjualan',
+  FARMASI_PENJUALAN_HAPUS: 'Apotek: nota penjualan DIBATALKAN',
   // BPJS_BATAL ke loket, BPJS_KONTROL ke pasien -- dan bedanya ditulis di
   // labelnya, dengan alasan yang sama seperti ketiga baris apotek di atas:
   // baris di Antrean/Log tidak boleh terbaca sebagai pemberitahuan yang gagal

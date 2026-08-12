@@ -832,6 +832,316 @@ sebagaimana mereka setel sendiri, dan `farmasi.hibah_nilai` dikembalikan ke `1` 
 dimatikan. `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`,
 umur heartbeat 27 detik).
 
+## Kelas kelima belas: PENJUALAN (`/farmasi`, migrations/040) -- barang KELUAR, dan pemicu pertama yang punya kejadian "dihapus"
+
+### Bentuk data yang menentukan seluruh rancangannya
+
+Seluruh angka di bawah diukur langsung terhadap `alca` (database produksi), lewat koneksi `wakhanza_ro` yang sama dipakai worker.
+
+```
+penjualan   COUNT(*) = 16.787   (Mar 2024 - Agu 2026)
+detailjual  COUNT(*) = 29.852
+```
+
+**Pemangkas `nota_jual` EKSAK -- 0 simpangan ke KEDUA arah:**
+
+```sql
+SELECT SUM(SUBSTRING(nota_jual,1,2) = 'PJ')                            AS awalan_PJ,
+       SUM(SUBSTRING(nota_jual,3,8) = DATE_FORMAT(tgl_jual,'%Y%m%d'))  AS cocok,
+       COUNT(*)                                                        AS total
+FROM penjualan;
+-- awalan_PJ 16787 | cocok 16787 | total 16787
+
+SELECT SUM(STR_TO_DATE(SUBSTRING(nota_jual,3,8),'%Y%m%d') > tgl_jual) AS prefiks_maju,
+       SUM(STR_TO_DATE(SUBSTRING(nota_jual,3,8),'%Y%m%d') < tgl_jual) AS prefiks_mundur
+FROM penjualan;
+-- prefiks_maju 0 | prefiks_mundur 0
+```
+
+Bandingkan pengadaan (9 dari 910 menyimpang sampai 31 hari). Ini pemangkas paling bersih di proyek ini; jendela dua arah dipertahankan sebagai jaring pengaman, bukan sebagai koreksi.
+
+**Kolom pasiennya ADA, dan hampir selalu penanda -- tapi tidak selalu:**
+
+```sql
+SELECT COUNT(DISTINCT nm_pasien) AS nama_berbeda,
+       COUNT(DISTINCT no_rkm_medis) AS rm_berbeda, COUNT(*) AS baris FROM penjualan;
+-- nama_berbeda 10 | rm_berbeda 7 | baris 16787
+
+SELECT no_rkm_medis, COUNT(*) FROM penjualan GROUP BY no_rkm_medis ORDER BY 2 DESC LIMIT 3;
+-- '000' 16779 | (dua nilai lain) 3, 1
+```
+
+Delapan baris membawa no. RM sungguhan. Itu yang membuat penahanannya dikerjakan di tingkat query, bukan diserahkan pada kebiasaan data.
+
+**Aritmetika total, diperiksa pada SELURUH baris rincian:**
+
+```sql
+SELECT COUNT(*) AS n,
+       SUM(ABS(total - (subtotal - bsr_dis + tambahan + embalase + tuslah)) < 0.01) AS cocok
+FROM detailjual;
+-- n 29852 | cocok 29852
+```
+
+**`ongkir` adalah PEMBULATAN, bukan ongkos kirim:**
+
+```sql
+SELECT COUNT(*) AS n_ada_ongkir,
+       SUM((jml + p.ongkir) MOD 1000 = 0) AS bulat_1000,
+       SUM((jml + p.ongkir) MOD 500  = 0) AS bulat_500,
+       SUM(p.ongkir < 1000)               AS dibawah_1000,
+       MAX(p.ongkir) AS terbesar, ROUND(AVG(p.ongkir)) AS rata
+FROM penjualan p
+JOIN (SELECT nota_jual, SUM(total) AS jml FROM detailjual GROUP BY nota_jual) d
+  ON d.nota_jual = p.nota_jual
+WHERE p.ongkir <> 0;
+-- n_ada_ongkir 3945 | bulat_1000 2959 | bulat_500 3343
+-- dibawah_1000 3764 | terbesar 20000 | rata 379
+```
+
+Itulah yang mengubah label template bawaannya jadi "Pembulatan/ongkir". `ppn` tidak pernah terisi (0 dari 16.787); `ongkir` pada 3.945.
+
+**Laju harian (60 hari terakhir), angka yang ditampilkan di sakelarnya:**
+
+```
+2026-08-11  33      2026-08-05  18
+2026-08-10  33      2026-08-04  28
+2026-08-08   9      2026-08-03  46
+2026-08-07  20      2026-08-01  16
+2026-08-06  20      2026-07-31  30
+```
+
+**`nip` diperiksa terhadap KEDUA master, bukan diasumsikan:**
+
+```sql
+SELECT COUNT(*) AS total,
+       SUM(EXISTS (SELECT 1 FROM petugas t WHERE t.nip = p.nip)) AS cocok_petugas,
+       SUM(EXISTS (SELECT 1 FROM pegawai g WHERE g.nik = p.nip)) AS cocok_pegawai
+FROM penjualan p WHERE p.nota_jual >= 'PJ20260701000';
+-- total 943 | cocok_petugas 943 | cocok_pegawai 943
+```
+
+### Kenapa `riwayat_barang_medis` ditolak -- tiga pengukuran
+
+```sql
+-- (1) status='Hapus' TIDAK berarti notanya dihapus
+SELECT COUNT(*) AS nota_hapus_berbeda,
+  SUM(EXISTS (SELECT 1 FROM penjualan p WHERE p.nota_jual = t.nota)) AS masih_ada,
+  SUM(NOT EXISTS (SELECT 1 FROM penjualan p WHERE p.nota_jual = t.nota)) AS benar_lenyap
+FROM (SELECT DISTINCT keterangan AS nota FROM riwayat_barang_medis
+      WHERE posisi='Penjualan' AND status='Hapus') t;
+-- nota_hapus_berbeda 22 | masih_ada 5 | benar_lenyap 17
+```
+
+```
+-- (2) biayanya, dan ia tumbuh selamanya
+EXPLAIN SELECT DISTINCT keterangan FROM riwayat_barang_medis
+  WHERE posisi='Penjualan' AND status='Hapus' AND tanggal >= '2026-08-05';
+  type=ALL  possible_keys=NULL  key=NULL  rows~96958  Extra="Using where; Using temporary"
+  terukur: dingin 52 ms, hangat 57 ms
+  riwayat_barang_medis COUNT(*) = 114.834, bertambah ~100/hari
+
+-- bandingkan jendela penjualan yang SUDAH dibaca pemicunya:
+EXPLAIN SELECT nota_jual, tgl_jual FROM penjualan
+  WHERE nota_jual >= 'PJ20260805000' AND nota_jual <= 'PJ20260819999';
+  type=range  key=PRIMARY  rows~137
+  terukur: 1 ms
+```
+
+```
+-- (3) keterangan memuat nama orang begitu fitur member dipakai
+DlgPenjualan.java:4260
+  Trackobat.catatRiwayat(..., "Simpan", ..., NoNota.getText()+" "+kdmem.getText()+" "+nmmem.getText())
+-- di sini membernya kosong, jadi 54/54 cocok '^PJ[0-9]{11}$'
+```
+
+### Rencana query -- keenamnya tanpa izin pindai penuh
+
+```
+npm run verify:plans
+[ok] FARMASI_PENJUALAN               p  range PRIMARY    rows~137
+[ok] FARMASI_PENJUALAN               pt eq_ref PRIMARY   rows~1
+[ok] FARMASI_PENJUALAN               b  eq_ref PRIMARY   rows~1
+[ok] FARMASI_PENJUALAN_ADA           p  range PRIMARY    rows~137  (Using index)
+[ok] FARMASI_PENJUALAN_RINGKAS       d  ref nota_jual    rows~2    (Using index)
+[ok] FARMASI_PENJUALAN_ANGKA         p  const PRIMARY    rows~1
+[ok] FARMASI_PENJUALAN_DETAIL        d  ref nota_jual    rows~2    (Using index)
+[ok] FARMASI_PENJUALAN_DETAIL        br eq_ref PRIMARY   rows~1
+[ok] FARMASI_PENJUALAN_DETAIL        sat eq_ref PRIMARY  rows~1
+[ok] FARMASI_PENJUALAN_DETAIL_HARGA  d  ref nota_jual    rows~2    (Using index)
+verify:plans lolos.
+```
+
+### Deteksi pembatalan dibuktikan terhadap jendela SUNGGUHAN
+
+Uji dijalankan terhadap `penjualan` produksi (sakelar fiturnya tetap MATI sepanjang uji; yang disuntik cuma baris buku pantau milik kita sendiri, lalu dihapus lagi):
+
+```
+jendela 2026-08-05 .. 2026-08-19  (PJ20260805000 .. PJ20260819999)
+nota yang ADA di penjualan: 142
+
+menyuntik buku pantau:
+  PJ20260812010  <- nota SUNGGUHAN yang masih ada
+  PJ20260805900  <- di dalam jendela, TIDAK ada di penjualan
+  PJ20250101001  <- di LUAR jendela, tidak ada di penjualan
+
+HASIL:
+  terhapus : ["PJ20260805900"]
+
+  BENAR:
+    hantu dilaporkan terhapus            : true  (harus true)
+    nota sungguhan TIDAK dilaporkan      : true  (harus true)
+    nota luar jendela TIDAK dilaporkan   : true  (harus true)
+    nota sungguhan TIDAK dikabarkan lagi : true  (harus true)
+
+  nomor dipakai ulang -> generasi naik  : true  (harus true, dapat 1)
+
+baris uji dibersihkan; sisa buku pantau: 0 (harus 0)
+```
+
+Asersi ketiga itulah yang paling mahal kalau hilang: tanpa syarat "di dalam jendela", setiap nota yang menua keluar dari jendela lalu dilaporkan sebagai pembatalan -- pesan SALAH atas penjualan yang masih hidup, bukan sekadar pesan yang tidak terkirim.
+
+### Pagar jendela dibuktikan MENGGIGIT
+
+```
+# `diDalam()` dilumpuhkan sengaja (return true)
+npx jest src/core/pantauPenjualan
+  × nota di LUAR jendela tidak pernah dilaporkan terhapus walau ada di buku pantau
+  × nota di LUAR jendela tidak pernah dilaporkan baru walau ada di penjualan
+Tests: 2 failed, 15 passed
+
+# dipulihkan
+Tests: 17 passed
+```
+
+### Grant tidak diwarisi -- untuk KEENAM kalinya
+
+Dibuktikan lewat percobaan SELECT/INSERT/UPDATE/DELETE empiris, bukan diasumsikan.
+
+```
+# sesudah `npm run migrate`, SEBELUM grant diterapkan lewat root
+grant penjualan_pantau untuk wakhanza_rw:
+  SELECT   BERHASIL
+  INSERT   BERHASIL
+  UPDATE   DITOLAK  -> UPDATE command denied to user 'wakhanza_rw'@'localhost' for table 'penjualan_pantau'
+  DELETE   DITOLAK  -> DELETE command denied to user 'wakhanza_rw'@'localhost' for table 'penjualan_pantau'
+
+# GRANT SELECT, INSERT, UPDATE, DELETE ON wakhanza.penjualan_pantau TO 'wakhanza_rw'@'localhost';
+grant penjualan_pantau untuk wakhanza_rw:
+  SELECT   BERHASIL
+  INSERT   BERHASIL
+  UPDATE   BERHASIL
+  DELETE   BERHASIL
+  sisa baris uji: 0 (harus 0)
+```
+
+### Pratinjau terhadap data produksi
+
+`npm run dryrun:penjualan` (tidak menulis apa pun, tidak menyentuh buku pantau):
+
+```
+Jendela worker (2026-08-05 .. 2026-08-19): 137 baris
+Pembacaan luas (2000-01-01 .. 2099-12-31): 1000 baris  <- TERPOTONG di batas jendela (1000)
+
+  --- PJ20260812003 | 2026-08-12 | Jual Bebas | Belum Dibayar | 4 barang ---
+  | *Penjualan Obat & BHP*
+  | ...
+  | *Barang (4):*
+  | • Fasidol Tablet — 10 Kaplet @ Rp400 = Rp4.000
+  | ...
+  | Subtotal : Rp28.578
+  | Pembulatan/ongkir : Rp1.422
+  | PPN : Rp0
+  | *Total : Rp30.000*
+
+  --- SEANDAINYA PJ20260812004 dihapus ---
+  | *Penjualan DIBATALKAN*
+  | No. Nota : PJ20260812004
+  | Nota penjualan di atas sudah dihapus dari sistem. ...
+
+  kolom header yang benar-benar terbaca : nota_jual, tgl_jual, jns_jual, status, nama_petugas, nm_bangsal
+  kolom rincian yang benar-benar terbaca: nota_jual, kode_brng, nama_brng, satuan, jumlah, h_jual, total
+  PAGAR PRIVASI OK -- tidak satu pun kolom identitas pembeli terbaca
+
+  prefiks nomor vs kolom tgl_jual: 1000 cocok, 0 berbeda (dari 1000)
+
+  buku pantau: 0 baris (0 di dalam jendela)
+  bila worker jalan sekarang: 137 nota baru, 0 pembatalan
+  (lantai aktivasi belum ada -- ditulis saat sakelarnya dinyalakan, ...)
+```
+
+Pagar privasinya diperiksa pada **`Object.keys()` baris hasilnya**, bukan dengan membaca SQL -- satu-satunya cara membuktikan kolom yang tidak diambil memang tidak sampai ke proses ini.
+
+**Dua cacat pada skrip pratinjaunya sendiri ditemukan dan diperbaiki di sini**, keduanya kelas "angka yang tampak pasti padahal bukan": (1) `luas.length` dicetak sebagai "seluruh riwayat" padahal ia `LIMIT` query-nya sendiri -- keluar tepat 1.000, angka bulat yang terbaca seperti hitungan sungguhan, sementara jumlah notanya 16.787; (2) karena urutannya ASC, contoh yang dicetak berasal dari **2024** alih-alih dari nota terakhir yang baru dimasukkan orang -- persis yang ingin dicocokkan dengan layar Khanza. Sekarang keterpotongannya dikatakan dan contohnya diambil dari jendela worker. Bentuk kegagalan yang sama sudah dibayar di `information_schema.TABLE_ROWS` pada 030.
+
+### Gerbang lengkap
+
+```
+npm run typecheck   -> bersih
+npm run lint        -> bersih
+npm test            -> Test Suites: 45 passed, Tests: 743 passed
+npm run verify:db   -> verify:db lolos.   (sik: tulis DITOLAK; wakhanza: 24 tabel)
+npm run verify:plans-> verify:plans lolos.
+npm run build       -> sukses
+```
+
+(dari 44 suite / 726 uji sebelum penambahan ini: +1 suite `pantauPenjualan`, +17 uji)
+
+### Terpasang, dan siklusnya dibuktikan BERJALAN
+
+Worker dimulai ulang lewat prosedur tiga langkah yang terdokumentasi (`pm2 stop` -> pastikan Chromium pemegang sesi bersih -> `pm2 start`), dari PowerShell:
+
+```
+Chromium pemegang sesi tersisa: 0
+pm2 start wakhanza-worker  -> online, restart 7 (TIDAK naik -- tidak ada kaskade)
+[1] status=ready denyut=8s  -> SESI SIAP
+pm2 restart wakhanza-web   -> online
+```
+
+Siklus barunya dibuktikan benar-benar terdaftar, bukan disimpulkan dari "prosesnya menyala": sakelarnya dinyalakan sementara **dengan nol tujuan bercentang** -- keadaan yang membuat runner berhenti SEBELUM menyentuh `sik`, sehingga nol pesan mungkin terkirim -- lalu lognya diperiksa:
+
+```
+{"level":40,...,"msg":"penjualan menyala tapi belum ada tujuan yang mencentang \"terima penjualan\""}
+```
+
+`level: 40` (warn) itu sendiri bagian dari buktinya: ia jalur yang sengaja dipilih untuk keadaan setengah jadi, dan ia hanya bisa berbunyi dari kode yang baru. Sesudahnya sakelarnya dikembalikan ke `0`.
+
+Keadaan akhir, dan ini yang harus benar sebelum RS memutuskan apa pun:
+
+```
+farmasi.penjualan_enabled      [0]     <- MATI
+farmasi.penjualan_sejak        []      <- lantai BELUM ditulis; ia lahir saat RS menyalakannya
+farmasi.penjualan_hapus_kabar  [1]
+farmasi.penjualan_harga        [1]
+farmasi.penjualan_lookback_hari [7]
+farmasi.penjualan_max_per_siklus [10]
+penjualan_pantau: 0 baris
+farmasi_target bercentang terima_penjualan: 0
+```
+
+Lantai yang masih kosong itu disengaja: menyalakan sementara lewat SQL sengaja TIDAK melewati `togglePenjualanAction`, justru supaya ia tidak menulis lantai aktivasi atas nama keputusan yang belum diambil siapa pun.
+
+Gerbang autentikasi tetap tegak, dan penanda fiturnya ada di build:
+
+```
+/farmasi?tab=penjualan -> 307 http://127.0.0.1:3100/login
+
+grep -rl "<penanda>" .next/server
+[18] nota penjualan DIBATALKAN
+[ 7] penjualan_pantau
+[ 6] terima_penjualan
+[ 2] Notifikasi penjualan
+[ 2] Tabel penjualan PUNYA kolom pasien
+[ 0] Pembulatan/ongkir      <- BENAR: string ini hidup di app_setting, bukan di build
+```
+
+Baris terakhir layak disebut tersendiri -- nol di sana bukan kegagalan melainkan yang diharapkan, dan menyimpulkan sebaliknya akan menyuruh orang mencari cacat yang tidak ada.
+
+### Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
+
+**Belum ada satu pun pesan penjualan yang benar-benar terkirim ke WhatsApp.** `farmasi.penjualan_enabled` MATI dan `terima_penjualan` belum dicentang pada satu tujuan pun -- menyalakannya berarti mengirim puluhan pesan sehari ke grup sungguhan, dan itu keputusan RS (lihat "Yang masih perlu keputusan rumah sakit"). Yang bisa gagal diam sudah dipagari dari sisi lain: seluruh keputusan pembatalannya ada di fungsi murni yang diuji berikut bukti menggigitnya, query-nya terbukti atas 16.787 baris produksi, dan jalur enqueue-nya `enqueueMessage()` yang sama dipakai empat belas kelas pemicu lain.
+
+**Pembatalan SUNGGUHAN (nota dihapus lewat layar Khanza) belum pernah terjadi selama fitur ini hidup.** Yang diuji adalah perbandingannya terhadap jendela sungguhan dengan baris pantau yang disuntik -- itu membuktikan logikanya, bukan bahwa staf yang menghapus nota di Khanza benar-benar menghasilkan baris yang hilang. Yang menopang keyakinan itu terukur: 17 dari 22 nota ber-`status='Hapus'` di `riwayat_barang_medis` memang sudah tidak ada di `penjualan`.
+
 ## Kelas keempat belas: DOKUMEN HASIL (`migrations/038`) -- ISI pemeriksaan, bukan kabar tentangnya
 
 Dijalankan 9 Agustus 2026 terhadap database produksi (`alca`) dan `wakhanza` sungguhan.

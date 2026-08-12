@@ -27,6 +27,7 @@
     "dryrun:hibah": "tsx scripts/dryrun-hibah.ts",
     "dryrun:kontrol": "tsx scripts/dryrun-kontrol.ts",
     "dryrun:pemesanan": "tsx scripts/dryrun-pemesanan.ts",
+    "dryrun:penjualan": "tsx scripts/dryrun-penjualan.ts",
     "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts",
     "dryrun:stok": "tsx scripts/dryrun-stok.ts"
   },

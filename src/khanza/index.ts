@@ -15,6 +15,7 @@ export * from './stokDarurat';
 export * from './pengadaan';
 export * from './hibah';
 export * from './pemesanan';
+export * from './penjualan';
 export * from './bpjsBatal';
 export * from './bpjsKontrol';
 export * from './kontrolUlang';

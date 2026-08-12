@@ -1,6 +1,15 @@
 import * as cron from 'node-cron';
 import { Op, QueryTypes } from 'sequelize';
-import { Outbox, SendLog, PatientContact, AutoReplyLog, InboundMessage, WaSessionEvent, getSettingNumber } from '@/models';
+import {
+  Outbox,
+  SendLog,
+  PatientContact,
+  AutoReplyLog,
+  InboundMessage,
+  WaSessionEvent,
+  PenjualanPantau,
+  getSettingNumber,
+} from '@/models';
 import { sik } from '@/db/sik';
 import { TERMINAL_OUTBOX_STATUSES } from '@/core/outboxStatus';
 import { normalizePhone } from '@/core/phone';
@@ -64,9 +73,30 @@ async function cleanupOldRecords(): Promise<void> {
   const cutoffInbox = new Date(Date.now() - hariInbox * 24 * 60 * 60 * 1000);
   const deletedInbound = await InboundMessage.destroy({ where: { createdAt: { [Op.lt]: cutoffInbox } } });
 
+
+  /**
+   * Buku pantau penjualan (migrations/040) dipangkas menurut UMUR NOTANYA, bukan
+   * `dikabarkan_at`.
+   *
+   * Sebuah baris berhenti berguna begitu nomornya jatuh di luar jendela pindai --
+   * sejak saat itu `bandingkanPantau()` tidak pernah melihatnya lagi, jadi ia
+   * tidak bisa menghasilkan kabar apa pun. Yang menentukan itu tanggal di dalam
+   * NOMORNYA, dan bukan kapan kami mengabarkannya.
+   *
+   * Ambangnya sengaja jauh lebih longgar daripada jendelanya (90 hari berbanding
+   * 7): memangkas terlalu rapat berarti nota yang dihapus tepat setelah barisnya
+   * dibuang akan terlihat sebagai nota yang tidak pernah ada, dan biaya menyimpan
+   * satu baris berisi satu nomor selama tiga bulan praktis nol (~33 baris sehari).
+   */
+  const cutoffNota = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const prefixNota = `PJ${cutoffNota.getFullYear()}${String(cutoffNota.getMonth() + 1).padStart(2, '0')}${String(
+    cutoffNota.getDate(),
+  ).padStart(2, '0')}000`;
+  const deletedPantau = await PenjualanPantau.destroy({ where: { notaJual: { [Op.lt]: prefixNota } } });
+
   logger.info(
-    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, deletedSessionEvents, hariInbox },
-    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message & wa_session_event lama dihapus',
+    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, deletedSessionEvents, deletedPantau, hariInbox },
+    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message, wa_session_event & penjualan_pantau lama dihapus',
   );
 
   await cleanupOrphanMedia();

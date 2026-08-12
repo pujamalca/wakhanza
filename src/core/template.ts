@@ -383,6 +383,68 @@ export const PEMESANAN_TEMPLATE_VARIABLES = [
 ] as const;
 
 /**
+ * PENJUALAN OBAT, ALKES & BHP (`/farmasi`) -- nota penjualan apotek.
+ *
+ * Daftar ini adalah tempat aturan privasi pemicu tersebut DITEGAKKAN untuk
+ * kedua kalinya, dan pengulangannya disengaja.
+ *
+ * Ketiga nota barang lain (pengadaan, pemesanan, hibah) tidak punya variabel
+ * pasien karena tabel sumbernya memang tidak punya kolomnya -- di sana
+ * ketiadaan variabel cuma mengikuti kenyataan. `penjualan` BERBEDA: ia punya
+ * `no_rkm_medis` DAN `nm_pasien`, dan `detailjual` punya nama obatnya. Digabung,
+ * keduanya persis "obat APA yang diterima SIAPA".
+ *
+ * Jadi di sini ketiadaan `{nama_pasien}`/`{no_rm}` adalah KEPUTUSAN, bukan
+ * kebetulan, dan ia dijaga dua lapis dengan alasan yang berbeda: query-nya tidak
+ * pernah men-SELECT kolomnya (itu yang menentukan datanya sampai ke proses ini
+ * atau tidak), dan daftar ini tidak punya variabelnya (itu yang dilihat orang
+ * saat menyusun template, dan yang menolak simpan bila ada yang mengetiknya).
+ * Pola yang sama dengan `status_prb` pada BPJS_KONTROL_TEMPLATE_VARIABLES.
+ *
+ * `{no_nota}` dan `{tgl_jual}` -- bukan `{no_faktur}`/`{tanggal}`. Yang pertama
+ * karena Khanza menyebutnya nota, bukan faktur, dan menyamakannya dengan
+ * pengadaan akan membuat dua nomor yang bentuknya mirip tapi artinya berlawanan
+ * (yang satu dibeli, yang satu dijual) memakai nama yang sama. Yang kedua karena
+ * `{tanggal}` sudah dipakai SELURUH pemicu untuk waktu pesannya dikirim --
+ * padanan `{tgl_beli}` dan `{tgl_hibah}`.
+ *
+ * `{status_bayar}` (enum 'Belum Dibayar'/'Sudah Dibayar') dicetak sebagai
+ * KETERANGAN dan tidak pernah masuk kunci idempoten, dengan alasan yang sama
+ * persis seperti `{status}` pada surat pemesanan: ia sakelar alur kerja yang
+ * bisa dibalik staf kapan saja, jadi memasukkannya ke kunci berarti satu orang
+ * yang bolak-balik menandai lunas menghasilkan pesan tanpa batas.
+ *
+ * Kelima angka penutup SELALU dibaca; `farmasi.penjualan_harga` hanya memutus
+ * harga PER BARANG di dalam `{daftar_barang}`. Sebabnya sudah dibayar di hibah:
+ * label angka penutup ditulis di template sebagai baris tersendiri, jadi
+ * memutusnya menyisakan "Total : " yang menggantung tanpa angka.
+ *
+ * `{subtotal}` DIJUMLAHKAN dari rinciannya, bukan dibaca -- `penjualan` tidak
+ * menyimpan totalnya sama sekali, hanya `ppn` dan `ongkir`. Lihat
+ * `hitungTotalNota()` di core/penjualan.ts.
+ */
+export const PENJUALAN_TEMPLATE_VARIABLES = [
+  'no_nota',
+  'tgl_jual',
+  'jenis_jual',
+  'status_bayar',
+  'nama_gudang',
+  'nama_petugas',
+  'daftar_barang',
+  'jumlah_item',
+  'subtotal',
+  'ongkir',
+  'ppn',
+  'total',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+
+/**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
  * daftarnya lebih dekat ke FARMASI_TEMPLATE_VARIABLES daripada ke daftar
  * pemicu pasien.
@@ -454,6 +516,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...STOK_TEMPLATE_VARIABLES,
     ...DARURAT_TEMPLATE_VARIABLES,
     ...PENGADAAN_TEMPLATE_VARIABLES,
+    ...PENJUALAN_TEMPLATE_VARIABLES,
     ...HIBAH_TEMPLATE_VARIABLES,
     ...PEMESANAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
@@ -469,6 +532,7 @@ export type TemplateVariable =
   | (typeof STOK_TEMPLATE_VARIABLES)[number]
   | (typeof DARURAT_TEMPLATE_VARIABLES)[number]
   | (typeof PENGADAAN_TEMPLATE_VARIABLES)[number]
+  | (typeof PENJUALAN_TEMPLATE_VARIABLES)[number]
   | (typeof HIBAH_TEMPLATE_VARIABLES)[number]
   | (typeof PEMESANAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]

@@ -81,6 +81,25 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
    * setiap nota penerimaan.
    */
   declare terimaPemesanan: CreationOptional<boolean>;
+  /**
+   * Menerima nota PENJUALAN dari alamat ini (migrations/040).
+   *
+   * Sengaja TANPA nomor urut -- penomoran di tabel ini sudah terlanjur menyimpang
+   * (028 menyebut dirinya "KEEMPAT", 030 "KEENAM"), dan yang mengikat memang
+   * daftar PERTANYAANNYA, bukan urutannya.
+   *
+   * Terpisah dari `terimaPengadaan` dan `terimaPemesanan` karena arah barangnya
+   * BERLAWANAN: keduanya menjawab "apa yang kita BELI dan berapa harganya dari
+   * pemasok", sementara ini menjawab "apa yang kita JUAL dan berapa yang masuk".
+   * Bagian pengadaan yang mencocokkan tagihan pemasok tidak punya urusan dengan
+   * omzet loket, dan kasir yang perlu tahu tiap nota tidak punya urusan dengan
+   * harga beli.
+   *
+   * Perlu diketahui sebelum mencentangnya: lajunya jauh lebih tinggi daripada
+   * ketiga nota barang lain -- 16-46 nota per hari, berbanding 2,21 faktur
+   * pengadaan per hari.
+   */
+  declare terimaPenjualan: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -118,6 +137,12 @@ FarmasiTarget.init(
       allowNull: false,
       defaultValue: false,
       field: 'terima_pemesanan',
+    },
+    terimaPenjualan: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_penjualan',
     },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },

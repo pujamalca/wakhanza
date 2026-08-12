@@ -17,6 +17,7 @@ import { runPermintaanCycle } from './pollerPermintaan';
 import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
 import { runPengadaanCycle } from './pengadaanRunner';
+import { runPenjualanCycle } from './penjualanRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
@@ -469,6 +470,27 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('pemesanan', runPemesananCycle, scanIntervalMs);
+  /**
+   * PENJUALAN -- siklus ketujuh di keluarga farmasi, dan sekali lagi TERPISAH.
+   *
+   * Alasan pemisahannya sama dengan hibah dan surat pemesanan, PLUS satu yang
+   * khas: ia satu-satunya siklus farmasi yang MENULIS ke database `wakhanza`
+   * (buku pantau `penjualan_pantau`) sebagai bagian dari pekerjaannya. Digabung
+   * ke siklus lain, galat pada paruh yang lain bisa memutus siklus ini tepat di
+   * antara "pesan sudah masuk outbox" dan "notanya dicatat di buku pantau" --
+   * dan celah itu persis yang membuat sebuah nota dikabarkan tapi penghapusannya
+   * tidak pernah bisa terdeteksi.
+   *
+   * Interval PINDAI (5 menit), bukan 60 detik: jendelanya dibaca ULANG
+   * seluruhnya tiap kali jalan. Selisih beberapa menit pada nota penjualan tidak
+   * berarti apa-apa bagi gudang, sementara lajunya jauh lebih tinggi daripada
+   * nota barang lain (16-46 nota per hari) sehingga pengulangan rapat justru
+   * paling mahal di sini.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('penjualan', runPenjualanCycle, scanIntervalMs);
   void dispatcherLoop();
   /**
    * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan

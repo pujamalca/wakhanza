@@ -16,6 +16,8 @@ import { HibahForm, type NilaiHibah } from './HibahForm';
 import { HibahSwitch } from './HibahSwitch';
 import { PemesananForm, type NilaiPemesanan } from './PemesananForm';
 import { PemesananSwitch } from './PemesananSwitch';
+import { PenjualanForm, type NilaiPenjualan } from './PenjualanForm';
+import { PenjualanSwitch } from './PenjualanSwitch';
 
 /**
  * Halaman ini memuat EMPAT bagian yang berdiri sendiri: satu daftar tujuan yang
@@ -41,7 +43,12 @@ import { PemesananSwitch } from './PemesananSwitch';
 // dikirim -> barang datang); Hibah ditaruh sesudah keduanya, bukan di antaranya,
 // justru supaya pasangan itu tidak terpisah -- ia jalur pemasukan barang yang
 // berdiri sendiri, bukan tahap ketiga dari alur yang sama.
-const TAB = ['tujuan', 'resep', 'stok', 'darurat', 'pengadaan', 'pemesanan', 'hibah'] as const;
+// Penjualan ditaruh PALING AKHIR di antara nota barang, dan itu bukan urutan
+// pembuatan melainkan arah barangnya: pengadaan/pemesanan/hibah semuanya
+// barang MASUK, yang ini satu-satunya barang KELUAR. Menyelipkannya di
+// tengah membuat tiga tab yang bertetangga tidak lagi menjawab satu
+// pertanyaan yang sama.
+const TAB = ['tujuan', 'resep', 'stok', 'darurat', 'pengadaan', 'pemesanan', 'hibah', 'penjualan'] as const;
 type TabKey = (typeof TAB)[number];
 
 function bacaTab(param: string | undefined): TabKey {
@@ -82,6 +89,7 @@ export default async function FarmasiPage({
     jumlahTujuanPengadaan,
     jumlahTujuanHibah,
     jumlahTujuanPemesanan,
+    jumlahTujuanPenjualan,
     jumlahJadwal,
   ] = await Promise.all([
     FarmasiTarget.count(),
@@ -91,17 +99,26 @@ export default async function FarmasiPage({
     FarmasiTarget.count({ where: { terimaPengadaan: true } }),
     FarmasiTarget.count({ where: { terimaHibah: true } }),
     FarmasiTarget.count({ where: { terimaPemesanan: true } }),
+    FarmasiTarget.count({ where: { terimaPenjualan: true } }),
     StokAlertSchedule.count(),
   ]);
 
-  const [enabled, stokModeMentah, daruratEnabled, pengadaanEnabled, hibahEnabled, pemesananEnabled] =
-    await Promise.all([
+  const [
+    enabled,
+    stokModeMentah,
+    daruratEnabled,
+    pengadaanEnabled,
+    hibahEnabled,
+    pemesananEnabled,
+    penjualanEnabled,
+  ] = await Promise.all([
       getSettingBool('farmasi.enabled', false),
       getSetting('farmasi.stok_mode', 'mati'),
       getSettingBool('farmasi.darurat_enabled', false),
       getSettingBool('farmasi.pengadaan_enabled', false),
       getSettingBool('farmasi.hibah_enabled', false),
       getSettingBool('farmasi.pemesanan_enabled', false),
+      getSettingBool('farmasi.penjualan_enabled', false),
     ]);
 
   // Dinormalkan SEKALI di sini, bukan sekali untuk titik status lalu sekali
@@ -174,6 +191,17 @@ export default async function FarmasiPage({
       ? 'Menyala, tapi belum ada tujuan yang menerimanya'
       : 'Menyala';
 
+  const statusPenjualan: TabStatus = !penjualanEnabled
+    ? 'neutral'
+    : jumlahTujuanPenjualan === 0
+      ? 'warning'
+      : 'success';
+  const labelPenjualan = !penjualanEnabled
+    ? 'Mati'
+    : jumlahTujuanPenjualan === 0
+      ? 'Menyala, tapi belum ada tujuan yang menerimanya'
+      : 'Menyala';
+
   return (
     <div>
       <PageHeader
@@ -223,6 +251,13 @@ export default async function FarmasiPage({
             status: statusHibah,
             statusLabel: labelHibah,
           },
+          {
+            key: 'penjualan',
+            href: '/farmasi?tab=penjualan',
+            label: 'Penjualan',
+            status: statusPenjualan,
+            statusLabel: labelPenjualan,
+          },
         ]}
       />
 
@@ -238,6 +273,9 @@ export default async function FarmasiPage({
       {tab === 'hibah' && <TabHibah enabled={hibahEnabled} adaTujuan={jumlahTujuanHibah > 0} />}
       {tab === 'pemesanan' && (
         <TabPemesanan enabled={pemesananEnabled} adaTujuan={jumlahTujuanPemesanan > 0} />
+      )}
+      {tab === 'penjualan' && (
+        <TabPenjualan enabled={penjualanEnabled} adaTujuan={jumlahTujuanPenjualan > 0} />
       )}
 
       {/* Berlaku untuk SEMUA pesan farmasi, jadi ditaruh di luar tab mana pun --
@@ -292,6 +330,7 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
     terimaPengadaan: t.terimaPengadaan,
     terimaHibah: t.terimaHibah,
     terimaPemesanan: t.terimaPemesanan,
+    terimaPenjualan: t.terimaPenjualan,
   }));
 
   const barisGrup: GrupRow[] = grup.map((g) => ({
@@ -743,6 +782,97 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
       <PemesananSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
 
       <PemesananForm nilai={nilai} adaTujuan={adaTujuan} />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tab: Penjualan                                                            */
+/* ------------------------------------------------------------------------- */
+
+async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: boolean }) {
+  const [template, templateHapus, harga, kabarHapus, lookback, kuota, sejak] = await Promise.all([
+    getSetting('farmasi.template_penjualan', ''),
+    getSetting('farmasi.template_penjualan_hapus', ''),
+    getSettingBool('farmasi.penjualan_harga', true),
+    getSettingBool('farmasi.penjualan_hapus_kabar', true),
+    getSettingNumber('farmasi.penjualan_lookback_hari', 7),
+    getSettingNumber('farmasi.penjualan_max_per_siklus', 10),
+    getSetting('farmasi.penjualan_sejak', ''),
+  ]);
+
+  const nilai: NilaiPenjualan = {
+    template: template ?? '',
+    templateHapus: templateHapus ?? '',
+    harga,
+    kabarHapus,
+    lookback,
+    kuota,
+  };
+
+  return (
+    <section>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Dipicu <span className="font-medium text-foreground">kejadian di Khanza</span> &mdash; setiap nota yang disimpan
+        lewat menu <span className="font-medium text-foreground">Transaksi Penjualan Obat, Alkes &amp; BHP</span>{' '}
+        dikirim sebagai nota berisi daftar barang dan totalnya, dan setiap nota yang{' '}
+        <span className="font-medium text-foreground">dihapus</span> dikabarkan sebagai pembatalan. Sakelarnya sendiri,{' '}
+        <span className="font-medium">tidak</span> terpengaruh sakelar di tab mana pun yang lain.
+      </p>
+
+      {/* TIDAK dilipat, dan ini satu-satunya peringatan privasi di halaman ini
+          yang berbunyi berbeda dari ketiga tab nota barang lain. Di sana
+          kalimatnya "tidak ada kolom pasiennya"; di sini kolomnya ADA dan yang
+          menahannya adalah keputusan kode. Menyamakan bunyinya akan menyembunyikan
+          justru perbedaan yang paling perlu diketahui pembacanya. */}
+      <Callout className="mb-4" title="Tabel penjualan PUNYA kolom pasien — dan kolom itu sengaja tidak dibaca">
+        <p>
+          Berbeda dari Pengadaan, Pemesanan, dan Hibah, tabel{' '}
+          <span className="font-mono">penjualan</span> punya <span className="font-mono">no_rkm_medis</span> dan{' '}
+          <span className="font-mono">nm_pasien</span>, sementara <span className="font-mono">detailjual</span> punya
+          nama obatnya. Digabung, keduanya jadi &ldquo;obat apa yang diterima siapa&rdquo; &mdash; persis yang tidak
+          boleh beredar di grup.
+        </p>
+        <p className="mt-2">
+          Karena itu keempat kolom itu (ditambah catatan kasir dan nama pembayar){' '}
+          <span className="font-medium text-foreground">tidak pernah dibaca sama sekali</span> dari Khanza, dan
+          variabelnya memang tidak tersedia untuk ditambahkan ke isi pesan. Nota yang dikirim menyebut{' '}
+          <span className="font-medium text-foreground">barang dan rupiah</span>, tidak pernah seorang pembeli pun.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          Terukur di rumah sakit ini: dari 16.787 nota, 16.779 memakai penanda{' '}
+          <span className="font-mono">&lsquo;000&rsquo;</span> pada nomor rekam medis &mdash; jadi ini memang penjualan
+          bebas di loket. Tapi delapan baris membawa nomor sungguhan, dan itu cukup untuk membuat penahanannya
+          dikerjakan di tingkat query alih-alih diserahkan pada kebiasaan data.
+        </p>
+      </Callout>
+
+      {/* Dilipat: keterangan yang dibaca sekali saat memutuskan, bukan
+          peringatan yang harus terbaca tiap kali halaman dibuka. Judulnya utuh
+          sendirian, karena cuma judul yang selalu terlihat. */}
+      <Callout
+        collapsible
+        className="mb-4"
+        title="Bagaimana pembatalan bisa terdeteksi, padahal barisnya sudah tidak ada"
+      >
+        <p>
+          Nota yang dihapus di Khanza tidak meninggalkan apa pun untuk dibaca &mdash; yang hilang terlihat persis sama
+          dengan yang tidak pernah ada. Jadi sistem menyimpan sendiri daftar nomor nota yang sudah dikabarkan, lalu tiap
+          siklus membandingkannya dengan nota yang masih ada di dalam jendela. Nomor yang tercatat tapi hilang berarti
+          barisnya memang sudah dihapus.
+        </p>
+        <p className="mt-2">
+          Konsekuensinya ada dua, dan keduanya wajar tapi perlu diketahui. Pertama, hanya nota yang{' '}
+          <span className="font-medium text-foreground">pernah dikabarkan</span> yang bisa dilaporkan dibatalkan &mdash;
+          nota lama yang jatuh di bawah lantai aktivasi tidak. Kedua, hanya selama nomornya masih di dalam{' '}
+          <span className="font-medium text-foreground">jendela pindai</span>; nota yang dihapus sebulan kemudian sudah
+          di luar jangkauan.
+        </p>
+      </Callout>
+
+      <PenjualanSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
+
+      <PenjualanForm nilai={nilai} adaTujuan={adaTujuan} />
     </section>
   );
 }

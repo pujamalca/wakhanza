@@ -19,4 +19,5 @@ export { BpjsTarget } from './BpjsTarget';
 export { TemplateTarget } from './TemplateTarget';
 export { WaGroup } from './WaGroup';
 export { StokAlertSchedule } from './StokAlertSchedule';
+export { PenjualanPantau } from './PenjualanPantau';
 export { InboundMessage, type JenisChat } from './InboundMessage';
