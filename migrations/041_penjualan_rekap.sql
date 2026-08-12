@@ -1,0 +1,200 @@
+-- 041_penjualan_rekap.sql
+-- REKAP HARIAN PENJUALAN -- satu pesan sehari berisi TOTALNYA, pada jam yang
+-- disetel staf, ke tujuan yang sama dengan nota penjualan (`terima_penjualan`).
+--
+-- ===========================================================================
+-- Kenapa ini ada, dan kenapa sakelarnya BERDIRI SENDIRI dari nota per-nota
+-- ===========================================================================
+--
+-- migrations/040 mengirim SATU PESAN PER NOTA, dan catatan kebijakannya di
+-- CLAUDE.md menutup dengan pertanyaan yang belum terjawab waktu itu:
+--
+--   "Yang harus diputuskan RS: apakah yang dibutuhkan memang kabar per nota,
+--    atau sebenarnya rekap harian yang fitur ini TIDAK sediakan. Kalau
+--    jawabannya rekap, jangan nyalakan."
+--
+-- Jawabannya sekarang ada, dan berbunyi "rekap". Maka yang salah bukan
+-- keputusan RS melainkan kalimat "jangan nyalakan" -- ia menyuruh orang
+-- menyerah karena fiturnya belum dibuat. Berkas ini membuatnya.
+--
+-- `farmasi.penjualan_rekap_enabled` karena itu TIDAK bertingkat di bawah
+-- `farmasi.penjualan_enabled`, dan itu keputusan yang paling menentukan di
+-- berkas ini. Rekap adalah ALTERNATIF dari kabar per nota, bukan tambahannya:
+-- RS yang cuma ingin satu pesan sehari harus bisa mendapatkannya TANPA lebih
+-- dulu menyalakan 16-46 pesan sehari yang justru ingin dihindarinya.
+-- Menaikkannya jadi anak dari sakelar itu akan memaksa persis kebalikan dari
+-- yang diminta.
+--
+-- Keduanya boleh menyala bersama, dan itu sah -- grup yang ingin tahu tiap
+-- transaksi DAN ingin angka penutup hari. Halaman mengatakan keduanya berdiri
+-- sendiri supaya kombinasi itu dipilih, bukan terjadi karena tidak sengaja.
+--
+-- ===========================================================================
+-- Kelas pemicunya: WAKTU, sama seperti DARURAT STOK -- bukan pindai
+-- ===========================================================================
+--
+-- Keempat nota barang (pengadaan, pemesanan, hibah, penjualan) adalah kelas
+-- PINDAI: jendela dibaca ulang tiap siklus, dedup lewat kunci idempoten. Yang
+-- ini bukan. Tidak ada baris di `sik` yang "muncul" untuk memicunya; yang
+-- memicunya adalah JAM DINDING melewati waktu yang disetel staf, lalu keadaan
+-- hari itu dibaca apa adanya.
+--
+-- Bentuknya karena itu meniru `runBpjsKontrolIfDue()`, bukan `runPenjualanCycle()`:
+-- kejatuhtempoan diperiksa tiap siklus pindai dan jamnya DIBACA ULANG tiap kali,
+-- sehingga staf yang mengubah jamnya di dashboard berlaku hari itu juga alih-alih
+-- menunggu worker dimulai ulang oleh orang yang tidak tahu ia perlu melakukannya
+-- (pelajaran `startScheduler()`/BOOK_REMIND, tercatat di CLAUDE.md).
+--
+-- Penandanya (`farmasi.penjualan_rekap_last_run`) CUMA PENGHEMAT QUERY, bukan
+-- penentu kebenaran: yang mencegah kirim ganda adalah kunci idempoten, ditegakkan
+-- `uq_idem` di mesin database. Karena itu ia dimajukan SESUDAH pekerjaannya
+-- berhasil, tidak pernah sebelum -- satu kegagalan sesaat tidak boleh menghapus
+-- rekap SEHARIAN tanpa percobaan kedua (pelajaran `bpjs.kontrol_last_run`).
+--
+-- ===========================================================================
+-- Jam bawaannya 21:00, dan angka itu DIUKUR
+-- ===========================================================================
+--
+-- `penjualan` tidak punya kolom jam sama sekali, jadi kapan transaksi benar-benar
+-- terjadi dibaca dari `riwayat_barang_medis` (posisi='Penjualan', status='Simpan',
+-- 90 hari terakhir, 3.603 baris):
+--
+--   jam 08  126     jam 13  412     jam 18  430
+--   jam 09   21     jam 14  472     jam 19  904   <- puncaknya
+--   jam 10   27     jam 15  457     jam 20   59
+--   jam 11  159     jam 16  341     jam 21    0
+--   jam 12   48     jam 17  147
+--
+-- Jam tersibuk adalah 19:00, dan penjualan masih terjadi sampai 20:00 (teramati
+-- 19:19, 18:41, 18:42, 19:00 sebagai transaksi terakhir hari itu). Rekap jam
+-- 18:00 -- angka yang paling wajar dikira "sore, sesudah jam kerja" -- karena itu
+-- akan RUTIN melewatkan jam paling ramai, dan yang terlihat cuma angka omzet yang
+-- selalu lebih kecil daripada yang diingat kasir. 21:00 adalah jam pertama yang
+-- nol pada seluruh 90 hari.
+--
+-- `farmasi.penjualan_rekap_offset_hari` tetap ada karena jam yang disetel staf
+-- menentukan hari MANA yang masuk akal: 21:00 merekap hari ini (offset 0), 07:00
+-- jelas memaksudkan kemarin (offset 1). Sistem tidak bisa menyimpulkannya dari
+-- jamnya sendiri, dan menebak berarti mengirim rekap yang isinya nyaris kosong
+-- tanpa satu pun galat -- jadi ia disetel eksplisit, dan halamannya membacakan
+-- akibat setelan itu sebagai kalimat penuh.
+--
+-- ===========================================================================
+-- Yang TIDAK ada di rekap ini, dan semuanya karena diukur
+-- ===========================================================================
+--
+-- `{status_bayar}` -- `penjualan.status` bernilai 'Sudah Dibayar' pada SELURUH
+--   16.793 baris (satu-satunya nilai yang pernah ada). Rincian lunas-vs-piutang
+--   adalah kolom yang selamanya mengatakan hal yang sama, dan kolom seperti itu
+--   mengajari pembacanya berhenti membaca.
+--
+-- Jumlah nota yang DIBATALKAN hari itu -- terbaca dari `penjualan_pantau`, tapi
+--   kolom `hapus_at` di sana adalah kapan KITA MENDETEKSINYA dan hanya terisi
+--   bila `farmasi.penjualan_enabled` menyala. Angka yang benar cuma pada sebagian
+--   konfigurasi adalah angka yang lebih buruk daripada tidak ada. Nota yang
+--   dibatalkan sudah benar tercermin di rekap ini: ia tidak ada lagi di
+--   `penjualan`, jadi ia memang tidak ikut dijumlahkan.
+--
+-- Barang terlaris hari itu -- berguna, dan sengaja tidak dibuat: yang diminta
+--   adalah rekap TOTAL, dan daftar barang membawa pertanyaan panjang pesan serta
+--   satu query lagi. Ia bisa ditambahkan belakangan tanpa mengubah apa pun di
+--   berkas ini.
+--
+-- ===========================================================================
+-- Privasi: pagarnya IDENTIK dengan 040, dan alasannya justru lebih kuat
+-- ===========================================================================
+--
+-- `penjualan` punya `no_rkm_medis` dan `nm_pasien`. Query rekap ini hanya
+-- menjalankan COUNT/SUM dan GROUP BY `jns_jual`; tidak satu pun kolom pasien
+-- di-SELECT, dan tidak satu pun baris per-transaksi meninggalkan SQL. Sebuah
+-- agregat memang tidak menyebut siapa pun -- tapi itu bukan alasan untuk
+-- melonggarkan daftar SELECT-nya, karena yang menjaga bukan sifat agregatnya
+-- melainkan kolom yang tidak pernah diambil (ARCHITECTURE §5.2).
+--
+-- `npm run dryrun:penjualan` memeriksanya pada `Object.keys()` baris hasilnya,
+-- bukan dengan membaca SQL.
+
+-- ---------------------------------------------------------------------------
+-- Perbaikan label `{ongkir}` pada nota per-nota -- diukur, bukan dirapikan
+-- ---------------------------------------------------------------------------
+--
+-- 040 menamainya "Pembulatan/ongkir" berdasarkan pengukuran yang benar tapi
+-- SETENGAH: 95% nilainya di bawah Rp1.000 dan kebanyakan membuat totalnya
+-- membulat, jadi "ongkir" saja memang menyesatkan. Yang terlewat waktu itu
+-- adalah EKORNYA. Atas seluruh 16.787 nota:
+--
+--   ongkir = 0        12.848
+--   ongkir > 0         3.565   (157 di antaranya di atas Rp1.000, sampai +20.000)
+--   ongkir < 0           380   (30 di antaranya di bawah -Rp1.000, sampai -21.000)
+--
+-- Dan yang negatif terbukti POTONGAN HARGA, bukan pembulatan:
+--
+--   subtotal 159.500 + (-21.000) = 138.500
+--   subtotal  50.000 + (-18.000) =  32.000
+--   subtotal 125.000 + (-15.000) = 110.000
+--
+-- Diskon 13% yang dicetak di bawah label "Pembulatan" terbaca sebagai sistem
+-- rusak, dan sejak itu angka yang benar pun tidak dipercaya -- pelajaran yang
+-- sama persis dengan label "Total nilai hibah :" tanpa angka (031). Kolom ini
+-- ternyata satu kolom PENYESUAIAN serba guna, jadi labelnya harus menyebut
+-- yang selalu benar.
+--
+-- Nama variabelnya TETAP `{ongkir}`, dan itu disengaja: ia menamai KOLOM
+-- Khanza yang mengisinya, sehingga siapa pun yang menelusuri angkanya sampai ke
+-- `penjualan.ongkir` tanpa perlu menebak. Yang diperbaiki labelnya, bukan
+-- tautannya ke sumber.
+--
+-- Lewat REPLACE() atas teks yang persis, bukan UPDATE yang menimpa seluruh
+-- template: staf boleh sudah menyunting pesannya, dan menimpanya berarti
+-- membuang pekerjaan orang untuk memperbaiki satu kata. Yang sudah mengganti
+-- kalimat itu sendiri tidak tersentuh sama sekali.
+UPDATE app_setting
+SET v = REPLACE(v, 'Pembulatan/ongkir : {ongkir}', 'Penyesuaian : {ongkir}')
+WHERE k = 'farmasi.template_penjualan';
+
+-- ---------------------------------------------------------------------------
+-- Pengaturan rekap
+-- ---------------------------------------------------------------------------
+INSERT IGNORE INTO app_setting (k, v) VALUES
+
+-- Sakelar utama. MATI, dan berdiri sendiri dari `farmasi.penjualan_enabled`
+-- (lihat kepala berkas). Dinyalakan lewat halaman `/farmasi?tab=penjualan`,
+-- yang mencatatnya ke `audit_log` sebagai peristiwanya sendiri.
+('farmasi.penjualan_rekap_enabled', '0'),
+
+-- Jam kirim, HH:MM. Bawaannya 21:00 -- diukur, lihat kepala berkas.
+--
+-- HH:MM dan bukan jam bulat seperti `bpjs.kontrol_jam`: siklus pindainya 5
+-- menit, jadi menit memang berarti (21:30 bisa diminta dan ditepati dalam satu
+-- siklus), dan `stok_alert_schedule.time_of_day` sudah lebih dulu memberi staf
+-- ketelitian menit di halaman yang sama.
+('farmasi.penjualan_rekap_jam', '21:00'),
+
+-- Hari mana yang direkap, dihitung mundur dari hari saat rekapnya dikirim.
+-- 0 = hari ini (pasangan wajar untuk jam 21:00), 1 = kemarin (untuk jam pagi).
+('farmasi.penjualan_rekap_offset_hari', '0'),
+
+-- Penanda "sudah jalan pada tanggal ini" (YYYY-MM-DD lokal). Kosong = belum
+-- pernah. BUKAN penentu kebenaran -- lihat kepala berkas.
+('farmasi.penjualan_rekap_last_run', ''),
+
+-- Isi pesan rekap.
+--
+-- `{rincian_jenis}` dipisah sebagai variabelnya sendiri, bukan dilebur ke badan
+-- pesan, supaya RS yang tidak peduli pemisahan Jual Bebas/Karyawan/VIP bisa
+-- menghapus dua barisnya tanpa kehilangan angka totalnya. Terukur: 'Jual Bebas'
+-- 15.999 dari 16.793, jadi pada kebanyakan hari isinya memang satu-dua baris.
+('farmasi.template_penjualan_rekap',
+ '*Rekap Penjualan Harian*\n{nama_rs}\n\nTanggal : {tanggal_rekap}\n\nJumlah nota : {jumlah_nota}\nJumlah barang : {jumlah_barang} ({jumlah_item} baris)\n\nSubtotal : {subtotal}\nPenyesuaian : {penyesuaian}\nPPN : {ppn}\n*Total : {total}*\n\n*Rincian per jenis:*\n{rincian_jenis}\n\nDikirim : {tanggal} {jam}'),
+
+-- Isi pesan saat hari itu TIDAK ADA penjualan sama sekali.
+--
+-- KOSONG = sengaja DIAM, dan bawaannya memang kosong. Alasannya sama persis
+-- dengan `farmasi.template_darurat_kosong` dan `autoreply.fallback_body`: pesan
+-- harian yang isinya "tidak ada apa-apa" berhenti dibaca dalam seminggu, dan
+-- sejak itu yang sungguhan ikut tidak terbaca.
+--
+-- Diisi, ia jadi tanda hidup harian yang berguna: apotek yang biasanya ramai
+-- lalu menerima "tidak ada penjualan" tahu ada yang perlu diperiksa -- entah
+-- Khanza-nya, entah rekapnya. RS yang memilih itu mengisinya sendiri.
+('farmasi.template_penjualan_rekap_kosong', '');

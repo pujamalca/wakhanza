@@ -101,6 +101,27 @@ const BYPASS_QUIET_HOURS = new Set([
   'FARMASI_PENYERAHAN',
   'FARMASI_UJI',
   'FARMASI_STOK_DARURAT',
+  /**
+   * FARMASI_PENJUALAN_REKAP (041): alasannya SAMA PERSIS dengan
+   * FARMASI_STOK_DARURAT tepat di atasnya -- jam kirimnya dipilih staf sendiri
+   * (`farmasi.penjualan_rekap_jam`), jadi menundukkannya pada jam tenang berarti
+   * diam-diam mengabaikan setelan yang baru saja mereka buat.
+   *
+   * Di sini itu bukan kehalusan melainkan SYARAT, dan angkanya yang membuktikan:
+   * jam bawaannya 21:00 (diukur -- jam pertama yang nol transaksi sepanjang 90
+   * hari) sementara jam tenang bawaan mulai pukul 21:00 juga. Tanpa baris ini,
+   * rekap pada setelan BAWAANNYA akan ditahan sampai pukul 07:00 keesokan hari,
+   * setiap hari, tanpa satu pun galat -- kanal yang tampak menyala dan selalu
+   * tiba salah hari.
+   *
+   * Yang SENGAJA tidak ikut: FARMASI_PENJUALAN dan FARMASI_PENJUALAN_HAPUS
+   * (juga PENGADAAN/PEMESANAN/HIBAH). Perbedaannya bukan penerimanya -- keempat
+   * kanal itu memang ke grup gudang yang sama -- melainkan SIAPA YANG MEMILIH
+   * WAKTUNYA: di sini staf menyetel jamnya sendiri, di sana waktunya ditentukan
+   * kapan kasir kebetulan menekan simpan. Argumen "setelan yang baru saja
+   * dibuat" tidak berlaku untuk yang kedua, jadi ia tidak bisa dipinjam ke sana.
+   */
+  'FARMASI_PENJUALAN_REKAP',
   'BPJS_BATAL',
   'ADMINISTRASI',
 ]);

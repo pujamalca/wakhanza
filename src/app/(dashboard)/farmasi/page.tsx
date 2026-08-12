@@ -18,6 +18,8 @@ import { PemesananForm, type NilaiPemesanan } from './PemesananForm';
 import { PemesananSwitch } from './PemesananSwitch';
 import { PenjualanForm, type NilaiPenjualan } from './PenjualanForm';
 import { PenjualanSwitch } from './PenjualanSwitch';
+import { RekapForm, type NilaiRekap } from './RekapForm';
+import { RekapSwitch } from './RekapSwitch';
 
 /**
  * Halaman ini memuat EMPAT bagian yang berdiri sendiri: satu daftar tujuan yang
@@ -111,6 +113,7 @@ export default async function FarmasiPage({
     hibahEnabled,
     pemesananEnabled,
     penjualanEnabled,
+    rekapEnabled,
   ] = await Promise.all([
       getSettingBool('farmasi.enabled', false),
       getSetting('farmasi.stok_mode', 'mati'),
@@ -119,6 +122,7 @@ export default async function FarmasiPage({
       getSettingBool('farmasi.hibah_enabled', false),
       getSettingBool('farmasi.pemesanan_enabled', false),
       getSettingBool('farmasi.penjualan_enabled', false),
+      getSettingBool('farmasi.penjualan_rekap_enabled', false),
     ]);
 
   // Dinormalkan SEKALI di sini, bukan sekali untuk titik status lalu sekali
@@ -191,16 +195,34 @@ export default async function FarmasiPage({
       ? 'Menyala, tapi belum ada tujuan yang menerimanya'
       : 'Menyala';
 
-  const statusPenjualan: TabStatus = !penjualanEnabled
+  /**
+   * Tab Penjualan memuat DUA sakelar yang berdiri sendiri (nota per transaksi
+   * dan rekap harian), jadi titiknya menyala bila SALAH SATU menyala.
+   *
+   * Membacanya dari `penjualanEnabled` saja -- bentuk yang benar untuk ketujuh
+   * tab lain yang cuma punya satu sakelar -- akan membuat RS yang memakai rekap
+   * SAJA melihat tabnya bertanda "Mati" sementara ia benar-benar mengirim tiap
+   * malam. Itu kebalikan persis dari guna titik ini: ia ada untuk menampakkan
+   * keadaan yang tidak terlihat tanpa membuka tabnya.
+   *
+   * Keduanya berbagi satu daftar tujuan (`terima_penjualan`), jadi peringatan
+   * "belum ada tujuan" tetap satu pemeriksaan untuk keduanya.
+   */
+  const penjualanAdaYangNyala = penjualanEnabled || rekapEnabled;
+  const statusPenjualan: TabStatus = !penjualanAdaYangNyala
     ? 'neutral'
     : jumlahTujuanPenjualan === 0
       ? 'warning'
       : 'success';
-  const labelPenjualan = !penjualanEnabled
+  const labelPenjualan = !penjualanAdaYangNyala
     ? 'Mati'
     : jumlahTujuanPenjualan === 0
       ? 'Menyala, tapi belum ada tujuan yang menerimanya'
-      : 'Menyala';
+      : penjualanEnabled && rekapEnabled
+        ? 'Nota per transaksi dan rekap harian menyala'
+        : penjualanEnabled
+          ? 'Nota per transaksi menyala'
+          : 'Rekap harian menyala';
 
   return (
     <div>
@@ -791,7 +813,20 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 /* ------------------------------------------------------------------------- */
 
 async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: boolean }) {
-  const [template, templateHapus, harga, kabarHapus, lookback, kuota, sejak] = await Promise.all([
+  const [
+    template,
+    templateHapus,
+    harga,
+    kabarHapus,
+    lookback,
+    kuota,
+    sejak,
+    rekapEnabled,
+    rekapJam,
+    rekapOffset,
+    rekapTemplate,
+    rekapTemplateKosong,
+  ] = await Promise.all([
     getSetting('farmasi.template_penjualan', ''),
     getSetting('farmasi.template_penjualan_hapus', ''),
     getSettingBool('farmasi.penjualan_harga', true),
@@ -799,6 +834,11 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
     getSettingNumber('farmasi.penjualan_lookback_hari', 7),
     getSettingNumber('farmasi.penjualan_max_per_siklus', 10),
     getSetting('farmasi.penjualan_sejak', ''),
+    getSettingBool('farmasi.penjualan_rekap_enabled', false),
+    getSetting('farmasi.penjualan_rekap_jam', '21:00'),
+    getSettingNumber('farmasi.penjualan_rekap_offset_hari', 0),
+    getSetting('farmasi.template_penjualan_rekap', ''),
+    getSetting('farmasi.template_penjualan_rekap_kosong', ''),
   ]);
 
   const nilai: NilaiPenjualan = {
@@ -808,6 +848,13 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
     kabarHapus,
     lookback,
     kuota,
+  };
+
+  const nilaiRekap: NilaiRekap = {
+    jam: rekapJam ?? '21:00',
+    offset: rekapOffset,
+    template: rekapTemplate ?? '',
+    templateKosong: rekapTemplateKosong ?? '',
   };
 
   return (
@@ -873,6 +920,35 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
       <PenjualanSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
 
       <PenjualanForm nilai={nilai} adaTujuan={adaTujuan} />
+
+      {/* --------------------------------------------------------------- */}
+      {/* Rekap harian -- kelas pemicu BERBEDA, jadi dipisah garis dan     */}
+      {/* diberi judulnya sendiri. Ditaruh di tab yang SAMA karena         */}
+      {/* keduanya tentang penjualan dan berbagi daftar tujuan; tab        */}
+      {/* kesembilan akan membuat orang mencari rekap di tempat yang tidak */}
+      {/* menyebut penjualan sama sekali.                                  */}
+      {/* --------------------------------------------------------------- */}
+      <hr className="my-8 border-border" />
+
+      <h3 className="mb-2 text-base font-medium">Rekap harian</h3>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Dipicu <span className="font-medium text-foreground">WAKTU</span>, bukan kejadian &mdash; pada jam yang disetel
+        di bawah, sistem membaca seluruh penjualan satu hari lalu mengirim{' '}
+        <span className="font-medium text-foreground">satu pesan</span> berisi totalnya. Tujuannya sama dengan nota per
+        transaksi (yang mencentang &ldquo;Penjualan&rdquo;), tapi{' '}
+        <span className="font-medium">sakelarnya berdiri sendiri</span>: rekap bisa dipakai tanpa menyalakan kabar per
+        nota, dan itu justru pemakaian yang paling masuk akal bagi grup yang tidak ingin puluhan pesan sehari.
+      </p>
+
+      <RekapSwitch
+        enabled={rekapEnabled}
+        adaTujuan={adaTujuan}
+        notaEnabled={enabled}
+        jam={nilaiRekap.jam}
+        offset={nilaiRekap.offset}
+      />
+
+      <RekapForm nilai={nilaiRekap} adaTujuan={adaTujuan} />
     </section>
   );
 }

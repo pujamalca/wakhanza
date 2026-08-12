@@ -119,6 +119,7 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // harus bisa dibedakan sekali baca -- pelajaran KONTROL_ULANG/KONTROL_TERBIT.
   FARMASI_PENJUALAN: 'Apotek: nota penjualan',
   FARMASI_PENJUALAN_HAPUS: 'Apotek: nota penjualan DIBATALKAN',
+  FARMASI_PENJUALAN_REKAP: 'Apotek: rekap penjualan harian',
   // BPJS_BATAL ke loket, BPJS_KONTROL ke pasien -- dan bedanya ditulis di
   // labelnya, dengan alasan yang sama seperti ketiga baris apotek di atas:
   // baris di Antrean/Log tidak boleh terbaca sebagai pemberitahuan yang gagal

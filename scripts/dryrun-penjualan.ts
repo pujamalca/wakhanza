@@ -247,6 +247,76 @@ async function main() {
     if (hasil.terhapus.length > 0) {
       console.log(`  nota yang akan dikabarkan dibatalkan: ${hasil.terhapus.join(', ')}`);
     }
+
+    /* ====================================================================
+     * REKAP HARIAN (migrations/041)
+     *
+     * Ditumpangkan ke skrip ini, bukan dibuat skrip sendiri: ia membaca tabel
+     * yang sama, tunduk pagar privasi yang sama, dan yang paling sering ingin
+     * dibandingkan orang justru KEDUANYA berdampingan -- "kalau saya matikan
+     * nota per transaksi dan pakai rekap saja, apa yang saya terima".
+     * ==================================================================== */
+    const { rekapPenjualanHarian } = await import('../src/khanza/penjualan');
+    const { gabungRekap } = await import('../src/core/penjualanRekap');
+    const { susunVarsRekap } = await import('../src/worker/penjualanRekapRunner');
+    const { hariRekap } = await import('../src/core/penjualanRekap');
+
+    const sekarang = new Date();
+    const offsetRekap = await getSettingNumber('farmasi.penjualan_rekap_offset_hari', 0);
+    const tanggalRekap = hariRekap(sekarang, offsetRekap);
+
+    console.log(`\n=== REKAP HARIAN -- tanggal ${tanggalRekap} (offset ${offsetRekap} hari) ===`);
+
+    const agregat = await rekapPenjualanHarian(tanggalRekap);
+
+    /**
+     * PAGAR PRIVASI, diperiksa pada `Object.keys()` baris HASILNYA -- bukan
+     * dengan membaca SQL.
+     *
+     * Agregat memang tidak menyebut siapa pun, dan justru karena itu godaan
+     * melonggarkan daftar SELECT-nya paling besar di sini. Yang menjaga tetap
+     * kolom yang tidak pernah diambil (§5.2), jadi pemeriksaannya sama ketat
+     * dengan yang dijalankan atas nota per transaksi di atas.
+     */
+    const TERLARANG = ['no_rkm_medis', 'nm_pasien', 'keterangan', 'nama_bayar', 'aturan_pakai'];
+    const kolomRekap = [
+      ...new Set([
+        ...(agregat.header[0] ? Object.keys(agregat.header[0]) : []),
+        ...(agregat.item[0] ? Object.keys(agregat.item[0]) : []),
+      ]),
+    ];
+    const bocorRekap = kolomRekap.filter((k) => TERLARANG.includes(k));
+    console.log(`  kolom terbaca: ${kolomRekap.length > 0 ? kolomRekap.join(', ') : '(tidak ada baris)'}`);
+    console.log(
+      bocorRekap.length === 0
+        ? '  [ok] tidak ada kolom pasien/keterangan/dosis yang terbaca'
+        : `  [BOCOR] kolom terlarang terbaca: ${bocorRekap.join(', ')}`,
+    );
+    if (bocorRekap.length > 0) process.exitCode = 1;
+
+    const ringkasRekap = gabungRekap(agregat.header, agregat.item);
+    console.log(
+      `  ${ringkasRekap.jmlNota} nota, ${ringkasRekap.jmlBaris} baris, ${ringkasRekap.jmlBarang} barang; ` +
+        `subtotal ${ringkasRekap.subtotal}, penyesuaian ${ringkasRekap.penyesuaian}, ppn ${ringkasRekap.ppn}, total ${ringkasRekap.total}`,
+    );
+
+    const bodyRekap = (await getSetting('farmasi.template_penjualan_rekap', '')) ?? '';
+    const bodyRekapKosong = (await getSetting('farmasi.template_penjualan_rekap_kosong', '')) ?? '';
+    const dipakai = ringkasRekap.kosong ? (bodyRekapKosong.trim() ? bodyRekapKosong : null) : bodyRekap;
+
+    if (dipakai === null) {
+      console.log(
+        '\n  Hari itu tidak ada penjualan, dan "pesan saat kosong" dibiarkan kosong -- jadi sistem sengaja DIAM.',
+      );
+    } else {
+      const teksRekap = appendUniqueCode(
+        renderTemplate(dipakai, { ...idVars, ...susunVarsRekap(ringkasRekap, tanggalRekap, sekarang) }),
+        buildIdempotencyKey('FARMASI_PENJUALAN_REKAP', tanggalRekap, 'contoh@g.us'),
+        kodeTemplate,
+        sekarang,
+      );
+      console.log(`\n${teksRekap}\n`);
+    }
   } finally {
     await sik.close();
     await db.close();

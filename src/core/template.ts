@@ -443,6 +443,53 @@ export const PENJUALAN_TEMPLATE_VARIABLES = [
   'kontak_rs',
 ] as const;
 
+/**
+ * REKAP HARIAN PENJUALAN (`/farmasi?tab=penjualan`, migrations/041) -- satu pesan
+ * sehari berisi TOTALNYA, bukan satu pesan per nota.
+ *
+ * Daftar TERSENDIRI, bukan menumpang `PENJUALAN_TEMPLATE_VARIABLES`, dan itu
+ * bukan kerapian: hampir seluruh variabel di sana menyebut SATU nota
+ * (`{no_nota}`, `{nama_petugas}`, `{daftar_barang}`) dan sama sekali tidak punya
+ * arti pada agregat sehari. Digabung, staf bisa menyimpan rekap yang memuat
+ * `{no_nota}` lalu menerimanya kosong setiap hari tanpa satu pun galat -- persis
+ * kelas kegagalan yang pemisahan daftar per konteks ada untuk mencegahnya.
+ *
+ * `{penyesuaian}` dan BUKAN `{ongkir}`: pada satu nota, nama itu menamai kolom
+ * Khanza yang mengisinya sehingga angkanya bisa ditelusuri; pada rekap ia sudah
+ * jumlah dari ratusan nota dan tidak menunjuk satu kolom pun. Terukur, isinya
+ * campuran pembulatan, potongan harga (sampai -Rp21.000), dan ongkos kirim.
+ *
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya: `{nama_pasien}`, `{no_rm}`,
+ * `{nama_pembeli}`. `penjualan` PUNYA `no_rkm_medis` dan `nm_pasien` -- berbeda
+ * dari ketiga nota barang lain -- jadi di sini ketiadaan variabelnya adalah
+ * KEPUTUSAN, bukan akibat bentuk tabel. Query-nya pun tidak pernah men-SELECT
+ * keduanya, sehingga merendernya mustahil dan bukan sekadar terlarang (§5.2).
+ *
+ * `{status_bayar}` juga tidak ada, dan itu diukur: `penjualan.status` bernilai
+ * 'Sudah Dibayar' pada SELURUH 16.793 baris. Rincian yang selamanya mengatakan
+ * hal yang sama mengajari pembacanya berhenti membaca.
+ *
+ * `{rincian_jenis}` masuk MULTILINE_VARIABLES di bawah -- aman HANYA karena
+ * `core/penjualanRekap.ts` memanggil sanitizeValue() sendiri untuk tiap nama
+ * jenis, dipatok unit test tersendiri di `penjualanRekap.test.ts`.
+ */
+export const REKAP_PENJUALAN_TEMPLATE_VARIABLES = [
+  'tanggal_rekap',
+  'jumlah_nota',
+  'jumlah_item',
+  'jumlah_barang',
+  'subtotal',
+  'penyesuaian',
+  'ppn',
+  'total',
+  'rincian_jenis',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
 
 /**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
@@ -517,6 +564,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...DARURAT_TEMPLATE_VARIABLES,
     ...PENGADAAN_TEMPLATE_VARIABLES,
     ...PENJUALAN_TEMPLATE_VARIABLES,
+    ...REKAP_PENJUALAN_TEMPLATE_VARIABLES,
     ...HIBAH_TEMPLATE_VARIABLES,
     ...PEMESANAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
@@ -533,6 +581,7 @@ export type TemplateVariable =
   | (typeof DARURAT_TEMPLATE_VARIABLES)[number]
   | (typeof PENGADAAN_TEMPLATE_VARIABLES)[number]
   | (typeof PENJUALAN_TEMPLATE_VARIABLES)[number]
+  | (typeof REKAP_PENJUALAN_TEMPLATE_VARIABLES)[number]
   | (typeof HIBAH_TEMPLATE_VARIABLES)[number]
   | (typeof PEMESANAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
@@ -597,6 +646,10 @@ const MULTILINE_VARIABLES = new Set<string>([
   // perakit baru lupa menyanitasi. Yang menambahkannya wajib menulis patokannya
   // sendiri, seperti ketiga yang sudah ada.
   'daftar_barang',
+  // Rekap harian penjualan (041). Dirakit `core/penjualanRekap.ts`, yang
+  // memanggil sanitizeValue() sendiri untuk tiap nama `jns_jual` -- patokannya
+  // ada di penjualanRekap.test.ts, sesuai kewajiban di atas.
+  'rincian_jenis',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

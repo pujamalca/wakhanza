@@ -129,6 +129,44 @@ describe('jatuhTempoHarian', () => {
   it('penanda kosong sama dengan belum pernah jalan', () => {
     expect(jatuhTempoHarian(jam9, 9, '')).toBe(true);
   });
+
+  /**
+   * `menitKirim` ditambahkan untuk rekap harian penjualan, yang jamnya disetel
+   * staf dalam bentuk HH:MM. Yang dijaga di sini BUKAN fitur barunya melainkan
+   * bahwa kedua pemanggil lama (pengingat kontrol BPJS dan non-BPJS) tidak
+   * berubah perilakunya sedikit pun -- keduanya menyerahkan jam bulat, dan
+   * pergeseran satu menit di sana berarti pengingat pasien yang meleset sehari
+   * pada hari-hari tertentu, tanpa satu pun galat.
+   */
+  describe('menitKirim', () => {
+    it('nilai bawaan 0 berperilaku persis seperti bentuk lama', () => {
+      // H*60+M < J*60 benar tepat ketika H < J, karena M selalu < 60.
+      for (const menit of [0, 1, 30, 59]) {
+        const sebelum = new Date(2026, 7, 5, 8, menit);
+        expect(jatuhTempoHarian(sebelum, 9, null)).toBe(false);
+        const sesudah = new Date(2026, 7, 5, 9, menit);
+        expect(jatuhTempoHarian(sesudah, 9, null)).toBe(true);
+      }
+    });
+
+    it('belum sampai menitnya -> belum jatuh tempo', () => {
+      expect(jatuhTempoHarian(new Date(2026, 7, 5, 21, 29), 21, null, 30)).toBe(false);
+    });
+
+    it('tepat pada menitnya -> jatuh tempo', () => {
+      expect(jatuhTempoHarian(new Date(2026, 7, 5, 21, 30), 21, null, 30)).toBe(true);
+    });
+
+    it('jam berikutnya tetap jatuh tempo walau menitnya lebih kecil', () => {
+      // Siklusnya 5 menit dan bisa terlewat; 22:05 harus tetap menjalankan
+      // jadwal 21:30, bukan menunggu besok.
+      expect(jatuhTempoHarian(new Date(2026, 7, 5, 22, 5), 21, null, 30)).toBe(true);
+    });
+
+    it('sudah jalan hari ini -> tidak diulang walau menitnya sudah lewat', () => {
+      expect(jatuhTempoHarian(new Date(2026, 7, 5, 23, 0), 21, '2026-08-05', 30)).toBe(false);
+    });
+  });
 });
 
 describe('tanggalLokal', () => {

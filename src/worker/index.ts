@@ -18,6 +18,7 @@ import { runDueStokDarurat } from './stokDaruratRunner';
 import { runSuratOtomatisCycle } from './suratRunner';
 import { runPengadaanCycle } from './pengadaanRunner';
 import { runPenjualanCycle } from './penjualanRunner';
+import { runPenjualanRekapIfDue } from './penjualanRekapRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
@@ -491,6 +492,31 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('penjualan', runPenjualanCycle, scanIntervalMs);
+  /**
+   * REKAP HARIAN PENJUALAN -- siklus TERPISAH dari `penjualan` tepat di atasnya,
+   * dan pemisahan itu lebih tajam daripada keenam pemisahan farmasi sebelumnya.
+   *
+   * Yang di atas kelas PINDAI (jendela dibaca ulang, dipicu baris baru di `sik`);
+   * yang ini kelas WAKTU (dipicu jam dinding, seperti `bpjs-kontrol` dan
+   * `stok-darurat`). Dua kelas pemicu berbeda di satu siklus berarti kegagalan
+   * salah satunya menjatuhkan yang lain -- dan di sini taruhannya bukan simetris:
+   * `runPenjualanCycle` BERHENTI TOTAL saat jendelanya terbaca penuh, jadi satu
+   * siklus gabungan akan membuat rekap harian ikut hilang karena sebab yang tidak
+   * ada hubungannya dengannya.
+   *
+   * Sakelarnya pun berdiri sendiri (`farmasi.penjualan_rekap_enabled` BUKAN anak
+   * dari `farmasi.penjualan_enabled`), justru supaya RS bisa memilih rekap saja
+   * tanpa 16-46 pesan sehari. Siklus gabungan akan membuat pilihan itu mustahil.
+   *
+   * Interval pindai, bukan poller: yang dikerjakan tiap siklus cuma membaca satu
+   * pengaturan dan membandingkan jam. Pembacaan `sik` yang sesungguhnya (2-33 ms)
+   * baru terjadi pada siklus yang benar-benar jatuh tempo, dan penandanya
+   * dimajukan sesudahnya supaya itu sekali sehari alih-alih tiap siklus.
+   *
+   * Ia menjaga sakelarnya sendiri (default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('penjualan-rekap', runPenjualanRekapIfDue, scanIntervalMs);
   void dispatcherLoop();
   /**
    * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan

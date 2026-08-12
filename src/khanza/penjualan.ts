@@ -1,6 +1,7 @@
 import { sikSelect } from '@/db/sik';
 import { registerPlanCheck } from './planChecks';
 import type { BarisPenjualan, BarisDetailPenjualan, RingkasPenjualan } from '@/core/penjualan';
+import type { BarisRekapHeader, BarisRekapItem } from '@/core/penjualanRekap';
 
 /**
  * PENJUALAN OBAT, ALKES & BHP -- nota penjualan apotek.
@@ -329,5 +330,126 @@ registerPlanCheck({
   name: 'FARMASI_PENJUALAN_DETAIL_HARGA',
   sql: buildDetailSql(true),
   replacements: { notas: ['PJ20260811020'] },
+  maxRows: 5000,
+});
+
+/* ==========================================================================
+ * REKAP HARIAN (migrations/041)
+ *
+ * Ditaruh di berkas INI, bukan di `khanza/penjualanRekap.ts` tersendiri, dan itu
+ * keputusan yang disengaja: yang paling penting untuk dijaga di seluruh keluarga
+ * penjualan adalah pagar privasi di kepala berkas ini, dan pagar itu berbunyi
+ * "JANGAN menambahkan satu pun dari kolom itu ke query di bawah". Berkas kedua
+ * berarti tempat kedua yang bisa menambahkan `nm_pasien` tanpa pernah membaca
+ * kalimatnya. Menyatukannya membuat pagar itu berlaku secara FISIK, bukan lewat
+ * ingatan penulis berikutnya.
+ *
+ * Kelas pemicunya berbeda (WAKTU, bukan pindai) dan itu memang alasan yang wajar
+ * untuk memisah berkas -- tapi kelas pemicu tinggal di runner, sementara yang
+ * tinggal di sini cuma bentuk SQL-nya, dan bentuk SQL-nya menyentuh tabel yang
+ * sama persis dengan pagar yang sama persis.
+ *
+ * DUA query, bukan satu, dan penggabungannya sengaja di `core/penjualanRekap.ts`.
+ * Satu query yang menjoinkan `penjualan` dengan `detailjual` lalu menjumlahkan
+ * SEMUANYA akan menggandakan `ppn` dan `ongkir` sebanyak barang di dalam tiap
+ * nota -- sebuah nota berisi 5 barang menyumbang penyesuaiannya LIMA KALI, tanpa
+ * satu pun galat. Lihat `gabungRekap()`.
+ * ========================================================================== */
+
+/**
+ * Agregat tingkat NOTA untuk satu hari, dikelompokkan per jenis penjualan.
+ *
+ * Hanya COUNT dan SUM; tidak satu pun baris per-transaksi meninggalkan SQL, dan
+ * tidak satu pun kolom pasien disebut. Sifat agregatnya BUKAN yang menjaga --
+ * yang menjaga tetap daftar SELECT yang tidak pernah memuatnya (§5.2).
+ *
+ * `GROUP BY p.jns_jual` dan bukan `ORDER BY` apa pun: urutan barisnya ditentukan
+ * hasil penggabungan dua query ini, jadi tidak satu pun dari keduanya bisa
+ * mengurutkannya dengan benar sendirian.
+ */
+function buildRekapHeaderSql(): string {
+  return `
+    SELECT
+      COALESCE(p.jns_jual, '')        AS jns_jual,
+      COUNT(*)                        AS jml_nota,
+      COALESCE(SUM(p.ppn), 0)         AS ppn,
+      COALESCE(SUM(p.ongkir), 0)      AS penyesuaian
+    FROM penjualan p
+    WHERE p.nota_jual >= :awalPrefix AND p.nota_jual <= :akhirPrefix
+    GROUP BY p.jns_jual
+  `;
+}
+
+/**
+ * Agregat tingkat BARANG untuk satu hari, dikelompokkan per jenis penjualan.
+ *
+ * `jns_jual` hanya ada di `penjualan`, jadi join-nya memang perlu -- dan MariaDB
+ * membalik arahnya sendiri: terukur `p` sebagai penggerak (`range PRIMARY`) lalu
+ * `d` lewat `ref nota_jual`. Penyaringnya sengaja tetap ditulis pada `d.nota_jual`
+ * seperti saat diukur; keduanya disamakan oleh join, dan bentuk yang berbeda dari
+ * yang diperiksa adalah bentuk yang belum diperiksa.
+ *
+ * `SUM(d.total)` dan bukan `SUM(d.subtotal)` -- kolom yang benar, dan itu diukur:
+ * `total = subtotal - bsr_dis + tambahan + embalase + tuslah` pada SELURUH 29.852
+ * baris, jadi hanya `total` yang sudah memperhitungkan potongan dan embalase.
+ */
+function buildRekapItemSql(): string {
+  return `
+    SELECT
+      COALESCE(p.jns_jual, '')        AS jns_jual,
+      COUNT(*)                        AS jml_baris,
+      COALESCE(SUM(d.jumlah), 0)      AS jml_barang,
+      COALESCE(SUM(d.total), 0)       AS subtotal
+    FROM detailjual d
+    JOIN penjualan p ON p.nota_jual = d.nota_jual
+    WHERE d.nota_jual >= :awalPrefix AND d.nota_jual <= :akhirPrefix
+    GROUP BY p.jns_jual
+  `;
+}
+
+/**
+ * Agregat satu hari penuh.
+ *
+ * Batas harinya prefiks `no_nota` yang sama dipakai jendela pindai, dan sekali
+ * lagi ia EKSAK: 16.787 dari 16.787 baris berprefiks sesuai `tgl_jual`, nol
+ * menyimpang ke kedua arah. Jadi "penjualan tanggal X" di sini benar-benar
+ * berarti penjualan tanggal X -- bukan perkiraan yang dilebarkan margin.
+ *
+ * Keduanya mengembalikan `[]` untuk hari tanpa satu nota pun (dibuktikan atas
+ * 2026-08-09 di database ini), jadi "tidak ada penjualan" adalah keadaan yang
+ * tidak ambigu -- bukan baris berisi nol yang bisa tertukar dengan hari yang
+ * gagal dibaca.
+ */
+export async function rekapPenjualanHarian(
+  tanggal: string,
+): Promise<{ header: BarisRekapHeader[]; item: BarisRekapItem[] }> {
+  const rep = { awalPrefix: prefixNota(tanggal, false), akhirPrefix: prefixNota(tanggal, true) };
+  const [header, item] = await Promise.all([
+    sikSelect<BarisRekapHeader>(buildRekapHeaderSql(), rep),
+    sikSelect<BarisRekapItem>(buildRekapItemSql(), rep),
+  ]);
+  return { header, item };
+}
+
+/**
+ * TANPA izin pindai penuh, dan itu tidak akan berubah saat tabelnya membesar:
+ * `nota_jual` adalah PRIMARY KEY `penjualan` dan indeks pada `detailjual`, jadi
+ * rentang satu hari selalu jatuh sebagai `range`. Terukur `range PRIMARY` (33
+ * baris) dan `range PRIMARY` + `ref nota_jual`.
+ *
+ * `Using temporary; Using filesort` pada keduanya berasal dari `GROUP BY` atas
+ * hasil rentang yang sudah kecil (puluhan baris), bukan dari pemindaian tabel.
+ */
+registerPlanCheck({
+  name: 'FARMASI_PENJUALAN_REKAP_HEADER',
+  sql: buildRekapHeaderSql(),
+  replacements: { awalPrefix: prefixNota('2026-08-11', false), akhirPrefix: prefixNota('2026-08-11', true) },
+  maxRows: 5000,
+});
+
+registerPlanCheck({
+  name: 'FARMASI_PENJUALAN_REKAP_ITEM',
+  sql: buildRekapItemSql(),
+  replacements: { awalPrefix: prefixNota('2026-08-11', false), akhirPrefix: prefixNota('2026-08-11', true) },
   maxRows: 5000,
 });

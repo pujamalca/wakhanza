@@ -455,13 +455,13 @@ Isi yang benar-benar terkirim (dibaca lewat Sequelize; konsol `mysql` merusak UT
 
 ```
 *Pengadaan Barang Medis*
-DPP INTAN RAHMA DEWI & APOTEK ALCA
+«nama RS»
 
 No. Faktur : PG20260807001
 Tanggal : 07-08-2026
-Pemasok : CV DURGA JAYA MEDIKA
+Pemasok : «nama pemasok»
 Gudang : Apotek
-Petugas : Apt. Amelia Eriska, S.Farm
+Petugas : «nama petugas»
 
 *Barang (3):*
 • Easy Touch Strip Gula — 75 Botol @ Rp3.600 = Rp270.000
@@ -1201,6 +1201,197 @@ Baris terakhir layak disebut tersendiri -- nol di sana bukan kegagalan melainkan
 **Belum ada satu pun pesan penjualan yang benar-benar terkirim ke WhatsApp.** `farmasi.penjualan_enabled` MATI dan `terima_penjualan` belum dicentang pada satu tujuan pun -- menyalakannya berarti mengirim puluhan pesan sehari ke grup sungguhan, dan itu keputusan RS (lihat "Yang masih perlu keputusan rumah sakit"). Yang bisa gagal diam sudah dipagari dari sisi lain: seluruh keputusan pembatalannya ada di fungsi murni yang diuji berikut bukti menggigitnya, query-nya terbukti atas 16.787 baris produksi, dan jalur enqueue-nya `enqueueMessage()` yang sama dipakai empat belas kelas pemicu lain.
 
 **Pembatalan SUNGGUHAN (nota dihapus lewat layar Khanza) belum pernah terjadi selama fitur ini hidup.** Yang diuji adalah perbandingannya terhadap jendela sungguhan dengan baris pantau yang disuntik -- itu membuktikan logikanya, bukan bahwa staf yang menghapus nota di Khanza benar-benar menghasilkan baris yang hilang. Yang menopang keyakinan itu terukur: 17 dari 22 nota ber-`status='Hapus'` di `riwayat_barang_medis` memang sudah tidak ada di `penjualan`.
+
+## Rekap harian penjualan (`migrations/041`) -- dipicu WAKTU, dan sakelarnya sengaja tidak bertingkat
+
+### Jam bawaan 21:00 -- diukur, bukan dipilih
+
+`penjualan` tidak punya kolom jam sama sekali, jadi kapan transaksi benar-benar terjadi dibaca dari `riwayat_barang_medis` (`posisi='Penjualan'`, `status='Simpan'`, 90 hari terakhir, 3.603 baris):
+
+```
+jam  8 -> 126     jam 13 -> 412     jam 18 -> 430
+jam  9 ->  21     jam 14 -> 472     jam 19 -> 904   <- puncaknya
+jam 10 ->  27     jam 15 -> 457     jam 20 ->  59
+jam 11 -> 159     jam 16 -> 341     jam 21 ->   0
+jam 12 ->  48     jam 17 -> 147
+```
+
+Transaksi TERAKHIR per hari (14 hari terakhir) teramati 19:19, 19:00, 18:42, 18:41, 15:41, 14:25, 13:56, 13:50, 13:28, 12:49, 11:52.
+
+Jam 21 adalah jam pertama yang NOL sepanjang 90 hari. Rekap jam 18:00 -- angka yang paling wajar dikira "sore, sesudah jam kerja" -- akan rutin melewatkan jam 18 dan 19, yaitu 1.334 dari 3.603 baris (37%).
+
+### `ongkir` bukan sekadar pembulatan -- label 040 diperbaiki karena pengukuran ULANG
+
+Sebaran atas SELURUH 16.787 nota:
+
+```
+null      0
+= 0      12.848
+> 0       3.565   (157 di antaranya > Rp1.000; maksimum +20.000)
+< 0         380   ( 30 di antaranya < -Rp1.000; minimum -21.000)
+```
+
+Yang negatif terbukti POTONGAN HARGA, bukan pembulatan -- diperiksa terhadap `SUM(detailjual.total)`:
+
+```
+ongkir  -21.000   subtotal 159.500  ->  total 138.500
+ongkir  -18.000   subtotal  50.000  ->  total  32.000
+ongkir  -15.000   subtotal 125.000  ->  total 110.000
+ongkir  -13.000   subtotal 147.000  ->  total 134.000
+ongkir  -11.670   subtotal 442.170  ->  total 430.500
+```
+
+Diskon 13% yang dicetak di bawah label "Pembulatan" terbaca sebagai sistem rusak. Migrasi 041 menggantinya lewat `REPLACE()` atas teks yang persis, dan dibuktikan berlaku pada template yang SUDAH HIDUP di produksi:
+
+```
+Subtotal : {subtotal}
+Penyesuaian : {ongkir}      <- sebelumnya "Pembulatan/ongkir : {ongkir}"
+PPN : {ppn}
+*Total : {total}*
+```
+
+### `{status_bayar}` sengaja tidak ada -- diukur
+
+```sql
+SELECT status, COUNT(*) FROM penjualan GROUP BY status;
+-- 'Sudah Dibayar'  16.793     (satu-satunya nilai)
+```
+
+Rincian lunas-vs-piutang akan jadi baris yang selamanya mengatakan hal yang sama.
+
+### Rencana query: `range` pada keduanya, TANPA izin pindai penuh
+
+```
+[ok] FARMASI_PENJUALAN_REKAP_HEADER  p  range PRIMARY    rows~33
+[ok] FARMASI_PENJUALAN_REKAP_ITEM    p  range PRIMARY    rows~33
+[ok] FARMASI_PENJUALAN_REKAP_ITEM    d  ref   nota_jual  rows~1
+verify:plans lolos.
+```
+
+Optimizer membalik arah join sendiri: penyaringnya ditulis pada `d.nota_jual`, dan MariaDB menggerakkannya dari `penjualan` lewat PRIMARY. Terukur 2-33 ms untuk kedua query sekaligus. `Using temporary; Using filesort` berasal dari `GROUP BY` atas hasil rentang yang sudah puluhan baris, bukan dari pemindaian tabel.
+
+`verify:db` tetap lolos (`sik` menolak tulisan, `audit_log` menolak UPDATE/DELETE).
+
+### Rekap atas data produksi sungguhan -- `npm run dryrun:penjualan`
+
+```
+=== REKAP HARIAN -- tanggal 2026-08-12 (offset 0 hari) ===
+  kolom terbaca: jns_jual, jml_nota, ppn, penyesuaian, jml_baris, jml_barang, subtotal
+  [ok] tidak ada kolom pasien/keterangan/dosis yang terbaca
+  11 nota, 18 baris, 130 barang; subtotal 227983, penyesuaian 917, ppn 0, total 228900
+
+*Rekap Penjualan Harian*
+«nama RS»
+
+Tanggal : 12-08-2026
+
+Jumlah nota : 11
+Jumlah barang : 130 (18 baris)
+
+Subtotal : Rp227.983
+Penyesuaian : Rp917
+PPN : Rp0
+*Total : Rp228.900*
+
+*Rincian per jenis:*
+• Jual Bebas : 10 nota, Rp222.203
+• Karyawan : 1 nota, Rp6.697
+
+Dikirim : Rabu, 12 Agustus 2026 14.34
+
+Kode Pengiriman : 2026-08-12 14:34:03 S0VSWT
+```
+
+Dua pemeriksaan aritmetika yang menutup penggabungan dua query itu: `227.983 + 917 + 0 = 228.900` (total keseluruhan), dan `222.203 + 6.697 = 228.900` (rincian per jenis berjumlah sama dengan totalnya).
+
+**Pagar privasi diperiksa pada `Object.keys()` baris HASILNYA**, bukan dengan membaca SQL: tujuh kolom terbaca, tidak satu pun dari `no_rkm_medis` / `nm_pasien` / `keterangan` / `nama_bayar` / `aturan_pakai`.
+
+### Cabang "hari kosong" dibuktikan lewat fungsi produksinya
+
+`susunRekapHarian()` dijalankan atas lima hari berturut-turut:
+
+```
+offset 0  2026-08-12  nota= 11  kosong=false  body=290 karakter
+offset 1  2026-08-11  nota= 33  kosong=false  body=290 karakter
+offset 2  2026-08-10  nota= 33  kosong=false  body=290 karakter
+offset 3  2026-08-09  nota=  0  kosong=true   body=null (DIAM)
+offset 4  2026-08-08  nota=  9  kosong=false  body=290 karakter
+```
+
+`body = null` pada 2026-08-09 adalah cabang "tidak ada penjualan DAN pesan kosong sengaja dibiarkan diam".
+
+### Siklusnya benar-benar terpasang di worker -- dibuktikan TANPA mengirim apa pun
+
+Bentuk kegagalan yang perlu ditutup: sakelarnya muncul di dashboard sementara worker tidak pernah menjalankan siklusnya -- gagal DIAM, persis jebakan yang tercatat untuk `migrations/038`.
+
+Membuktikannya tanpa mengirim pesan sungguhan memakai hari yang TERBUKTI nol nota di atas: sakelar dinyalakan sementara dengan `jam = 00:01` (sudah lewat), `offset = 3` (menunjuk 2026-08-09), penanda dikosongkan. Dengan begitu runner melewati SELURUH jalurnya -- baca sakelar, periksa kejatuhtempoan, muat tujuan, baca `sik`, putuskan -- lalu berhenti di cabang diam.
+
+Pengaturannya ditulis langsung lewat `setSetting`, sengaja TIDAK lewat `toggleRekapPenjualanAction`, supaya tidak ada baris `audit_log` yang mengaku seorang admin mengambil keputusan kebijakan.
+
+Hasilnya, satu baris di log worker dan tidak ada yang lain:
+
+```json
+{"level":30,"pid":5496,"tanggalRekap":"2026-08-09",
+ "msg":"rekap penjualan: tidak ada penjualan hari itu dan pesan kosong tidak diisi, lewati"}
+```
+
+Baris itu membuktikan SELURUH jalurnya dilewati: sakelar dibaca, kejatuhtempoan lolos, tujuan dimuat (kalau tidak, yang muncul adalah `warn` "belum ada tujuan yang mencentang"), `sik` dibaca untuk 2026-08-09, dan cabang diam diambil.
+
+**Penanda harian dibuktikan maju sesudahnya**, yaitu jalur "dimajukan sesudah berhasil, termasuk saat berhasilnya adalah sengaja diam":
+
+```
+farmasi.penjualan_rekap_last_run   ""  ->  "2026-08-12"
+```
+
+Sesudah dua siklus, `outbox` berisi **0 baris** ber-`trigger_code = 'FARMASI_PENJUALAN_REKAP'` -- tidak satu pun pesan dibuat, apalagi dikirim. Seluruh nilainya lalu dikembalikan ke bawaan (`enabled=0`, `jam=21:00`, `offset=0`, penanda kosong) dan dibaca ulang untuk memastikan.
+
+**Satu kekeliruan verifikasi yang layak dicatat**, karena bentuknya persis yang berulang di proyek ini: pembacaan penanda pertama dilakukan dengan menjalankan ulang skrip yang SAMA yang memasang setelan ujinya. Skrip itu punya efek samping -- ia menulis penandanya kembali ke kosong -- sehingga `""` yang terbaca adalah tulisan saya sendiri, bukan keadaan yang ditinggalkan worker. Angka yang tampak seperti pengukuran padahal hasil tindakan sendiri; pelajaran yang sama dengan `information_schema.TABLE_ROWS` di 030 dan `luas.length` di dryrun 040. Pembacaannya diulang dengan skrip yang HANYA membaca.
+
+### Gerbang label menggigit pada pemicu baru
+
+`labels.test.ts` (dibuat sesi sebelumnya) membaca konstanta `TRIGGER_*` dari `src/worker/*.ts` lalu menuntut tiap kode punya label manusianya. Ini pemakaian pertamanya atas pemicu yang benar-benar baru:
+
+```
+label dihapus sementara
+  × setiap pemicu yang dipakai runner punya label manusianya
+Tests: 1 failed, 10 passed, 11 total
+
+=== PULIHKAN ===
+Tests: 11 passed, 11 total
+```
+
+### `menitKirim` tidak menggeser kedua pemanggil lama
+
+`jatuhTempoHarian()` dipakai bersama tiga runner; parameter menit ditambahkan untuk HH:MM. Yang dijaga bukan fitur barunya melainkan bahwa pengingat kontrol BPJS dan non-BPJS tidak bergeser semenit pun: uji memeriksa menit 0/1/30/59 pada jam sebelum dan sesudah batas, dan seluruh 11 uji `bpjs.test.ts` yang lama tetap lolos tanpa satu asersi pun diubah.
+
+### Pemeriksaan menyeluruh
+
+```
+tsc --noEmit          bersih
+eslint .              bersih
+npm test              46 suite, 781 uji lolos   (dari 45 suite / 746 uji)
+npm run test:int      3 suite, 46 uji lolos
+npm run verify:db     lolos
+npm run verify:plans  lolos
+npm run build         berhasil
+npm run migrate       041 diterapkan
+```
+
+Grant tidak diperlukan: 041 tidak membuat tabel baru, hanya menambah baris `app_setting` (tabel yang grant-nya sudah ada) dan satu `UPDATE` atas baris yang sudah ada.
+
+### Pemasangan
+
+`wakhanza-web` dimulai ulang; ketiga penanda fitur baru ada di build (`Rekap penjualan harian` 2 berkas, `penjualan_rekap_jam` 9, `rincian_jenis` 10).
+
+`wakhanza-worker` dimulai ulang lewat prosedur tiga langkah: `pm2 stop` -> `Get-CimInstance Win32_Process ... wwebjs_auth` menghasilkan **0 proses tersisa** -> `pm2 start`. Sesudahnya `wa_session.status = ready`, denyut 28 detik (ambang basi 40 detik), `last_error` kosong, penghitung restart tetap 9 (tidak ada kaskade).
+
+Restart ini WAJIB dan bukan kehati-hatian: tanpa itu sakelar rekapnya muncul di dashboard sementara worker tidak pernah menjalankan siklusnya.
+
+### Yang TIDAK diverifikasi, dan kenapa itu bisa diterima
+
+**Rekap sungguhan belum pernah terkirim ke grup.** Mengirimnya berarti menyalakan `farmasi.penjualan_rekap_enabled` untuk hari yang berisi penjualan, dan itu keputusan RS -- lihat §"Yang masih perlu keputusan rumah sakit". Yang bisa gagal DIAM sudah dipagari dari sisi lain: teks pesannya dirender atas data produksi sungguhan lewat fungsi yang sama dipakai worker (di atas), jalur enqueue-nya `enqueueMessage()` yang sama dipakai ketujuh pemicu farmasi lain, dan tujuannya daftar yang sama yang sudah terbukti menerima nota penjualan hari ini.
+
+**Cabang "sudah jalan hari ini, tidak diulang" belum teramati di produksi.** Ia dipatok unit test (`jatuhTempoHarian`), dan penjaga sesungguhnya bukan penanda itu melainkan `uq_idem` di mesin database.
 
 ## Kelas keempat belas: DOKUMEN HASIL (`migrations/038`) -- ISI pemeriksaan, bukan kabar tentangnya
 

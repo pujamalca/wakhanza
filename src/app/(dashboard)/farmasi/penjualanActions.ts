@@ -2,9 +2,16 @@
 
 import { revalidatePath } from 'next/cache';
 import { FarmasiTarget, logAudit, setSetting, getSetting, getSettingBool, getSettingNumber } from '@/models';
-import { findUnknownVariables, PENJUALAN_TEMPLATE_VARIABLES, renderTemplate } from '@/core/template';
+import {
+  findUnknownVariables,
+  PENJUALAN_TEMPLATE_VARIABLES,
+  REKAP_PENJUALAN_TEMPLATE_VARIABLES,
+  renderTemplate,
+} from '@/core/template';
 import { hitungJendelaPindai } from '@/core/jendelaPindai';
 import { kelompokkanDetailJual } from '@/core/penjualan';
+import { bacaJamRekap, hariRekap, tulisJamRekap } from '@/core/penjualanRekap';
+import { susunRekapHarian } from '@/worker/penjualanRekapRunner';
 import {
   pollPenjualanJendela,
   ambilRingkasPenjualan,
@@ -275,5 +282,175 @@ export async function pratinjauPenjualanAction(
     };
   } catch (err) {
     return { error: `Gagal membaca data penjualan: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/* ==========================================================================
+ * REKAP HARIAN (migrations/041)
+ *
+ * Aksinya di berkas yang SAMA dengan nota per-nota: keduanya dikelola di tab
+ * yang sama, memakai daftar tujuan yang sama (`terima_penjualan`), dan menyentuh
+ * tabel Khanza yang sama. Yang berbeda cuma kelas pemicunya, dan itu tinggal di
+ * runner.
+ * ========================================================================== */
+
+export interface HasilPratinjauRekap {
+  error?: string;
+  teks?: string;
+  /** Tanggal yang dibaca -- WAJIB ditampilkan, lihat pratinjaunya di bawah. */
+  tanggal?: string;
+  jumlahNota?: number;
+  /**
+   * Hari itu tidak ada penjualan DAN pesan kosongnya sengaja dibiarkan diam.
+   * Bukan galat, tapi harus dikatakan -- kalau tidak, pratinjau yang tidak
+   * menampilkan apa pun terbaca sebagai fitur yang rusak.
+   */
+  diam?: boolean;
+}
+
+/**
+ * Sakelar rekap, dicatat sebagai peristiwa audit tersendiri.
+ *
+ * TANPA lantai aktivasi, dan itu bukan kelalaian: lantai ada untuk menahan
+ * ARSIP: pemicu kelas pindai membaca jendela berhari-hari ke belakang, jadi
+ * menyalakannya tanpa lantai membongkar seluruh isi jendela sekaligus. Rekap
+ * harian hanya pernah membaca SATU hari -- hari yang ditentukan offset saat ia
+ * jatuh tempo -- sehingga tidak ada arsip yang bisa terbongkar. Menambahkan
+ * lantai di sini cuma akan jadi pagar yang tidak menahan apa pun, dan pagar
+ * seperti itu mengajari pembacanya bahwa pagar boleh dekoratif.
+ */
+export async function toggleRekapPenjualanAction(enabled: boolean): Promise<void> {
+  const { session, response } = await requireRole('admin');
+  if (response) return;
+
+  await setSetting('farmasi.penjualan_rekap_enabled', enabled ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'penjualan_rekap_toggle',
+    'farmasi.penjualan_rekap_enabled',
+    enabled ? 'nyala' : 'mati',
+  );
+  segarkan();
+}
+
+export async function simpanRekapPenjualanAction(
+  _prev: HasilPenjualan,
+  formData: FormData,
+): Promise<HasilPenjualan> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const jamRaw = String(formData.get('penjualan_rekap_jam') ?? '');
+  const offset = Number(formData.get('penjualan_rekap_offset_hari'));
+  const template = String(formData.get('template_penjualan_rekap') ?? '');
+  const templateKosong = String(formData.get('template_penjualan_rekap_kosong') ?? '');
+
+  /**
+   * Jam ditolak di DEPAN orang yang bisa memperbaikinya seketika.
+   *
+   * Worker sengaja lebih pemaaf (jatuh ke jam bawaan berikut `warn`), dan
+   * pembagian itu disengaja: di sini ada manusia yang menunggu jawaban, di sana
+   * tidak ada siapa-siapa pukul sembilan malam. Pola yang sama dengan
+   * `bacaHariSebelum()` pada pengingat kontrol.
+   */
+  const jam = bacaJamRekap(jamRaw);
+  if (!jam) {
+    return { error: 'Jam kirim harus berbentuk HH:MM, mis. 21:00.' };
+  }
+
+  /**
+   * Offset dijepit 0-7. Batas atasnya bukan kerapian: rekap yang menoleh lebih
+   * dari sepekan ke belakang bukan lagi rekap harian melainkan laporan, dan
+   * angka besar yang tidak sengaja terketik menghasilkan rekap yang isinya benar
+   * tapi menyebut hari yang tidak dipikirkan siapa pun.
+   */
+  if (!Number.isFinite(offset) || offset < 0 || offset > 7) {
+    return { error: 'Hari yang direkap harus antara 0 (hari ini) dan 7.' };
+  }
+
+  if (!template.trim()) {
+    return { error: 'Isi pesan rekap tidak boleh kosong — tanpa itu rekap terkirim sebagai pesan hampa.' };
+  }
+
+  // Ditolak SAAT DISIMPAN, bukan saat kirim (ARCHITECTURE §5.3).
+  for (const [nama, isi] of [
+    ['Isi pesan rekap', template],
+    ['Isi pesan saat tidak ada penjualan', templateKosong],
+  ] as const) {
+    if (!isi.trim()) continue;
+    const takDikenal = findUnknownVariables(isi, REKAP_PENJUALAN_TEMPLATE_VARIABLES);
+    if (takDikenal.length > 0) {
+      return {
+        error: `${nama}: variabel tidak dikenal ${takDikenal.map((v) => `{${v}}`).join(', ')}. Yang tersedia: ${REKAP_PENJUALAN_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(' ')}`,
+      };
+    }
+  }
+
+  await setSetting('farmasi.penjualan_rekap_jam', tulisJamRekap(jam));
+  await setSetting('farmasi.penjualan_rekap_offset_hari', String(Math.floor(offset)));
+  await setSetting('farmasi.template_penjualan_rekap', template);
+  await setSetting('farmasi.template_penjualan_rekap_kosong', templateKosong);
+  await logAudit(
+    session!.user.username,
+    'penjualan_rekap_pesan',
+    'farmasi.template_penjualan_rekap',
+    `jam ${tulisJamRekap(jam)}; offset ${Math.floor(offset)} hari; pesan saat kosong: ${templateKosong.trim() ? 'diisi' : 'diam'}`,
+  );
+  segarkan();
+  return { sukses: 'Pengaturan rekap penjualan tersimpan.' };
+}
+
+/**
+ * Pratinjau rekap atas hari yang BENAR-BENAR akan dibaca worker.
+ *
+ * Memakai `susunRekapHarian()` yang SAMA dipakai worker, dan membaca nilai
+ * TERSIMPAN -- bukan isi kotak yang sedang diketik. Pilihan yang sama dengan
+ * pratinjau nota di atasnya: yang perlu dibuktikan staf adalah apa yang akan
+ * dikirim WORKER, dan worker membaca `app_setting`.
+ *
+ * Tanggal yang dibaca WAJIB ikut ditampilkan. Tanpa itu, rekap yang isinya
+ * mengejutkan (nyaris kosong pada pukul sembilan pagi karena offsetnya 0) tidak
+ * bisa dibedakan dari query yang salah -- dan yang pertama justru keadaan yang
+ * benar, cuma setelan offsetnya yang belum cocok dengan jam kirimnya.
+ */
+export async function pratinjauRekapPenjualanAction(
+  _prev: HasilPratinjauRekap,
+  _formData: FormData,
+): Promise<HasilPratinjauRekap> {
+  const { response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const [template, offset] = await Promise.all([
+    getSetting('farmasi.template_penjualan_rekap', ''),
+    getSettingNumber('farmasi.penjualan_rekap_offset_hari', 0),
+  ]);
+  if (!template?.trim()) return { error: 'Isi pesan rekap masih kosong. Simpan isi pesannya lebih dulu.' };
+
+  const sekarang = new Date();
+  const tanggal = hariRekap(sekarang, offset);
+
+  try {
+    const hasil = await susunRekapHarian(tanggal, sekarang);
+    if (hasil.body === null) {
+      return { tanggal, jumlahNota: 0, diam: true };
+    }
+
+    /**
+     * Identitas RS disisipkan sebagai DASAR, persis seperti `enqueueMessage`.
+     * Tanpa ini `{nama_rs}` tampil kosong di pratinjau padahal terisi saat
+     * benar-benar dikirim, dan staf yang melihatnya wajar menyimpulkan
+     * variabelnya tidak jalan lalu membuangnya dari template.
+     */
+    const identitas = await getHospitalIdentity();
+    const teks = renderTemplate(hasil.body, {
+      nama_rs: identitas.namaRs,
+      alamat_rs: identitas.alamatRs,
+      kontak_rs: identitas.kontakRs,
+      ...hasil.vars,
+    });
+
+    return { teks, tanggal, jumlahNota: hasil.ringkas.jmlNota };
+  } catch (err) {
+    return { error: `Gagal membaca rekap penjualan: ${err instanceof Error ? err.message : String(err)}` };
   }
 }

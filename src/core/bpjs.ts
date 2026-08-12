@@ -135,9 +135,38 @@ export function labelSisaHari(hariSebelum: number): string {
  * diperlakukan sebagai belum jalan hari ini -- kalau tidak, satu kekeliruan jam
  * bisa mendiamkan pengingat sampai tanggal itu benar-benar tiba, dan itu bisa
  * berhari-hari tanpa satu pun tanda.
+ *
+ * ==========================================================================
+ * Dipakai DI LUAR BPJS juga, dan sengaja tidak disalin ke sana
+ * ==========================================================================
+ *
+ * Tiga pemanggil sekarang: pengingat kontrol BPJS, pengingat kontrol non-BPJS
+ * (`kontrolUlangRunner`), dan rekap harian penjualan (`penjualanRekapRunner`).
+ * Ketiganya menjawab pertanyaan yang sama persis -- "apakah pekerjaan harian ini
+ * sudah waktunya jalan, dan apakah ia sudah jalan hari ini" -- dan dua penurunan
+ * untuk itu adalah dua tempat yang cepat atau lambat berbeda tafsir soal penanda
+ * masa depan atau soal batas jamnya. Bentuk kegagalan yang sudah berkali-kali
+ * dibayar di proyek ini (`respectsOptOut()`, `core/outboxStatus.ts`,
+ * `kunciPesanMasuk()`, `core/tujuanPemicu.ts`).
+ *
+ * Ia tetap tinggal di berkas ini alih-alih dipindah ke modul netral: memindahkannya
+ * berarti menyentuh impor dua runner yang sedang berjalan demi perbaikan nama
+ * belaka. Kalau suatu saat ada pemanggil keempat, itu saat yang tepat untuk
+ * memindahkannya -- bersama seluruh pemanggilnya sekaligus.
+ *
+ * `menitKirim` ditambahkan untuk rekap penjualan, yang jamnya disetel staf dalam
+ * bentuk HH:MM. Bawaannya 0, dan pada nilai itu hasilnya IDENTIK dengan bentuk
+ * lamanya (`H*60+M < J*60` benar tepat ketika `H < J`, karena M selalu < 60) --
+ * jadi kedua pemanggil lama tidak berubah perilakunya sedikit pun.
  */
-export function jatuhTempoHarian(sekarang: Date, jamKirim: number, penandaTerakhir: string | null): boolean {
-  if (sekarang.getHours() < jamKirim) return false;
+export function jatuhTempoHarian(
+  sekarang: Date,
+  jamKirim: number,
+  penandaTerakhir: string | null,
+  menitKirim = 0,
+): boolean {
+  const menitSekarang = sekarang.getHours() * 60 + sekarang.getMinutes();
+  if (menitSekarang < jamKirim * 60 + menitKirim) return false;
   const hariIni = tanggalLokal(sekarang);
   if (!penandaTerakhir) return true;
   return penandaTerakhir !== hariIni;
