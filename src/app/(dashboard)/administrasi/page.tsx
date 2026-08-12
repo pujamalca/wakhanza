@@ -1,7 +1,13 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { getSetting, getSettingBool, getSettingJson, getSettingNumber } from '@/models';
-import { cariSuratSakit, cariKunjunganSehat } from '@/khanza/suratPasien';
+import {
+  cariSuratSakit,
+  cariKunjunganSehat,
+  hitungSuratSakit,
+  hitungKunjunganSehat,
+} from '@/khanza/suratPasien';
+import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN, type Paginasi } from '@/core/pagination';
 import { normalizePhone, type PhoneRejectReason } from '@/core/phone';
 import { formatTanggalSurat, isianSurat } from '@/core/suratDoc';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
@@ -28,7 +34,7 @@ import {
   PESAN_BAWAAN as PESAN_BAWAAN_DOKUMEN,
 } from '@/lib/dokumen';
 import { Template } from '@/models';
-import { Callout, PageHeader, Tabs, type TabStatus } from '@/components/ui';
+import { Callout, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
 import { SuratTable, type BarisSurat } from './SuratTable';
 import { MasterSwitch, AutoSwitch, DiagnosaSwitch, TeksForm } from './PengaturanForm';
 import { DokumenSwitch, RincianObatSwitch, TeksDokumenForm } from './DokumenForm';
@@ -94,14 +100,14 @@ const ALASAN_NOMOR: Record<PhoneRejectReason, string> = {
 export default async function AdministrasiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; dari?: string; sampai?: string }>;
+  searchParams: Promise<{ tab?: string; dari?: string; sampai?: string; page?: string }>;
 }) {
   const session = await auth();
   // Nav menyembunyikan tautan ini untuk operator, tapi akses langsung lewat URL
   // harus tetap ditolak di server (pola sama seperti /audit, /farmasi, /bpjs).
   if (session?.user.role !== 'admin') redirect('/ringkasan');
 
-  const { tab: tabParam, dari: dariParam, sampai: sampaiParam } = await searchParams;
+  const { tab: tabParam, dari: dariParam, sampai: sampaiParam, page: pageParam } = await searchParams;
   const tab = bacaTab(tabParam);
 
   const [aktif, diagnosaAktif, autoAktif, poliSensitif] = await Promise.all([
@@ -115,13 +121,33 @@ export default async function AdministrasiPage({
   let baris: BarisSurat[] = [];
   let dari = '';
   let sampai = '';
+  let p: Paginasi | null = null;
 
   if (tab === 'sakit' || tab === 'sehat') {
     dari = bacaTanggal(dariParam, HARI_BAWAAN[tab]);
     sampai = bacaTanggal(sampaiParam, 0);
 
+    /**
+     * Urutannya mengikat: baca `?page` -> COUNT -> jepit -> ambil barisnya.
+     *
+     * Sebelum ini keduanya memakai `LIMIT 200` mati tanpa satu pun kendali dan
+     * tanpa keterangan apa pun di layar. Itu menggigit HARI INI, bukan suatu
+     * saat nanti: pada rentang BAWAAN tab Surat sehat (7 hari) rumah sakit ini
+     * menghasilkan 197 kunjungan -- tiga baris di bawah tutupnya. Satu minggu
+     * agak ramai membuat sisanya lenyap tanpa galat, dan yang terlihat di layar
+     * persis sama dengan "memang cuma segitu". Pada 30 hari: 727 baris, 73%
+     * di antaranya tidak pernah bisa dilihat.
+     *
+     * COUNT-nya dibayar sekali per pembukaan tab dan terukur murah (`range` +
+     * `Using index`; tiga kali jalan berturut-turut totalnya 1 ms), jadi kolam
+     * `sik` ber-`pool.max: 2` tidak dirugikan.
+     */
+    const diminta = bacaHalaman(pageParam);
+    const jumlah = tab === 'sakit' ? await hitungSuratSakit(dari, sampai) : await hitungKunjunganSehat(dari, sampai);
+    p = hitungPaginasi(diminta, jumlah, UKURAN_HALAMAN.riwayat);
+
     if (tab === 'sakit') {
-      const rows = await cariSuratSakit(dari, sampai);
+      const rows = await cariSuratSakit(dari, sampai, p.limit, p.offset);
       baris = rows.map((r) => {
         const n = normalizePhone(r.no_tlp);
         return {
@@ -140,7 +166,7 @@ export default async function AdministrasiPage({
         };
       });
     } else {
-      const rows = await cariKunjunganSehat(dari, sampai);
+      const rows = await cariKunjunganSehat(dari, sampai, p.limit, p.offset);
       baris = rows.map((r) => {
         const n = normalizePhone(r.no_tlp);
         return {
@@ -421,14 +447,20 @@ export default async function AdministrasiPage({
             </Callout>
           )}
 
-          <RentangTanggal tab={tab} dari={dari} sampai={sampai} jumlah={baris.length} />
+          {/* `p.jumlah`, BUKAN `baris.length` -- sejak ada paginasi yang kedua
+              selalu paling banyak satu halaman, dan "50 surat ditemukan" pada
+              rentang berisi 727 adalah angka yang salah tanpa terlihat salah. */}
+          <RentangTanggal tab={tab} dari={dari} sampai={sampai} jumlah={p?.jumlah ?? 0} />
           <SuratTable jenis={tab} rows={baris} aktif={aktif} />
 
-          {baris.length >= 200 && (
-            <p className="mt-2 text-xs text-warning">
-              Menampilkan 200 baris pertama — daftarnya terpotong. Persempit rentang tanggalnya supaya tidak ada yang
-              luput.
-            </p>
+          {p && (
+            <Pagination
+              page={p.halaman}
+              totalPages={p.totalHalaman}
+              count={p.jumlah}
+              hrefFor={(n) => hrefHalaman('/administrasi', { tab, dari, sampai }, n)}
+              unit={tab === 'sakit' ? 'surat' : 'kunjungan'}
+            />
           )}
         </>
       )}

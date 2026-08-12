@@ -157,11 +157,12 @@ const DIAGNOSA_SELECT = `,
       ) AS diagnosa`;
 
 /**
- * Tiga bentuk, satu penurunan.
+ * Empat bentuk, satu penurunan.
  *
  *   `satu`      satu surat lewat PK -- pratinjau dan kirim manual
  *   `rentang`   daftar di layar, TERBARU dulu (yang dicari staf ada di atas)
  *   `otomatis`  jendela pindai milik worker, TERTUA dulu
+ *   `jumlah`    COUNT untuk paginasi daftar layar
  *
  * Urutan `otomatis` sengaja terbalik dari `rentang`, dan itu bukan selera: bila
  * jendelanya berisi lebih banyak surat daripada yang boleh dikirim satu siklus,
@@ -169,31 +170,64 @@ const DIAGNOSA_SELECT = `,
  * membuat surat tertua di jendela didorong keluar oleh yang lebih baru setiap
  * siklus, dan ia tidak pernah terkirim tanpa satu pun galat.
  */
-type BentukSuratSakit = 'satu' | 'rentang' | 'otomatis';
+type BentukSuratSakit = 'satu' | 'rentang' | 'otomatis' | 'jumlah';
 
 /**
  * Batas baris jendela pindai otomatis.
  *
- * Lebih longgar daripada 200 milik daftar layar karena keduanya menjawab hal
- * berbeda: 200 di layar adalah sebanyak yang masuk akal DIBACA orang, sementara
- * yang ini sebanyak yang perlu DIPERIKSA mesin -- dan yang sudah pernah dikirim
- * disaring sesudahnya, jadi jumlah baris di sini bukan jumlah pesan.
+ * Lebih longgar daripada satu halaman layar karena keduanya menjawab hal
+ * berbeda: halaman layar sebanyak yang masuk akal DIBACA orang sekali lihat,
+ * sementara yang ini sebanyak yang perlu DIPERIKSA mesin -- dan yang sudah
+ * pernah dikirim disaring sesudahnya, jadi jumlah baris di sini bukan jumlah
+ * pesan.
  */
 const BATAS_JENDELA_OTOMATIS = 500;
 
+/**
+ * FROM + seluruh join identitas, dipakai BERSAMA oleh daftar dan penghitungnya.
+ *
+ * Dipisah sebagai satu fragmen karena `IDENTITAS_JOIN` dibuka `JOIN reg_periksa`
+ * -- INNER, bukan LEFT. Surat yang kunjungannya sudah tidak ada karena itu
+ * DIBUANG oleh daftar, sementara `COUNT(*) FROM suratsakit` tetap
+ * menghitungnya. Selisihnya tidak menghasilkan galat apa pun: yang muncul cuma
+ * "Halaman 1 dari 5" pada daftar yang halaman kelimanya kosong, dan jumlah baris
+ * yang tidak pernah bisa dicapai dengan menekan Berikutnya.
+ *
+ * Menyalin WHERE-nya ke query kedua akan bekerja hari ini dan menyimpang pada
+ * hari seseorang mengubah salah satu join. Satu fragmen bersama membuat
+ * penyimpangan itu mustahil, bukan cuma tidak disengaja.
+ */
+const SAKIT_FROM_JOIN = `
+    FROM suratsakit ss
+    ${IDENTITAS_JOIN}
+    LEFT JOIN perusahaan_pasien pr ON pr.kode_perusahaan = p.perusahaan_pasien`;
+
 function buildSuratSakitSql(sertakanDiagnosa: boolean, bentuk: BentukSuratSakit): string {
   const satuSurat = bentuk === 'satu';
+  const where = satuSurat
+    ? 'ss.no_surat = :noSurat'
+    : 'ss.no_surat >= :awalPrefix AND ss.no_surat <= :akhirPrefix';
+
+  // Tanpa ORDER dan tanpa LIMIT: mengurutkan sesuatu yang cuma dihitung adalah
+  // pekerjaan yang dibuang, dan LIMIT pada COUNT akan mengembalikan jumlah yang
+  // dipotong -- yaitu angka yang justru dibutuhkan paginasi untuk TIDAK dipotong.
+  if (bentuk === 'jumlah') {
+    return `
+    SELECT COUNT(*) AS jumlah
+    ${SAKIT_FROM_JOIN}
+    WHERE ${where}
+  `;
+  }
+
   return `
     SELECT
       ss.no_surat, ss.no_rawat, ss.tanggalawal, ss.tanggalakhir, ss.lamasakit,
       ${IDENTITAS_SELECT},
       pr.nama_perusahaan${sertakanDiagnosa ? DIAGNOSA_SELECT : ''}
-    FROM suratsakit ss
-    ${IDENTITAS_JOIN}
-    LEFT JOIN perusahaan_pasien pr ON pr.kode_perusahaan = p.perusahaan_pasien
-    WHERE ${satuSurat ? 'ss.no_surat = :noSurat' : 'ss.no_surat >= :awalPrefix AND ss.no_surat <= :akhirPrefix'}
+    ${SAKIT_FROM_JOIN}
+    WHERE ${where}
     ORDER BY ss.no_surat ${bentuk === 'otomatis' ? 'ASC' : 'DESC'}
-    LIMIT ${satuSurat ? 1 : bentuk === 'otomatis' ? BATAS_JENDELA_OTOMATIS : 200}
+    ${satuSurat ? 'LIMIT 1' : bentuk === 'otomatis' ? `LIMIT ${BATAS_JENDELA_OTOMATIS}` : 'LIMIT :limit OFFSET :offset'}
   `;
 }
 
@@ -246,11 +280,27 @@ function prefixSurat(tanggal: string, akhir: boolean): string {
   return `SKS${angka}${akhir ? '999' : '000'}`;
 }
 
-export async function cariSuratSakit(dariTanggal: string, sampaiTanggal: string): Promise<BarisSuratSakit[]> {
+export async function cariSuratSakit(
+  dariTanggal: string,
+  sampaiTanggal: string,
+  limit: number,
+  offset: number,
+): Promise<BarisSuratSakit[]> {
   return sikSelect<BarisSuratSakit>(buildSuratSakitSql(false, 'rentang'), {
     awalPrefix: prefixSurat(dariTanggal, false),
     akhirPrefix: prefixSurat(sampaiTanggal, true),
+    limit,
+    offset,
   });
+}
+
+/** Jumlah surat pada rentang yang sama -- masukan `hitungPaginasi()`. */
+export async function hitungSuratSakit(dariTanggal: string, sampaiTanggal: string): Promise<number> {
+  const rows = await sikSelect<{ jumlah: number }>(buildSuratSakitSql(false, 'jumlah'), {
+    awalPrefix: prefixSurat(dariTanggal, false),
+    akhirPrefix: prefixSurat(sampaiTanggal, true),
+  });
+  return Number(rows[0]?.jumlah ?? 0);
 }
 
 export async function ambilSuratSakit(noSurat: string, sertakanDiagnosa: boolean): Promise<BarisSuratSakit | null> {
@@ -294,18 +344,34 @@ export const JENDELA_OTOMATIS_PENUH = BATAS_JENDELA_OTOMATIS;
  * `tgl_registrasi`, yang tidak terindeks. `status_lanjut` tidak disaring:
  * pasien rawat inap pun bisa meminta surat sehat setelah pulang.
  */
+/**
+ * FROM + join + WHERE, dipakai BERSAMA daftar dan penghitungnya -- alasan yang
+ * sama persis dengan `SAKIT_FROM_JOIN`. Di sini `JOIN reg_periksa` kebetulan
+ * menunjuk tabel yang sama dengan sumbernya sehingga tidak pernah membuang
+ * baris, tapi menyalin WHERE-nya ke query kedua tetap salah untuk alasan yang
+ * tidak bergantung pada kebetulan itu: dua tempat yang menafsirkan sendiri satu
+ * rentang yang sama adalah dua tempat yang cepat atau lambat berbeda.
+ */
+const SEHAT_FROM_WHERE = `
+    FROM reg_periksa ss
+    ${IDENTITAS_JOIN}
+    LEFT JOIN surat_keterangan_sehat sks ON sks.no_rawat = ss.no_rawat
+    WHERE ss.no_rawat >= :awalPrefix AND ss.no_rawat < :akhirPrefix`;
+
 const SEHAT_SQL = `
     SELECT
       ss.no_rawat,
       ${IDENTITAS_SELECT},
       p.tgl_lahir,
       sks.kesimpulan, sks.butawarna, sks.keperluan
-    FROM reg_periksa ss
-    ${IDENTITAS_JOIN}
-    LEFT JOIN surat_keterangan_sehat sks ON sks.no_rawat = ss.no_rawat
-    WHERE ss.no_rawat >= :awalPrefix AND ss.no_rawat < :akhirPrefix
+    ${SEHAT_FROM_WHERE}
     ORDER BY ss.no_rawat DESC
-    LIMIT 200
+    LIMIT :limit OFFSET :offset
+  `;
+
+const SEHAT_JUMLAH_SQL = `
+    SELECT COUNT(*) AS jumlah
+    ${SEHAT_FROM_WHERE}
   `;
 
 const SEHAT_SATU_SQL = `
@@ -328,15 +394,34 @@ function tambahHari(tanggal: string, hari: number): Date {
   return d;
 }
 
-export async function cariKunjunganSehat(dariTanggal: string, sampaiTanggal: string): Promise<BarisSuratSehat[]> {
-  return sikSelect<BarisSuratSehat>(SEHAT_SQL, {
+/**
+ * Prefix rentang, dipakai daftar DAN penghitungnya.
+ *
+ * Batas ATAS eksklusif: prefix hari BERIKUTNYA, supaya seluruh kunjungan pada
+ * `sampaiTanggal` ikut terbaca berapa pun nomor urutnya. Memakai
+ * `<= prefix(sampai)` akan membuang semuanya, karena `2026/08/06` secara
+ * leksikal lebih kecil daripada `2026/08/06/000001`.
+ */
+function rentangSehat(dariTanggal: string, sampaiTanggal: string) {
+  return {
     awalPrefix: formatRawatPrefix(tambahHari(dariTanggal, 0)),
-    // Batas ATAS eksklusif: prefix hari BERIKUTNYA, supaya seluruh kunjungan
-    // pada `sampaiTanggal` ikut terbaca berapa pun nomor urutnya. Memakai
-    // `<= prefix(sampai)` akan membuang semuanya, karena `2026/08/06` secara
-    // leksikal lebih kecil daripada `2026/08/06/000001`.
     akhirPrefix: formatRawatPrefix(tambahHari(sampaiTanggal, 1)),
-  });
+  };
+}
+
+export async function cariKunjunganSehat(
+  dariTanggal: string,
+  sampaiTanggal: string,
+  limit: number,
+  offset: number,
+): Promise<BarisSuratSehat[]> {
+  return sikSelect<BarisSuratSehat>(SEHAT_SQL, { ...rentangSehat(dariTanggal, sampaiTanggal), limit, offset });
+}
+
+/** Jumlah kunjungan pada rentang yang sama -- masukan `hitungPaginasi()`. */
+export async function hitungKunjunganSehat(dariTanggal: string, sampaiTanggal: string): Promise<number> {
+  const rows = await sikSelect<{ jumlah: number }>(SEHAT_JUMLAH_SQL, rentangSehat(dariTanggal, sampaiTanggal));
+  return Number(rows[0]?.jumlah ?? 0);
 }
 
 export async function ambilKunjunganSehat(noRawat: string): Promise<BarisSuratSehat | null> {
@@ -359,6 +444,23 @@ const CONTOH_TGL_AKHIR = formatRawatPrefix(lookbackDate(-1));
 registerPlanCheck({
   name: 'ADMINISTRASI_SURAT_SAKIT',
   sql: buildSuratSakitSql(false, 'rentang'),
+  replacements: { awalPrefix: 'SKS20260101000', akhirPrefix: 'SKS20261231999', limit: 50, offset: 0 },
+  maxRows: 3000,
+});
+
+/**
+ * Penghitung paginasi, didaftarkan TERSENDIRI walau WHERE-nya sama.
+ *
+ * Bukan pemeriksaan kembar: menghapus daftar SELECT dan `ORDER BY` mengubah apa
+ * yang boleh dipilih optimizer -- sebuah COUNT yang seluruh kolomnya ada di
+ * indeks bisa dilayani tanpa menyentuh baris sama sekali (`Using index`),
+ * sementara daftarnya harus membaca barisnya. Jalur akses yang berbeda adalah
+ * persis hal yang `verify:plans` ada untuk menjaga, dan query ini jalan pada
+ * SETIAP pembukaan tab lewat kolam `sik` ber-`pool.max: 2`.
+ */
+registerPlanCheck({
+  name: 'ADMINISTRASI_SURAT_SAKIT_JUMLAH',
+  sql: buildSuratSakitSql(false, 'jumlah'),
   replacements: { awalPrefix: 'SKS20260101000', akhirPrefix: 'SKS20261231999' },
   maxRows: 3000,
 });
@@ -405,7 +507,30 @@ registerPlanCheck({
 registerPlanCheck({
   name: 'ADMINISTRASI_SURAT_SEHAT',
   sql: SEHAT_SQL,
-  replacements: { awalPrefix: CONTOH_TGL_AWAL, akhirPrefix: CONTOH_TGL_AKHIR },
+  replacements: { awalPrefix: CONTOH_TGL_AWAL, akhirPrefix: CONTOH_TGL_AKHIR, limit: 50, offset: 0 },
   allowFullScan: ['sks'],
+  maxRows: 3000,
+});
+
+/**
+ * Penghitungnya, dan ia TANPA `allowFullScan` -- bukan kelalaian, melainkan
+ * yang terukur. Join-nya persis sama dengan daftarnya, tapi rencananya berbeda:
+ *
+ *   daftar  sks ALL                          (baca barisnya demi kesimpulan/butawarna/keperluan)
+ *   jumlah  sks ref no_rawat (Using index)   (tidak satu kolom pun dibaca)
+ *
+ * COUNT tidak memilih satu kolom pun dari `sks`, jadi indeks `no_rawat` sudah
+ * cukup dan tabel kosongnya tidak pernah disentuh. Menyalin izin itu ke sini
+ * "karena tetangganya punya" akan menghasilkan izin pindai penuh yang
+ * menganggur -- dan izin yang menganggur diam-diam menutupi kemunduran
+ * berikutnya, yaitu hari ketika query ini benar-benar jatuh ke pemindaian penuh
+ * dan tidak ada yang berbunyi.
+ *
+ * Alasan pendaftaran terpisahnya sendiri sama dengan pasangan surat sakit.
+ */
+registerPlanCheck({
+  name: 'ADMINISTRASI_SURAT_SEHAT_JUMLAH',
+  sql: SEHAT_JUMLAH_SQL,
+  replacements: { awalPrefix: CONTOH_TGL_AWAL, akhirPrefix: CONTOH_TGL_AKHIR },
   maxRows: 3000,
 });

@@ -68,7 +68,10 @@ async function main() {
 
   // -------------------------------------------------------------------------
   garis('SURAT KETERANGAN SAKIT');
-  const daftarSakit = await cariSuratSakit(iso(dari), iso(sampai));
+  // 200 = batas mati yang dulu tertanam di query-nya. Dipertahankan APA ADANYA
+  // di sini supaya pratinjau ini tetap menjangkau nomor surat yang sama seperti
+  // sebelum paginasi ada -- skrip ini mencari satu baris contoh, bukan halaman.
+  const daftarSakit = await cariSuratSakit(iso(dari), iso(sampai), 200, 0);
   console.log(`Ditemukan ${daftarSakit.length} surat dalam 365 hari terakhir.`);
 
   const pilihSakit = kunciArg
@@ -118,7 +121,7 @@ async function main() {
   garis('SURAT KETERANGAN SEHAT');
   const dari30 = new Date();
   dari30.setDate(dari30.getDate() - 30);
-  const daftarSehat = await cariKunjunganSehat(iso(dari30), iso(sampai));
+  const daftarSehat = await cariKunjunganSehat(iso(dari30), iso(sampai), 200, 0);
   console.log(`Ditemukan ${daftarSehat.length} kunjungan dalam 30 hari terakhir.`);
   console.log('Catatan: Khanza tidak menyimpan baris surat sehat -- ia dicetak langsung dari kunjungan.');
 
