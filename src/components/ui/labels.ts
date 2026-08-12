@@ -104,6 +104,16 @@ export const TRIGGER_LABEL: Record<string, string> = {
   FARMASI_PENYERAHAN: 'Apotek: obat diserahkan',
   FARMASI_UJI: 'Apotek: pesan uji',
   FARMASI_STOK_DARURAT: 'Apotek: persediaan menipis',
+  // Keempat NOTA BARANG, diurutkan seperti tabnya di /farmasi. Labelnya
+  // sengaja menyebut KEJADIANNYA, bukan cuma nama menunya, dan itu pelajaran
+  // KONTROL_ULANG/KONTROL_TERBIT yang sama: "nota pengadaan" dan "nota
+  // pemesanan" berdampingan di satu tabel Antrean praktis tidak bisa
+  // dibedakan, padahal keduanya dua ujung berlawanan dari satu alur (yang satu
+  // barangnya SUDAH datang, yang satu baru DIPESAN). Yang dicari orang saat
+  // menelusuri justru pemicu MANA yang mengirim.
+  FARMASI_PENGADAAN: 'Apotek: barang datang (pembelian)',
+  FARMASI_PEMESANAN: 'Apotek: pesanan ke pemasok',
+  FARMASI_HIBAH: 'Apotek: barang datang (hibah)',
   // Sepasang, dan labelnya sengaja BERLAWANAN BUNYI. Keduanya menyangkut nota
   // yang sama pada dua saat yang berbeda, jadi baris berdampingan di Antrean
   // harus bisa dibedakan sekali baca -- pelajaran KONTROL_ULANG/KONTROL_TERBIT.

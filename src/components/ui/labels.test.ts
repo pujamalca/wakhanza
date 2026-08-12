@@ -125,3 +125,60 @@ describe('TRIGGER_SOURCE', () => {
     expect(triggerSource('PEMICU_YANG_TIDAK_ADA')).toBeUndefined();
   });
 });
+
+/**
+ * Pemicu yang BUKAN baris `template` -- FARMASI_*, BPJS_*, SURAT_SAKIT --
+ * dikecualikan dari kedua pemeriksaan di atas, dan pengecualian itu benar untuk
+ * `TRIGGER_SOURCE` (mereka punya halamannya sendiri). Tapi ia sekaligus membuat
+ * mereka lolos dari pemeriksaan LABEL, dan celah itu terbukti nyata: tiga kode
+ * (`FARMASI_PENGADAAN`, `FARMASI_PEMESANAN`, `FARMASI_HIBAH`) hidup berbulan-
+ * bulan tanpa label, sehingga halaman Antrean dan Log menampilkan kode mentah
+ * untuk pesan yang benar-benar terkirim ke grup apotek.
+ *
+ * Kegagalannya diam sempurna: `triggerLabel()` jatuh ke `?? code`, jadi tidak
+ * ada galat, tidak ada baris kosong, cuma tulisan yang tidak berarti apa-apa
+ * bagi petugas. Dan ia berulang -- tiga kali, pada tiga fitur berturut-turut.
+ *
+ * Acuannya dibaca dari `src/worker/*.ts`, bukan disalin jadi daftar kedua di
+ * sini: konstanta `TRIGGER_*` di sanalah yang benar-benar dipakai saat menulis
+ * baris `outbox`, jadi ia satu-satunya sumber kebenaran soal kode mana yang
+ * bisa muncul di layar.
+ */
+function kodePemicuDariRunner(): string[] {
+  const dir = join(AKAR, 'src', 'worker');
+  const kode: string[] = [];
+  for (const nama of readdirSync(dir).sort()) {
+    if (!nama.endsWith('.ts') || nama.endsWith('.test.ts') || nama.endsWith('.int.test.ts')) continue;
+    const isi = readFileSync(join(dir, nama), 'utf8');
+    for (const m of isi.matchAll(/^export const TRIGGER_[A-Z0-9_]+ = '([A-Z][A-Z0-9_]*)';/gm)) {
+      if (m[1]) kode.push(m[1]);
+    }
+  }
+  return [...new Set(kode)].sort();
+}
+
+describe('label pemicu di luar tabel template', () => {
+  const dariRunner = kodePemicuDariRunner();
+
+  it('menemukan konstanta pemicunya sama sekali', () => {
+    // Kalau parsernya berhenti cocok (bentuk deklarasinya berubah), daftar ini
+    // jadi kosong dan pemeriksaan di bawah lolos tanpa memeriksa apa pun --
+    // gerbang yang rusak DIAM, persis kelas kegagalan yang ia jaga.
+    expect(dariRunner.length).toBeGreaterThanOrEqual(8);
+    expect(dariRunner).toContain('FARMASI_PENGADAAN');
+  });
+
+  it('setiap pemicu yang dipakai runner punya label manusianya', () => {
+    const tanpaLabel = dariRunner.filter((k) => !TRIGGER_LABEL[k]);
+    expect(tanpaLabel).toEqual([]);
+  });
+
+  it('labelnya berbeda satu sama lain', () => {
+    // Dua pemicu berlabel sama tidak bisa dibedakan di Antrean, dan itu sama
+    // tidak bergunanya dengan tidak punya label -- cuma lebih sulit disadari,
+    // karena layarnya tampak wajar. Nyata di sini: keempat nota barang
+    // sama-sama tergoda dinamai "nota <sesuatu>".
+    const label = dariRunner.map((k) => TRIGGER_LABEL[k]);
+    expect(new Set(label).size).toBe(label.length);
+  });
+});

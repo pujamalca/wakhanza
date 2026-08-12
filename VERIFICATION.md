@@ -832,6 +832,66 @@ sebagaimana mereka setel sendiri, dan `farmasi.hibah_nilai` dikembalikan ke `1` 
 dimatikan. `pm2 restart wakhanza-web` lalu `wakhanza-worker` **sekali** (`wa_session` `ready`,
 umur heartbeat 27 detik).
 
+## Label pemicu di luar tabel `template`
+
+### Celahnya diukur, bukan diduga
+
+`labels.test.ts` menuntut setiap baris `template` punya label, dan itu benar -- tapi pemicu yang BUKAN baris `template` (`FARMASI_*`, `BPJS_*`, `SURAT_SAKIT`) sengaja dikecualikan darinya, sehingga mereka juga lolos dari pemeriksaan LABEL. Kode yang benar-benar dipakai runner dibandingkan dengan isi `TRIGGER_LABEL`:
+
+```
+kode pemicu yang dipakai kode:  19
+yang sudah punya label:         25 (termasuk peninggalan + baris template)
+
+TANPA label:
+  FARMASI_HIBAH
+  FARMASI_PEMESANAN
+  FARMASI_PENGADAAN
+```
+
+Tepat tiga, tidak ada yang lain. Ketiganya hidup berbulan-bulan sejak `migrations/028`/`030`/`031`, dan selama itu halaman Antrean dan Log menampilkan **kode mentah** untuk pesan yang benar-benar terkirim ke grup apotek. Kegagalannya diam sempurna -- `triggerLabel()` jatuh ke `?? code`, jadi tidak ada galat maupun baris kosong, cuma tulisan yang tidak berarti apa-apa bagi petugas.
+
+### Labelnya menyebut KEJADIAN, bukan nama menu
+
+```
+FARMASI_PENGADAAN: 'Apotek: barang datang (pembelian)'
+FARMASI_PEMESANAN: 'Apotek: pesanan ke pemasok'
+FARMASI_HIBAH:     'Apotek: barang datang (hibah)'
+```
+
+"Nota pengadaan" dan "nota pemesanan" berdampingan di satu tabel Antrean praktis tidak bisa dibedakan, padahal keduanya dua ujung berlawanan dari satu alur -- yang satu barangnya SUDAH datang, yang satu baru DIPESAN. Pelajaran `KONTROL_ULANG`/`KONTROL_TERBIT` yang sama: yang dicari orang saat menelusuri justru pemicu MANA yang mengirim.
+
+### Gerbang barunya dibuktikan MENGGIGIT ke DUA arah
+
+Acuannya dibaca dari `src/worker/*.ts` -- konstanta `TRIGGER_*` di sanalah yang dipakai saat menulis baris `outbox`, jadi ia satu-satunya sumber kebenaran soal kode mana yang bisa muncul di layar. Bukan disalin jadi daftar kedua di dalam uji.
+
+```
+# [1] satu label dihapus
+    x setiap pemicu yang dipakai runner punya label manusianya
+Tests: 1 failed, 10 passed
+
+# [2] dua label dibuat kembar
+    x labelnya berbeda satu sama lain
+Tests: 1 failed, 10 passed
+
+# dipulihkan
+Tests: 11 passed
+```
+
+Arah kedua perlu karena dua pemicu berlabel sama sama tidak bergunanya dengan tidak punya label, cuma lebih sulit disadari -- layarnya tampak wajar. Nyata di sini: keempat nota barang sama-sama tergoda dinamai "nota <sesuatu>".
+
+Uji `menemukan konstanta pemicunya sama sekali` menjaga parsernya sendiri: kalau bentuk deklarasinya berubah dan regexnya berhenti cocok, daftarnya jadi kosong dan kedua pemeriksaan di atas lolos tanpa memeriksa apa pun -- gerbang yang rusak DIAM, persis kelas kegagalan yang ia jaga.
+
+### Gerbang lengkap
+
+```
+npm run typecheck -> bersih
+npm run lint      -> bersih
+npm test          -> Test Suites: 45 passed, Tests: 746 passed
+npm run build     -> sukses
+```
+
+(dari 743 uji: +3 di `labels.test.ts`)
+
 ## Kelas kelima belas: PENJUALAN (`/farmasi`, migrations/040) -- barang KELUAR, dan pemicu pertama yang punya kejadian "dihapus"
 
 ### Bentuk data yang menentukan seluruh rancangannya
