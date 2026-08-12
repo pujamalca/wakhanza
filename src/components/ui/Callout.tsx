@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
+import { IconAlertTriangle, IconInfo, IconShield, type IconProps } from './icons';
 
 /**
  * Kotak keterangan berjudul, dengan pilihan dilipat.
@@ -25,12 +26,47 @@ import type { ReactNode } from 'react';
  * halaman yang lebih pendek dengan keputusan yang diambil tanpa keterangan.
  */
 
-export type CalloutVariant = 'warning' | 'info' | 'neutral';
+/**
+ * ## Ikon jangkar
+ *
+ * Tiap varian membawa satu ikon di depan judulnya. Ia **bukan pengganti** prosa
+ * -- justru kebalikannya: peringatan yang harus dibaca sebelum sebuah sakelar
+ * dinyalakan tetap terbentang penuh, dan ikonnya ada supaya pagar itu bisa
+ * ditemukan sekilas di halaman yang memuat belasan kotak keterangan. Keterangan
+ * yang memang boleh disembunyikan pindah ke `Petunjuk`, bukan ke sini.
+ *
+ * `privasi` sengaja berbagi warna dengan `warning`: keduanya sama-sama pagar,
+ * yang berbeda JENISNYA -- satu memperingatkan akibat, satu memperingatkan data
+ * siapa yang beredar. Di halaman yang memuat keduanya (mis. `/farmasi`)
+ * pembedaan itulah yang membuat keduanya bisa dipisahkan tanpa dibaca dulu.
+ *
+ * Ikonnya `aria-hidden` (bawaan `icons.tsx`) karena judulnya sudah membawa
+ * seluruh maknanya sebagai teks -- ikon yang ikut dibacakan pembaca layar cuma
+ * menggandakan kalimat yang sama.
+ */
+export type CalloutVariant = 'warning' | 'privasi' | 'info' | 'neutral';
 
 const KOTAK: Record<CalloutVariant, string> = {
   warning: 'border-warning/30 bg-warning/5',
+  privasi: 'border-warning/30 bg-warning/5',
   info: 'border-primary/25 bg-primary/5',
   neutral: 'border-border/60',
+};
+
+const IKON: Record<CalloutVariant, ComponentType<IconProps> | null> = {
+  warning: IconAlertTriangle,
+  privasi: IconShield,
+  info: IconInfo,
+  // Catatan biasa tidak dapat ikon: pada varian yang paling sering dipakai, ikon
+  // berhenti menandai apa pun dan cuma menambah satu bidang gambar per kotak.
+  neutral: null,
+};
+
+const WARNA_IKON: Record<CalloutVariant, string> = {
+  warning: 'text-warning',
+  privasi: 'text-warning',
+  info: 'text-primary',
+  neutral: '',
 };
 
 export interface CalloutProps {
@@ -53,22 +89,44 @@ export function Callout({
   className = '',
 }: CalloutProps) {
   const kotak = `rounded-lg border p-3 text-xs ${KOTAK[variant]} ${className}`;
+  const Ikon = IKON[variant];
 
-  if (!children) return <div className={kotak}><span className="font-medium">{title}</span></div>;
+  /**
+   * Isinya digeser sejajar dengan TEKS judul, bukan dengan ikonnya: 1rem lebar
+   * ikon + 0.5rem jarak. Tanpa itu, paragraf di bawah mulai dari tepi kotak
+   * sementara judulnya menjorok, dan keduanya berhenti terbaca sebagai satu
+   * blok yang sama.
+   */
+  const jarakIsi = Ikon ? 'ml-6' : '';
+
+  const judul = (
+    <span className="inline-flex items-start gap-2 align-top">
+      {/* `aria-hidden` datang dari `icons.tsx` -- judulnya sudah membawa seluruh
+          maknanya sebagai teks, jadi ikon yang ikut dibacakan pembaca layar cuma
+          menggandakan kalimat yang sama. */}
+      {Ikon && <Ikon className={`h-4 w-4 shrink-0 ${WARNA_IKON[variant]}`} />}
+      <span>{title}</span>
+    </span>
+  );
+
+  if (!children) return <div className={kotak}><span className="font-medium">{judul}</span></div>;
 
   if (!collapsible) {
     return (
       <div className={kotak}>
-        <p className="font-medium">{title}</p>
-        <div className="mt-1 text-muted-foreground">{children}</div>
+        <p className="font-medium">{judul}</p>
+        <div className={`mt-1 text-muted-foreground ${jarakIsi}`}>{children}</div>
       </div>
     );
   }
 
   return (
+    // `<summary>` sengaja TIDAK dijadikan flex: di Chromium itu menghapus
+    // segitiga pembukanya, sehingga satu-satunya tanda bahwa kotak ini bisa
+    // dibuka ikut hilang. Perataannya dikerjakan span di dalamnya.
     <details className={kotak} open={defaultOpen}>
-      <summary className="cursor-pointer font-medium marker:text-muted-foreground">{title}</summary>
-      <div className="mt-2 text-muted-foreground">{children}</div>
+      <summary className="cursor-pointer font-medium marker:text-muted-foreground">{judul}</summary>
+      <div className={`mt-2 text-muted-foreground ${jarakIsi}`}>{children}</div>
     </details>
   );
 }

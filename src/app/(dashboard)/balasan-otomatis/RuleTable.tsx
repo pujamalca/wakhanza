@@ -11,6 +11,7 @@ import {
   Modal,
   ConfirmDialog,
   EmptyState,
+  Petunjuk,
   IconReply,
   tableWrapperClass,
   theadClass,
@@ -79,8 +80,16 @@ export function RuleTable({ rules, hariRingkasan }: { rules: RuleRow[]; hariRing
           <table className="w-full text-sm">
             <thead className={theadClass}>
               <tr>
-                <th className={`${cellClass} w-14`} title="Aturan dengan urutan lebih kecil diperiksa lebih dulu">
-                  Urut
+                <th className={`${cellClass} w-14`}>
+                  <span className="inline-flex items-center gap-1">
+                    Urut
+                    <Petunjuk untuk="Urutan aturan">
+                      Aturan dengan urutan lebih kecil diperiksa lebih dulu, dan{' '}
+                      <strong>yang pertama cocok menang</strong> — satu pesan masuk paling banyak menghasilkan satu
+                      balasan. Bukan &quot;yang paling mirip&quot;: kenapa sebuah aturan yang menjawab harus terjawab
+                      dengan melihat daftar terurut ini.
+                    </Petunjuk>
+                  </span>
                 </th>
                 <th className={`${cellClass} whitespace-nowrap`}>Nama</th>
                 <th className={`${cellClass} hidden md:table-cell`}>Kata kunci</th>

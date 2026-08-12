@@ -3444,3 +3444,128 @@ grep -rl "<penanda>" .next/server
 **Tombolnya belum pernah ditekan atas jadwal sungguhan.** Menekannya berarti mengubah salah satu dari enam jadwal aktif milik RS -- pada jadwal berfilter perubahannya TIDAK bisa dikembalikan lewat tombol mana pun, jadi itu keputusan staf atas jadwalnya sendiri, bukan efek samping verifikasi. Yang bisa gagal DIAM sudah dipagari dari sisi lain: seluruh keputusannya ada di fungsi murni yang diuji berikut bukti menggigitnya, daftar acuannya dibaca ulang server lewat pintu yang sama dipakai worker, dan `broadcast_schedule` sudah punya grant `UPDATE` sejak `migrations/006` (dibuktikan berjalan oleh `toggleScheduleAction` yang memakai kolom lain di tabel yang sama).
 
 **Konversi `semua` -> `pilih` belum pernah dijalankan worker.** Yang sesudah konversi dipakai adalah `fetchPatientsByRm()`, jalur yang sudah berjalan di produksi untuk broadcast manual bermode centang.
+
+## Keterangan: empat tingkat, dan ikon hanya memikul satu di antaranya
+
+Diverifikasi 12 Agustus 2026.
+
+### Pengukuran yang mendasari keputusannya
+
+Dihitung dari seluruh `src/app/(dashboard)/**/*.tsx` (isi `<Callout>`, isi `<p>`, string `hint`; tag JSX dan ekspresi dibuang):
+
+```
+halaman                 karakter   blok  callout
+farmasi                    25361    157       12
+administrasi               12539     62        9
+bpjs                        5827     33        3
+template                    3975     20        1
+broadcast-terjadwal         2921     31        0
+...
+TOTAL                      58903    409       25
+```
+
+`/audit` dan `/log` nol karakter -- keduanya memang cuma tabel.
+
+Pemakaian `title=` berisi kalimat, dipisah dari `title=` sebagai prop komponen:
+
+```
+title= sebagai TOOLTIP html  : 30   (9 di antaranya berisi kalimat)
+title= sebagai PROP komponen : 79
+```
+
+Kesembilan itulah pemakai pertama `Petunjuk`: `farmasi/TargetTable.tsx` x6, `pesan-masuk/page.tsx` x2, `balasan-otomatis/RuleTable.tsx` x1.
+
+### Kenapa popover native, bukan tooltip CSS -- hit-test, bukan bounding rect
+
+Percobaan pertama mengukur `getBoundingClientRect` dan itu SALAH: rect tetap melaporkan posisi tata letak walau pikselnya tidak pernah dilukis. Yang menjawab "benar-benar terlihat" cuma `elementFromPoint`, yang menghormati pemotongan. Diuji terhadap salinan persis `tableWrapperClass`:
+
+```
+Chromium 146 | popover=true | anchor-positioning=true
+
+a. Tooltip absolute biasa
+   menggantung keluar pembungkus : true
+   benar-benar terlihat di luar  : false   (titik uji kena: BODY)
+   pembungkus melahirkan scrollbar vertikal : true
+
+b. Popover native + anchor positioning (dibuka dengan Enter)
+   terbuka lewat keyboard        : true
+   benar-benar terlihat di luar  : true    (titik uji kena: DIV#pop)
+   pembungkus melahirkan scrollbar vertikal : false
+   Esc menutup                   : true
+
+c. Batas yang tidak bisa ditutup:
+   isi popover TERTUTUP terjangkau Ctrl+F  : false
+```
+
+Baris (c) itulah yang membuat tingkat B memakai `Callout collapsible` alih-alih `Petunjuk`: `<details>` dibuka sendiri oleh peramban saat kena Ctrl+F.
+
+Degradasi tanpa anchor positioning diuji dengan `@supports`-nya sengaja dipalsukan -- ketiga skenario (desktop 1280px, tablet 768px, anchor dimatikan) sama-sama lolos: terbuka lewat Enter, terlihat utuh di luar tabel, tidak keluar tepi layar, Esc menutup.
+
+### Perilaku di peramban, memakai CSS HASIL BUILD
+
+CSS-nya diambil dari `.next/static/chunks/*.css` yang benar-benar dikirim ke peramban petugas, bukan ditulis ulang untuk uji. Blok `@supports` terbukti ikut ter-emit:
+
+```
+@supports (position-anchor:--x){.petunjuk-isi{position-anchor:var(--jangkar);position-area:bottom span-right;position-try-fallbacks:flip-block, flip-inline, flip-block flip-inline;margin-top:.25rem;position:absolute}}
+```
+
+Ketiga skenario lolos seluruhnya:
+
+```
+1) Tema TERANG, 1280px        2) Tema GELAP, 1280px        3) Tema GELAP, tablet 768px
+  summary display        : list-item (segitiga selamat)
+  indent isi             : 24px (harap 24px)
+  ikon privasi           : ada=true 16px aria-hidden=true
+  netral tanpa ikon      : true
+  tombol Petunjuk        : 2, tanpa aria-label: 0
+  gulir mendatar halaman : false
+  popover buka(Enter)    : true | menggantung: true | terlihat: true
+  popover bg/warna       : terang rgb(255,255,255) / gelap rgb(20,28,46)  (terisi: true)
+  scrollbar tabel liar   : false | Esc menutup: true
+```
+
+`summary display : list-item` adalah asersi yang paling mudah terlewat: menjadikan `<summary>` flex akan menghapus segitiga pembukanya di Chromium, sehingga satu-satunya tanda bahwa kotak itu bisa dibuka ikut hilang.
+
+### Gerbang yang menjaga pola lama tidak kembali
+
+`src/components/ui/petunjuk.test.ts`, 4 uji, dan dua di antaranya membuktikan gerbangnya MENGGIGIT alih-alih sekadar hijau:
+
+```
+gerbang: keterangan tidak boleh disembunyikan di balik title=
+  v tidak ada satu pun di seluruh halaman dashboard (11 ms)
+  v MENGGIGIT pada bentuk yang dulu dipakai
+  v menjaring juga bentuk berkurung kurawal dan template literal
+  v MELOLOSKAN pemakaian yang sah
+```
+
+Yang sah dan tetap lolos: `title={t.chatId}` (nilai data), `<button title="...">` (elemen interaktif yang teksnya sudah terlihat), dan label pendek.
+
+### Hasil akhir, terukur
+
+```
+Callout terbentang : 10 (6160 karakter terlihat)
+Callout terlipat   : 15 (7471 karakter di balik lipatan)
+Petunjuk           :  9 (2517 karakter di balik ikon)
+---
+Total tersembunyi  : 9988 karakter
+```
+
+Callout terlipat naik 12 -> 15; `title=` berisi kalimat 9 -> 0. Seluruh KESIMPULAN tetap terbaca sebagai teks biasa -- yang pindah ke balik lipatan/ikon cuma alasannya.
+
+Klasifikasi 12 Callout yang sebelumnya terbentang: **7 tingkat A** (tetap terbentang, kini berjangkar ikon), **4 tingkat B** (dilipat), **1 penanda status** (`"Pengiriman dokumen masih dimatikan"` -- keadaan, bukan penjelasan). Lima di antaranya ditandai `variant="privasi"`.
+
+### Gerbang lain
+
+```
+tsc --noEmit          bersih
+eslint .              bersih
+npm test              47 suite / 785 uji lolos
+npm run build         Compiled successfully in 6.6s
+pm2 restart wakhanza-web -> online, unstable restarts 0, /login HTTP 200
+```
+
+### Yang TIDAK dikerjakan, dan kenapa
+
+**Tingkat D (hapus prosa alasan-implementasi) praktis tidak menghasilkan apa pun.** Perkiraan dari sampel memperkirakan ~6 blok; pembacaan sesungguhnya tidak menemukan satu pun yang jelas-jelas cuma berguna bagi penulis kodenya. Yang paling mendekati (angka pengukuran seperti "141 dari 348" pada ambang stok) ternyata menjelaskan ke staf KENAPA sebuah barang tidak ikut terhitung -- itu keterangan operasional, bukan catatan pengembang. Menghapusnya bukan keputusan yang aman diambil sepihak.
+
+**Halaman dashboard-nya sendiri tidak dibuka lewat peramban ber-login.** Perilakunya dibuktikan lewat CSS hasil build plus markup yang bentuknya persis seperti keluaran komponennya; membuat akun admin sementara pada sistem yang memegang data pasien bukan harga yang sepadan untuk memeriksa tata letak.

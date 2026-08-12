@@ -2,6 +2,7 @@ export * from './Button';
 export * from './LinkButton';
 export * from './Card';
 export * from './Callout';
+export * from './Petunjuk';
 export * from './Tabs';
 export * from './Modal';
 export * from './PageHeader';

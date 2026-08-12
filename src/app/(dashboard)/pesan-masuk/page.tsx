@@ -10,6 +10,7 @@ import {
   CopyButton,
   EmptyState,
   Pagination,
+  Petunjuk,
   IconInbox,
   tableWrapperClass,
   theadClass,
@@ -223,8 +224,14 @@ export default async function PesanMasukPage({
                         // Kolom kosong di sini BUKAN detail sepele: pengalamatan
                         // @lid yang nomornya tidak terpetakan pernah membuat
                         // pesan pasien hilang berjam-jam tanpa jejak.
-                        <span className="text-warning" title="Nomor tidak bisa dipetakan dari pengalamatan @lid">
+                        <span className="inline-flex items-center gap-1 text-warning">
                           tidak terpetakan
+                          <Petunjuk untuk="Nomor tidak terpetakan">
+                            WhatsApp memindahkan sebagian percakapan ke pengalamatan <strong>@lid</strong> — identitas
+                            tetap per pengguna yang sengaja <strong>tidak memuat nomor telepon</strong>. Saat nomornya
+                            tidak bisa ditelusuri balik, pesannya tetap dicatat di sini tapi tidak bisa dicocokkan ke
+                            pasien mana pun, dan balasan otomatis tidak dikirim.
+                          </Petunjuk>
                         </span>
                       )}
                     </td>
@@ -247,8 +254,14 @@ export default async function PesanMasukPage({
                     </td>
                     <td className={`${cellClass} hidden whitespace-nowrap md:table-cell`}>
                       {m.jenis === 'grup' ? (
-                        <span className="text-xs text-muted-foreground" title="Pesan grup memang tidak pernah dibalas otomatis">
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                           —
+                          <Petunjuk untuk="Pesan grup tidak dibalas">
+                            Pesan grup memang <strong>tidak pernah</strong> dibalas aturan balasan otomatis: menjawab
+                            pertanyaan satu orang berarti seluruh anggota menerima pesannya, dan satu percakapan ramai
+                            berubah jadi rentetan balasan dari satu-satunya nomor rumah sakit. Yang tetap dijawab di
+                            grup hanya pertanyaan stok, dan hanya dari grup yang didaftarkan admin.
+                          </Petunjuk>
                         </span>
                       ) : (
                         <Badge variant={m.dibalas ? 'success' : 'neutral'}>{m.dibalas ? 'Ya' : 'Tidak'}</Badge>

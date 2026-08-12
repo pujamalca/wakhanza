@@ -222,6 +222,7 @@ async function TabTujuan({
       )}
 
       <Callout
+        variant="privasi"
         className="mt-8"
         collapsible
         title="Pembatalan berisi data pasien; pengingat kontrol tidak berisi data klinis"
@@ -336,7 +337,7 @@ async function TabKontrol({
       <KontrolSwitch enabled={enabled} kePasien={kePasien} adaPenerima={adaPenerima} />
 
       <Callout
-        variant="warning"
+        variant="privasi"
         className="mb-4"
         title="Ini satu-satunya pesan di halaman ini yang dibaca pasien"
       >

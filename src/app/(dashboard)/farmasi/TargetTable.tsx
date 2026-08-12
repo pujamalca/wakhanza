@@ -9,6 +9,7 @@ import {
   Modal,
   ConfirmDialog,
   EmptyState,
+  Petunjuk,
   IconPill,
   tableWrapperClass,
   theadClass,
@@ -55,6 +56,48 @@ export interface GrupRow {
   nama: string;
   jumlahPeserta: number | null;
   syncedAt: string;
+}
+
+/**
+ * Satu centang berikut keterangannya.
+ *
+ * Keenam centang di kolom ini menjawab pertanyaan yang berbeda-beda, dan
+ * jawabannya dulu dititipkan pada atribut `title=` -- yang **tidak pernah
+ * muncul di layar sentuh sama sekali**, sehingga di tablet loket keenamnya
+ * hanya berupa kata "Hibah", "Pemesanan", "Penjualan" tanpa satu pun cara
+ * mengetahui bedanya.
+ *
+ * **Tombol `Petunjuk` BERSAUDARA dengan `<label>`, bukan di dalamnya**, dan itu
+ * bukan kerapian: apa pun yang diklik di dalam sebuah label ikut menyalakan
+ * kontrolnya, jadi menekan ikon keterangan akan MENGUBAH setelan yang artinya
+ * baru saja hendak ditanyakan. Tidak ada galat yang muncul -- cuma centang yang
+ * berpindah sendiri, pada halaman yang menentukan ke mana data apotek dikirim.
+ */
+function BarisCentang({
+  untuk,
+  label,
+  checked,
+  disabled,
+  onChange,
+  children,
+}: {
+  /** Subjek untuk pembaca layar -- tetap, walau `label`-nya berubah. */
+  untuk: string;
+  label: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <label className="flex cursor-pointer items-center gap-2">
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={onChange} />
+        <span className="text-xs text-muted-foreground">{label}</span>
+      </label>
+      <Petunjuk untuk={untuk}>{children}</Petunjuk>
+    </div>
+  );
 }
 
 export function TargetTable({
@@ -168,71 +211,71 @@ export function TargetTable({
                       per baris -- bukan kembali ke satu kolom per centang. */}
                   <td className={`${cellClass} hidden md:table-cell`}>
                     <div className="flex flex-col gap-1">
-                      <label className="flex cursor-pointer items-center gap-2" title="Boleh membuat nomor rumah sakit menjawab pertanyaan stok/harga">
-                        <input
-                          type="checkbox"
-                          checked={t.bolehTanya}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleBolehTanyaAction(t.id, !t.bolehTanya))}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          Boleh tanya{t.bolehTanya && t.jenis === 'grup' ? ' (dijawab di grup)' : ''}
-                        </span>
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2" title="Menerima rekap barang yang stoknya di bawah ambang minimal">
-                        <input
-                          type="checkbox"
-                          checked={t.terimaDaruratStok}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleTerimaDaruratAction(t.id, !t.terimaDaruratStok))}
-                        />
-                        <span className="text-xs text-muted-foreground">Darurat stok</span>
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2" title="Menerima nota pembelian langsung dari pemasok, termasuk harga beli">
-                        <input
-                          type="checkbox"
-                          checked={t.terimaPengadaan}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleTerimaPengadaanAction(t.id, !t.terimaPengadaan))}
-                        />
-                        <span className="text-xs text-muted-foreground">Pengadaan</span>
-                      </label>
-                      <label
-                        className="flex cursor-pointer items-center gap-2"
-                        title="Menerima nota barang yang diterima sebagai hibah, berikut nilainya"
+                      <BarisCentang
+                        untuk="Boleh tanya"
+                        label={`Boleh tanya${t.bolehTanya && t.jenis === 'grup' ? ' (dijawab di grup)' : ''}`}
+                        checked={t.bolehTanya}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleBolehTanyaAction(t.id, !t.bolehTanya))}
                       >
-                        <input
-                          type="checkbox"
-                          checked={t.terimaHibah}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleTerimaHibahAction(t.id, !t.terimaHibah))}
-                        />
-                        <span className="text-xs text-muted-foreground">Hibah</span>
-                      </label>
-                      <label
-                        className="flex cursor-pointer items-center gap-2"
-                        title="Menerima nota pesanan yang dikirim ke pemasok — barangnya belum datang"
+                        Boleh membuat nomor rumah sakit <strong>menjawab</strong> pertanyaan stok dan harga obat dari
+                        alamat ini. Terpisah dari centang lain: sebuah grup sangat wajar cuma menerima pemberitahuan
+                        tanpa nomor rumah sakit ikut bicara di dalamnya.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Darurat stok"
+                        label="Darurat stok"
+                        checked={t.terimaDaruratStok}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaDaruratAction(t.id, !t.terimaDaruratStok))}
                       >
-                        <input
-                          type="checkbox"
-                          checked={t.terimaPemesanan}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleTerimaPemesananAction(t.id, !t.terimaPemesanan))}
-                        />
-                        <span className="text-xs text-muted-foreground">Pemesanan</span>
-                      </label>
-                      <label
-                        className="flex cursor-pointer items-center gap-2"
-                        title="Menerima nota penjualan apotek, dan kabar saat sebuah nota dibatalkan — jauh lebih ramai daripada nota barang lain (16-46 per hari)"
+                        Menerima rekap barang yang stoknya sudah menyentuh ambang minimal, pada jam yang dijadwalkan.
+                        Isinya keadaan gudang — <strong>tidak menyebut satu pun pasien</strong>.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Pengadaan"
+                        label="Pengadaan"
+                        checked={t.terimaPengadaan}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaPengadaanAction(t.id, !t.terimaPengadaan))}
                       >
-                        <input
-                          type="checkbox"
-                          checked={t.terimaPenjualan}
-                          disabled={pending}
-                          onChange={() => jalankan(() => toggleTerimaPenjualanAction(t.id, !t.terimaPenjualan))}
-                        />
-                        <span className="text-xs text-muted-foreground">Penjualan</span>
-                      </label>
+                        Menerima nota pembelian langsung dari pemasok, <strong>termasuk harga beli</strong> — angka yang
+                        punya nilai dagang tersendiri. Dipisah dari centang lain justru supaya grup shift apotek bisa
+                        menerima pemberitahuan resep tanpa ikut membaca harga.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Hibah"
+                        label="Hibah"
+                        checked={t.terimaHibah}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaHibahAction(t.id, !t.terimaHibah))}
+                      >
+                        Menerima nota barang yang diterima sebagai hibah, berikut nilainya dan{' '}
+                        <strong>nama pemberinya</strong>. Terpisah dari Pengadaan karena batas kerahasiaannya berbeda:
+                        harga pemasok wajar dibatasi, nilai barang pemberian justru sering perlu dilihat lebih luas.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Pemesanan"
+                        label="Pemesanan"
+                        checked={t.terimaPemesanan}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaPemesananAction(t.id, !t.terimaPemesanan))}
+                      >
+                        Menerima nota pesanan yang dikirim ke pemasok — <strong>barangnya belum datang</strong>. Ini
+                        ujung yang lain dari Pengadaan, bukan penggantinya: yang ini berbunyi saat pesanan dikirim, yang
+                        itu saat barangnya diterima.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Penjualan"
+                        label="Penjualan"
+                        checked={t.terimaPenjualan}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaPenjualanAction(t.id, !t.terimaPenjualan))}
+                      >
+                        Menerima nota penjualan apotek, dan kabar saat sebuah nota dibatalkan.{' '}
+                        <strong>Jauh lebih ramai daripada nota barang lain — 16–46 pesan per hari</strong>, berbanding
+                        sekitar 2 untuk pengadaan.
+                      </BarisCentang>
                     </div>
                   </td>
                   <td className={cellClass}>

@@ -74,3 +74,49 @@
       color 0.15s ease;
   }
 }
+
+@layer components {
+  /* Petunjuk -- keterangan pendek di balik satu ikon.
+     Alasan lengkapnya (kenapa popover native, kenapa bukan untuk semua
+     keterangan, dan biaya Ctrl+F yang diterima) ada di components/ui/Petunjuk.tsx.
+     Yang tinggal di sini cuma bagian yang memang harus CSS. */
+  .petunjuk {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+  }
+
+  .petunjuk-tombol {
+    @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full
+           text-muted-foreground transition-colors hover:bg-muted hover:text-foreground;
+  }
+  .petunjuk-tombol:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  .petunjuk-isi {
+    @apply rounded-lg border bg-card p-3 text-xs leading-relaxed text-muted-foreground shadow-lg;
+    /* `min()` supaya di layar sempit ia tidak pernah melewati tepi layar --
+       popover di top layer tidak ikut terpotong oleh apa pun, termasuk oleh
+       viewport, jadi lebarnya harus dibatasi sendiri. */
+    width: min(20rem, calc(100vw - 2rem));
+    margin: 0;
+  }
+  .petunjuk-isi strong {
+    @apply font-medium text-foreground;
+  }
+
+  /* Menempel pada tombolnya bila peramban mendukung anchor positioning. Bila
+     tidak, popover tetap tampil di tengah layar (top layer) -- kurang menempel,
+     tetap terbaca, tetap bisa ditutup Esc. Degradasi, bukan kegagalan; diuji
+     dengan @supports-nya sengaja dipalsukan dan seluruh asersi tetap lolos. */
+  @supports (position-anchor: --x) {
+    .petunjuk-isi {
+      position: absolute;
+      position-anchor: var(--jangkar);
+      position-area: bottom span-right;
+      position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+      margin-top: 0.25rem;
+    }
+  }
+}

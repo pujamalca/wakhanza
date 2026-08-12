@@ -430,7 +430,7 @@ async function TabResep({ enabled, adaTujuanAktif }: { enabled: boolean; adaTuju
           pasien ke penerima yang keanggotaannya diatur di luar sistem. Yang
           perlu dibaca sebelum menyalakan, bukan setelah terlanjur. */}
       <Callout
-        variant="warning"
+        variant="privasi"
         className="mb-4"
         title="Pesan ini berisi data pasien, dan grup bukan sistem tertutup"
       >
@@ -631,13 +631,19 @@ async function TabPengadaan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
         <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep.
       </p>
 
-      {/* Sengaja TIDAK dilipat, dan isinya kebalikan dari peringatan di tab
-          Notifikasi resep: yang di sana memperingatkan adanya data pasien, yang
-          di sini justru menjelaskan ketiadaannya. Keduanya perlu dikatakan,
-          karena tanpa ini pembacanya wajar mengira seluruh halaman Farmasi
-          membawa risiko yang sama -- dan rumah sakit yang menunda menyalakan
-          notifikasi resep akan ikut menunda yang ini tanpa sebab. */}
-      <Callout className="mb-4" title="Nota pembelian tidak menyebut satu pun pasien">
+      {/* Isinya kebalikan dari peringatan di tab Notifikasi resep: yang di sana
+          memperingatkan adanya data pasien, yang di sini justru menjelaskan
+          ketiadaannya. Keduanya perlu dikatakan, karena tanpa ini pembacanya
+          wajar mengira seluruh halaman Farmasi membawa risiko yang sama -- dan
+          rumah sakit yang menunda menyalakan notifikasi resep akan ikut menunda
+          yang ini tanpa sebab.
+
+          DILIPAT sejak keterangan halaman ini ditata ulang, dan itu TIDAK
+          membatalkan alasan di atas: yang harus terbaca adalah kesimpulannya,
+          dan kesimpulan itu ADA DI JUDULNYA -- judul yang tetap terlihat tanpa
+          dibuka. Yang pindah ke balik lipatan cuma tabel mana yang dibaca.
+          Melipat kotak yang JUDULNYA tidak utuh sendirian tetap terlarang. */}
+      <Callout collapsible className="mb-4" title="Nota pembelian tidak menyebut satu pun pasien">
         Yang dibaca hanya <span className="font-mono">pembelian</span> dan <span className="font-mono">detailbeli</span>{' '}
         beserta master pemasok, barang, dan petugas — tidak ada satu kolom pun yang menautkan sebuah pembelian dengan
         seorang pasien, dan variabel pasien memang tidak tersedia untuk ditambahkan ke isi pesan. Yang tetap perlu
@@ -677,11 +683,9 @@ async function TabHibah({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: b
         Pengadaan.
       </p>
 
-      {/* Sengaja TIDAK dilipat, sama seperti padanannya di tab Pengadaan:
-          tanpa ini pembacanya wajar mengira seluruh halaman Farmasi membawa
-          risiko yang sama, dan rumah sakit yang menunda menyalakan notifikasi
-          resep akan ikut menunda yang ini tanpa sebab. */}
-      <Callout className="mb-4" title="Nota hibah tidak menyebut satu pun pasien">
+      {/* Dilipat, sama seperti padanannya di tab Pengadaan -- dan lewat alasan
+          yang sama: kesimpulannya ada di JUDUL, yang tetap terlihat. */}
+      <Callout collapsible className="mb-4" title="Nota hibah tidak menyebut satu pun pasien">
         Yang dibaca hanya <span className="font-mono">hibah_obat_bhp</span> dan{' '}
         <span className="font-mono">detailhibah_obat_bhp</span> beserta master pemberi, barang, dan petugas — tidak ada
         satu kolom pun yang menautkan sebuah penerimaan hibah dengan seorang pasien, dan variabel pasien memang tidak
@@ -746,7 +750,7 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
           dan "harga" akan terbaca sebagai fitur yang sama, lalu salah satunya
           dinyalakan dengan harapan yang keliru -- atau keduanya dinyalakan ke
           grup yang sama, yang berarti dua pesan untuk satu barang. */}
-      <Callout className="mb-4" title="Ini ujung yang lain dari Pengadaan, bukan penggantinya">
+      <Callout variant="warning" className="mb-4" title="Ini ujung yang lain dari Pengadaan, bukan penggantinya">
         <p>
           <span className="font-medium text-foreground">Pemesanan</span> berbunyi saat pesanan{' '}
           <span className="font-medium text-foreground">dikirim ke pemasok</span> — barangnya belum ada.{' '}
@@ -762,11 +766,9 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
         </p>
       </Callout>
 
-      {/* Sengaja TIDAK dilipat, sama seperti padanannya di tab Pengadaan dan
-          Hibah: tanpa ini pembacanya wajar mengira seluruh halaman Farmasi
-          membawa risiko yang sama, dan rumah sakit yang menunda menyalakan
-          notifikasi resep akan ikut menunda yang ini tanpa sebab. */}
-      <Callout className="mb-4" title="Nota pemesanan tidak menyebut satu pun pasien">
+      {/* Dilipat, sama seperti padanannya di tab Pengadaan dan Hibah: yang
+          harus terbaca adalah kesimpulannya, dan itu ada di judulnya. */}
+      <Callout collapsible className="mb-4" title="Nota pemesanan tidak menyebut satu pun pasien">
         Yang dibaca hanya <span className="font-mono">surat_pemesanan_medis</span> dan{' '}
         <span className="font-mono">detail_surat_pemesanan_medis</span> beserta master pemasok, barang, dan pegawai —
         tidak ada satu kolom pun yang menautkan sebuah pesanan dengan seorang pasien, dan variabel pasien memang tidak
@@ -872,7 +874,7 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
           kalimatnya "tidak ada kolom pasiennya"; di sini kolomnya ADA dan yang
           menahannya adalah keputusan kode. Menyamakan bunyinya akan menyembunyikan
           justru perbedaan yang paling perlu diketahui pembacanya. */}
-      <Callout className="mb-4" title="Tabel penjualan PUNYA kolom pasien — dan kolom itu sengaja tidak dibaca">
+      <Callout variant="privasi" className="mb-4" title="Tabel penjualan PUNYA kolom pasien — dan kolom itu sengaja tidak dibaca">
         <p>
           Berbeda dari Pengadaan, Pemesanan, dan Hibah, tabel{' '}
           <span className="font-mono">penjualan</span> punya <span className="font-mono">no_rkm_medis</span> dan{' '}

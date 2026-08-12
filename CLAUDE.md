@@ -1464,6 +1464,44 @@ Nasihat lama itu juga terbukti melahirkan bentuk barunya sendiri dari jebakan ya
 
 **Perubahan yang tidak bisa dibuktikan tanpa login, dibuktikan lewat `.next`, bukan lewat akun uji.** `grep -rl "<penanda>" .next/server` menjawab "apakah build ini memuat perubahannya" tanpa menyentuh `app_user` sama sekali. Membuat akun admin sementara untuk uji peramban bisa dilakukan lewat `npm run users` dan memang reversibel, tapi ia menambah akun berhak penuh ke sistem yang memegang data pasien -- tempuh hanya bila yang diuji memang perilaku sesudah login, dan hapus di alur yang sama.
 
+### Keterangan: empat tingkat, dan ikon hanya memikul satu di antaranya
+
+Halaman dashboard memuat **58.903 karakter** prosa penjelasan di 409 blok -- 43% di `/farmasi` saja, dan sekali baca seluruhnya sekitar 45 menit. Ruang vertikal sudah pernah jadi masalah nyata di sana (5.808 px sekali gulung sebelum dipecah jadi tab).
+
+**"Ganti semua penjelasan dengan ikon" DITOLAK, dan yang membantahnya bukan selera melainkan `Callout.tsx` sendiri**: judul yang tidak memuat kesimpulan "menyembunyikan seluruh pesannya di balik satu klik yang tidak ada alasan untuk ditekan". Ditambah tiga kerugian terukur: `title=` tidak pernah muncul di layar sentuh, isi popover tertutup tidak terjangkau Ctrl+F, dan peringatan data pasien wajib terbaca sebelum sakelarnya dinyalakan.
+
+Sumbunya BUKAN panjang-pendek melainkan **kapan wajib dibaca**. Ujinya satu kalimat: *kalau staf menekan kontrolnya tanpa membaca ini, apakah ada yang tidak bisa ditarik kembali?*
+
+| | Isi | Bentuk | Peran ikon |
+|---|---|---|---|
+| **A — pagar** | dibaca SEBELUM tindakan tak terbalikkan | `Callout` terbentang | jangkar visual, **bukan** pengganti |
+| **B — orientasi** | "ini halaman apa", dibaca sekali | `Callout collapsible` | — (judul yang jadi ringkasannya) |
+| **C — rujukan** | "centang ini artinya apa" | `Petunjuk` | satu-satunya pemicu |
+| **D — buang** | alasan implementasi | pindah ke berkas ini | tidak ada |
+
+**Tingkat B memakai `Callout collapsible`, BUKAN `Petunjuk`** -- ini koreksi atas rancangan awalnya, dan sebabnya menentukan: `<details>` dibuka SENDIRI oleh peramban saat isinya kena Ctrl+F, sementara isi popover ber-`display:none` tidak pernah terjangkau. Untuk blok prosa yang berdiri sendiri, melipat lebih baik daripada menyembunyikan di balik ikon. `Petunjuk` dipakai hanya untuk keterangan yang MENEMPEL pada satu baris atau kontrol, tempat sebuah kotak tersendiri akan memakan ruang vertikal yang tidak sepadan.
+
+**`Petunjuk` (`components/ui/Petunjuk.tsx`) memakai `popover` native + anchor positioning, dan itu bukan pilihan gaya.** `tableWrapperClass` berbunyi `overflow-x-auto`; begitu satu sumbu bukan `visible`, sumbu satunya ikut jadi `auto`. Diukur dengan hit-test `elementFromPoint` -- bukan `getBoundingClientRect`, yang tetap melaporkan posisi tata letak walau pikselnya tidak pernah dilukis:
+
+| Bentuk | Terlihat di luar pembungkus | Melahirkan scrollbar |
+|---|---|---|
+| `position:absolute` | **tidak** (hit-test kena BODY) | **ya** |
+| `popover` + anchor | **ya** | tidak |
+
+Gratis dari peramban: top layer, Esc, klik-di-luar, satu popover pada satu waktu. Nol JavaScript, nol paket baru, nol ikon baru (`IconInfo`/`IconAlertTriangle`/`IconShield` sudah ada). Tanpa dukungan anchor positioning ia jatuh ke tengah layar -- **degradasi, bukan kegagalan**, dibuktikan dengan `@supports`-nya sengaja dipalsukan.
+
+Tiga hal yang gampang dirusak tanpa sadar:
+
+- **`untuk` wajib menyebut SUBJEKNYA, bukan kata "info".** Itu yang dibacakan pembaca layar; di dalam tabel berisi enam ikon serupa, "Keterangan" sendirian membuat keenamnya tidak bisa dibedakan sama sekali.
+- **Tombolnya BERSAUDARA dengan `<label>`, tidak pernah di dalamnya.** Apa pun yang diklik di dalam label ikut menyalakan kontrolnya, jadi menekan ikon keterangan akan MENGUBAH setelan yang artinya baru saja hendak ditanyakan -- tanpa galat, cuma centang yang berpindah sendiri. `BarisCentang` di `farmasi/TargetTable.tsx` ada untuk itu.
+- **`<summary>` TIDAK boleh dijadikan flex** saat ikon ditambahkan ke `Callout`: Chromium menghapus segitiga pembukanya, sehingga satu-satunya tanda bahwa kotak itu bisa dibuka ikut hilang. Perataannya dikerjakan span di dalamnya, dan isinya digeser `ml-6` supaya sejajar TEKS judul, bukan ikonnya.
+
+**`Callout` mendapat varian `privasi`** (perisai), berbagi warna dengan `warning` karena keduanya sama-sama pagar -- yang berbeda JENISNYA. Di halaman yang memuat keduanya (`/farmasi`) pembedaan itulah yang membuat keduanya bisa dipisahkan tanpa dibaca dulu. `neutral` sengaja TANPA ikon: pada varian yang paling sering dipakai, ikon berhenti menandai apa pun.
+
+**Gerbangnya `components/ui/petunjuk.test.ts`**, dan ia ada karena pola lamanya gampang kembali: satu atribut, terlihat rapi di kode, dan **tidak menghasilkan galat apa pun** -- di peramban pengembang (yang punya tetikus) ia bahkan tampak bekerja. Uji itu gagal bila ada `title=` berisi literal >= 25 karakter pada elemen HTML non-interaktif. Ambangnya PANJANG karena yang salah bukan `title=` melainkan `title=` yang memikul KETERANGAN; nilai data (`title={t.chatId}`) dan tombol yang teksnya sudah terlihat tetap lolos. Dibuktikan MENGGIGIT atas bentuk yang dulu dipakai, bukan diasumsikan.
+
+Hasilnya terukur: **9 keterangan berkalimat** pindah dari `title=` ke `Petunjuk` (nol tersisa), Callout terlipat **12 -> 15**, dan **9.988 karakter** tidak lagi terbentang secara bawaan sementara seluruh kesimpulannya tetap terbaca sebagai teks biasa.
+
 ### Design system dashboard -- `src/components/ui/`
 Semua halaman `(dashboard)/**` dan `/login` memakai primitif dari `src/components/ui/` (barrel export lewat `index.ts`) alih-alih menulis ulang class Tailwind mentah per halaman: `Button`/`LinkButton` (varian `primary`/`secondary`/`destructive`/`ghost`, ukuran `xs`/`sm`/`md`), `Input`/`Textarea`/`Select` (prop `fieldSize`, BUKAN `size` -- `size` sudah jadi atribut HTML asli di `<select>`), `Card` (+ `cardClassName` string untuk kasus elemen bukan `<div>`, mis. `<form>`), `Badge` (+ `outboxStatusVariant()` untuk status `Outbox`), `PageHeader`, `FilterChip`, `CheckboxList` (pengganti `<select multiple>` asli -- checklist + "pilih semua" + pencarian-jika->8 opsi, dipakai filter wilayah/cara-bayar di `/broadcast` dan `/broadcast-terjadwal`), `EmptyState` (opsional `icon`/`title`/`action` -- bentuk lama `<EmptyState>teks</EmptyState>` tetap berlaku), `Tabs` (tab berbasis URL; `<nav>` + `aria-current`, **bukan** `role="tablist"` -- lihat §`/farmasi` dipecah jadi TAB) dan `Callout` (kotak keterangan berjudul, opsional dilipat lewat `<details>` asli), `StatCard` (kotak KPI + sparkline), `Pagination`, `Skeleton`/`SkeletonTable`, `icons.tsx` (~20 ikon garis 24-grid, digambar sendiri alih-alih menambah paket ikon yang menarik ribuan modul ke bundel klien), dan class helper tabel (`tableWrapperClass`/`theadClass`/`rowClass`/`cellClass`). `WindowModeFields` (`/broadcast-terjadwal`) menerima daftar preset lewat **prop**, bukan mengimpor `./filters` -- modul itu menarik `khanza/*` yang berujung ke koneksi database dan tidak boleh masuk bundel klien.
 

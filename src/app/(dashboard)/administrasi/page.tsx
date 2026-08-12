@@ -322,7 +322,7 @@ export default async function AdministrasiPage({
            * BERUBAH secara mendasar begitu salah satu sakelar di bawah menyala,
            * dan itu bukan keterangan yang boleh ditemukan belakangan.
            */}
-          <Callout variant="warning" className="mb-4" title="Yang dikirim di sini adalah ISI pemeriksaan, bukan kabar tentangnya">
+          <Callout variant="privasi" className="mb-4" title="Yang dikirim di sini adalah ISI pemeriksaan, bukan kabar tentangnya">
             <p>
               Ketiga pemberitahuan ini sudah berjalan sejak lama dan isinya sengaja tidak menyebut apa-apa: &ldquo;hasil
               pemeriksaan Anda sudah tersedia&rdquo;, &ldquo;tagihan Anda telah terbit&rdquo;. Menyalakan sakelar di
