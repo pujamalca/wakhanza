@@ -97,6 +97,11 @@ export const TRIGGER_LABEL: Record<string, string> = {
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
   AUTO_REPLY: 'Balasan otomatis',
+  // Perintah /…-jawaban-otomatis lewat WhatsApp (045). Labelnya menyebut
+  // "perintah" dan bukan sekadar "balasan": penerimanya staf yang sedang
+  // menyusun aturan, jadi baris ini di Antrean/Log tidak boleh terbaca sebagai
+  // pemberitahuan pasien yang gagal sampai.
+  WA_PERINTAH: 'Perintah lewat WhatsApp',
   // Dua-duanya BUKAN pesan ke pasien. Labelnya menyebut "apotek" secara
   // eksplisit supaya baris di halaman Antrean dan Log tidak terbaca sebagai
   // pemberitahuan yang gagal sampai ke pasien -- penerimanya memang staf.

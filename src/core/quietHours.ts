@@ -139,8 +139,46 @@ const BYPASS_QUIET_HOURS = new Set([
    * bagi keduanya.
    */
   'FARMASI_RESEP_REKAP',
+  /**
+   * ERM_PENILAIAN_UMUM (044): alasan yang sama persis dengan kedua rekap di
+   * atasnya -- kelas WAKTU, jam kirimnya dipilih staf sendiri
+   * (`erm.penilaian_jam`), dan penerimanya grup/petugas KEPERAWATAN, bukan
+   * pasien yang sedang tidur.
+   *
+   * Ketiadaannya di daftar ini adalah KELALAIAN, bukan keputusan: tidak ada
+   * satu pun sebutan jam tenang di runner-nya, migrasinya, maupun halamannya.
+   * Kedua slot bawaannya (13:00 dan 19:30) kebetulan jatuh di luar jam tenang,
+   * jadi ia bekerja benar apa adanya -- dan justru itu yang membuat lubangnya
+   * tidak bergejala.
+   *
+   * Yang membukanya: migrations/044 menuliskan bahwa `erm.penilaian_jam`
+   * "menerima daftar berapa pun". Jadi slot 21:30 yang disetel staf adalah
+   * pemakaian yang SAH menurut fiturnya sendiri, dan tanpa baris ini ia
+   * tertahan sampai 07:00 keesokan hari -- rekap "asesmen hari ini" yang tiba
+   * setelah harinya lewat, tanpa satu pun galat. Bentuk kegagalan yang sama
+   * persis dengan yang membuat FARMASI_RESEP_REKAP ada di sini.
+   *
+   * Berbeda dari keempat pemicu nota barang, menambahkannya di sini TIDAK
+   * mengubah apa pun yang sedang berjalan: `erm.penilaian_enabled` masih mati.
+   */
+  'ERM_PENILAIAN_UMUM',
   'BPJS_BATAL',
   'ADMINISTRASI',
+  /**
+   * WA_PERINTAH (045): balasan atas percakapan yang orangnya MULAI SENDIRI
+   * beberapa detik lalu -- alasan yang sama persis dengan AUTO_REPLY, dan
+   * bahkan lebih tegas: ini bukan jawaban atas pertanyaan melainkan langkah
+   * berikutnya dari sebuah wizard. Menahannya sampai 07.00 berarti staf
+   * mengetik nama aturan pukul 21.30 lalu tidak pernah ditanyai kata kuncinya,
+   * sementara sesinya sendiri sudah kedaluwarsa jauh sebelum balasannya
+   * berangkat -- fiturnya tidak sekadar lambat, ia mustahil dipakai selama
+   * sepuluh jam setiap hari.
+   *
+   * Penerimanya pun bukan pasien melainkan alamat yang terdaftar di
+   * `wa_command_admin`, jadi kedua alasan yang membenarkan pengecualian ini
+   * berlaku sekaligus (ada yang menunggu, DAN penerimanya staf).
+   */
+  'WA_PERINTAH',
 ]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */

@@ -18,6 +18,21 @@ import { enqueueMessage, type PipelineContext } from './pipeline';
  * meminta berhenti.
  *
  * Setiap baris ditandai pada `idempotency_key` dan dibersihkan di afterAll.
+ *
+ * IDENTITAS DI SINI WAJIB SINTETIS, dan itu bukan kerapian. Berkas uji ikut
+ * ter-commit dan terdorong ke remote, sementara nama pasien serta no. RM adalah
+ * persis yang §9.7 larang keluar dari mesin ini. Nilai yang dipakai dulu
+ * (`RISNAWATI`, `LASTRI`, RM `000130`/`007360`) ternyata BUKAN karangan: nomor
+ * RM-nya nyata di `pasien`, dan kedua namanya cocok dengan 2 dan 7 baris
+ * sungguhan -- tersalin saat menelusuri data produksi, lalu tidak pernah
+ * ditinjau lagi karena uji ini memang hijau.
+ *
+ * Yang membuatnya gampang terulang: hijau tidak mengatakan apa pun soal ini.
+ * Jadi bentuknya dibuat mustahil disalahpahami -- nama berawalan `PASIEN UJI`
+ * dan RM berawalan `UJI`, keduanya terbukti nol baris di `pasien`. `Jantung`
+ * sengaja DIBIARKAN: nama poli adalah katalog layanan yang memang diumumkan RS,
+ * bukan identitas seseorang (alasan yang sama membuat poli sensitif tetap
+ * dijawab saat pasien menyebutnya sendiri).
  */
 
 const TANDA = 'INTTESTBPJS';
@@ -83,11 +98,11 @@ describe('BPJS_BATAL -- penerimanya STAF', () => {
     await enqueueMessage(
       {
         idempotencyKey: k,
-        noRkmMedis: '000130',
+        noRkmMedis: 'UJI0001',
         rawPhone: null,
         chatId: GRUP_UJI,
         eventAt: new Date(),
-        vars: { nama_pasien: 'RISNAWATI', no_rm: '000130', nama_poli: 'Jantung', tanggal: '2026-08-05' },
+        vars: { nama_pasien: 'PASIEN UJI SATU', no_rm: 'UJI0001', nama_poli: 'Jantung', tanggal: '2026-08-05' },
       },
       ctxBatal(),
     );
@@ -100,8 +115,8 @@ describe('BPJS_BATAL -- penerimanya STAF', () => {
     // penerima, walau no_rkm_medis-nya sengaja tetap disimpan supaya pencarian
     // di /antrean menemukan ke mana saja pesan pasien ini pergi.
     expect(row!.phoneE164).toBeNull();
-    expect(row!.noRkmMedis).toBe('000130');
-    expect(row!.body).toContain('RISNAWATI');
+    expect(row!.noRkmMedis).toBe('UJI0001');
+    expect(row!.body).toContain('PASIEN UJI SATU');
   });
 
   it('MELEWATI jam tenang -- slot yang batal sering untuk besok pagi', async () => {
@@ -141,11 +156,11 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
     await enqueueMessage(
       {
         idempotencyKey: k,
-        noRkmMedis: '007360',
+        noRkmMedis: 'UJI0002',
         rawPhone: null,
         phoneOverride: NOMOR_OPTOUT,
         eventAt: new Date(),
-        vars: { nama_pasien: 'YESNI' },
+        vars: { nama_pasien: 'PASIEN UJI DUA' },
       },
       ctxKontrol(),
     );
@@ -160,7 +175,7 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
     await enqueueMessage(
       {
         idempotencyKey: k,
-        noRkmMedis: '007360',
+        noRkmMedis: 'UJI0002',
         rawPhone: null,
         phoneOverride: NOMOR_UJI,
         eventAt: MALAM,
@@ -178,12 +193,12 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
     await enqueueMessage(
       {
         idempotencyKey: k,
-        noRkmMedis: '007360',
+        noRkmMedis: 'UJI0002',
         rawPhone: null,
         phoneOverride: NOMOR_UJI,
         eventAt: new Date(),
         kdPoli: 'U0012',
-        vars: { nama_pasien: 'YESNI', nama_poli: 'Jantung' },
+        vars: { nama_pasien: 'PASIEN UJI DUA', nama_poli: 'Jantung' },
       },
       ctxKontrol({ sensitivePoli: ['U0012'] }),
     );
@@ -207,11 +222,11 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
       await enqueueMessage(
         {
           idempotencyKey: k,
-          noRkmMedis: '007360',
+          noRkmMedis: 'UJI0002',
           rawPhone: null,
           phoneOverride: NOMOR_UJI,
           eventAt: new Date(),
-          vars: { nama_pasien: 'YESNI', tanggal_kontrol: tgl, sisa_hari: sisa },
+          vars: { nama_pasien: 'PASIEN UJI DUA', tanggal_kontrol: tgl, sisa_hari: sisa },
         },
         ctxKontrol(),
       );
@@ -239,11 +254,11 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
     expect(turunan.length).toBeLessThanOrEqual(64);
 
     await enqueueMessage(
-      { idempotencyKey: dasar, noRkmMedis: '007360', rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: {} },
+      { idempotencyKey: dasar, noRkmMedis: 'UJI0002', rawPhone: null, phoneOverride: NOMOR_UJI, eventAt: new Date(), vars: {} },
       ctxKontrol(),
     );
     await enqueueMessage(
-      { idempotencyKey: turunan, noRkmMedis: '007360', rawPhone: null, chatId: GRUP_UJI, eventAt: new Date(), vars: {} },
+      { idempotencyKey: turunan, noRkmMedis: 'UJI0002', rawPhone: null, chatId: GRUP_UJI, eventAt: new Date(), vars: {} },
       ctxKontrol(),
     );
 
@@ -261,11 +276,11 @@ describe('BPJS_KONTROL -- penerimanya PASIEN', () => {
     const turunan = turunkanKunciTujuan(dasar, GRUP_UJI);
 
     await enqueueMessage(
-      { idempotencyKey: dasar, noRkmMedis: '007360', rawPhone: null, phoneOverride: NOMOR_OPTOUT, eventAt: new Date(), vars: {} },
+      { idempotencyKey: dasar, noRkmMedis: 'UJI0002', rawPhone: null, phoneOverride: NOMOR_OPTOUT, eventAt: new Date(), vars: {} },
       ctxKontrol(),
     );
     await enqueueMessage(
-      { idempotencyKey: turunan, noRkmMedis: '007360', rawPhone: null, chatId: GRUP_UJI, eventAt: new Date(), vars: {} },
+      { idempotencyKey: turunan, noRkmMedis: 'UJI0002', rawPhone: null, chatId: GRUP_UJI, eventAt: new Date(), vars: {} },
       ctxKontrol(),
     );
 
@@ -310,7 +325,7 @@ describe('LAB_REQUEST / RAD_REQUEST -- pasangan LAB_RESULT/RAD_RESULT dari ujung
         rawPhone: null,
         phoneOverride: NOMOR_OPTOUT,
         eventAt: new Date(),
-        vars: { nama_pasien: 'LASTRI', nama_dokter: 'dr. Uji', tanggal: '2026-08-06' },
+        vars: { nama_pasien: 'PASIEN UJI TIGA', nama_dokter: 'dr. Uji', tanggal: '2026-08-06' },
       },
       ctxPermintaan(triggerCode),
     );
@@ -339,7 +354,7 @@ describe('LAB_REQUEST / RAD_REQUEST -- pasangan LAB_RESULT/RAD_RESULT dari ujung
         eventAt: new Date(),
         // Satu kode sensitif di antara beberapa sudah cukup (core/privacy.ts).
         kdJenisPrw: ['242-RJ', '290-RJ'],
-        vars: { nama_pasien: 'LASTRI', nama_dokter: 'dr. Uji' },
+        vars: { nama_pasien: 'PASIEN UJI TIGA', nama_dokter: 'dr. Uji' },
       },
       { ...ctxPermintaan('LAB_REQUEST'), sensitiveExam: ['290-RJ'] },
     );

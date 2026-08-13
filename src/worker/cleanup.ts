@@ -15,6 +15,7 @@ import { TERMINAL_OUTBOX_STATUSES } from '@/core/outboxStatus';
 import { normalizePhone } from '@/core/phone';
 import { logger, safeError } from '@/lib/logger';
 import { daftarBerkasMedia, hapusBerkasLampiran } from '@/lib/mediaStorage';
+import { pangkasSesiPerintah } from './commandReply';
 
 const RETENTION_DAYS = 90;
 
@@ -94,9 +95,34 @@ async function cleanupOldRecords(): Promise<void> {
   ).padStart(2, '0')}000`;
   const deletedPantau = await PenjualanPantau.destroy({ where: { notaJual: { [Op.lt]: prefixNota } } });
 
+  /**
+   * Sesi wizard perintah (migrations/045) dipangkas jauh lebih rapat: SEHARI,
+   * bukan 90 hari.
+   *
+   * Ia bukan riwayat melainkan keadaan sesaat, dan umur berlakunya sudah
+   * ditegakkan di tempat lain (`autoreply.wa_sesi_timeout_menit`, bawaan 10
+   * menit) -- baris yang lebih tua dari itu sudah pasti diabaikan `bacaSesi()`.
+   * Yang dikerjakan di sini cuma membuang bangkainya supaya tabelnya tidak
+   * tumbuh satu baris per percakapan yang pernah ditinggalkan di tengah.
+   *
+   * Sehari, bukan sepuluh menit, semata-mata supaya baris yang masih dipegang
+   * percakapan berjalan mustahil ikut terbawa kalau batas waktunya kelak
+   * dinaikkan staf.
+   */
+  const deletedSesiPerintah = await pangkasSesiPerintah(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
   logger.info(
-    { deletedOutbox, deletedLogs, deletedAutoReply, deletedInbound, deletedSessionEvents, deletedPantau, hariInbox },
-    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message, wa_session_event & penjualan_pantau lama dihapus',
+    {
+      deletedOutbox,
+      deletedLogs,
+      deletedAutoReply,
+      deletedInbound,
+      deletedSessionEvents,
+      deletedPantau,
+      deletedSesiPerintah,
+      hariInbox,
+    },
+    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message, wa_session_event, penjualan_pantau & wa_command_session lama dihapus',
   );
 
   await cleanupOrphanMedia();

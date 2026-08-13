@@ -8,6 +8,7 @@ import { catatTransisiStatus } from './sessionHistory';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 import { handleInboundMessageSafely } from './autoReply';
 import { cobaBalasPersediaanDariGrup } from './stokReply';
+import { cobaPerintahWaSafely } from './commandReply';
 import { isOptOutRequest, optOutTriggerCodes } from '@/core/optOut';
 import {
   isIndividualAddress,
@@ -422,8 +423,36 @@ export async function initWaClient(): Promise<Client> {
        */
       let dibalas = false;
       try {
-        const hasil = await cobaBalasPersediaanDariGrup(message);
-        dibalas = hasil.ditangani;
+        /**
+         * PERINTAH diperiksa LEBIH DULU, dan urutannya mengikat: cabang
+         * persediaan selalu menjawab begitu kata kuncinya kena, jadi nama
+         * aturan atau isi balasan yang kebetulan memuat kata "stok"/"harga"
+         * akan ditelan sebagai pencarian obat -- staf menerima daftar katalog
+         * di tengah percakapan wizard, dan langkahnya tidak pernah maju.
+         *
+         * Daftar putihnya pun BERBEDA (`wa_command_admin`, bukan
+         * `farmasi_target.boleh_tanya`), jadi grup yang cuma boleh bertanya
+         * stok tetap jatuh ke cabang di bawah seolah fitur ini tidak ada.
+         */
+        const perintah = await cobaPerintahWaSafely({
+          chatId: message.from,
+          // Di grup, yang menjawab wizard harus peserta yang MEMULAINYA. Tanpa
+          // `author`, sesinya terkunci ke grupnya sendiri -- artinya siapa pun
+          // di dalamnya bisa melanjutkan, yang masih aman karena grupnya sudah
+          // terdaftar, tapi tidak seketat yang seharusnya.
+          pengirimId: message.author ?? message.from,
+          waMessageId: kunciPesanMasuk(message),
+          teks: message.body ?? '',
+          jenis: 'grup',
+          phoneE164: null,
+        });
+
+        if (perintah.ditangani) {
+          dibalas = true;
+        } else {
+          const hasil = await cobaBalasPersediaanDariGrup(message);
+          dibalas = hasil.ditangani;
+        }
       } catch (err) {
         // Kegagalan menjawab satu grup tidak boleh menjatuhkan pencatatan
         // pesan masuk -- itu satu-satunya jejak bahwa pesannya pernah datang.
@@ -479,6 +508,41 @@ export async function initWaClient(): Promise<Client> {
       } catch (err) {
         logger.error({ phone: maskPhone(phoneE164), ...safeError(err) }, 'gagal memproses permintaan berhenti kirim otomatis');
       }
+      await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164, dibalas: true });
+      return;
+    }
+
+    /**
+     * PERINTAH lewat WhatsApp (045). Diperiksa SESUDAH permintaan berhenti dan
+     * SEBELUM balasan otomatis, dan ketiga posisinya disengaja:
+     *
+     * - Sesudah opt-out, karena aturan apa pun yang ditulis staf tidak boleh
+     *   bisa menyandera permintaan berhenti. Frasanya tiga kata dan praktis
+     *   mustahil terketik sebagai jawaban wizard, tapi urutannya tetap tidak
+     *   dibalik.
+     * - Sebelum `handleInboundMessage`, bukan di dalamnya: sakelarnya berdiri
+     *   sendiri dari `autoreply.enabled`, supaya RS bisa menyusun aturannya
+     *   lewat WhatsApp sebelum menyalakan balasan otomatis. Di dalam, ia akan
+     *   mati bersama fungsi itu pada baris pertamanya.
+     * - Karena itu pula ia mendahului cabang persediaan, yang berada di dalam
+     *   `handleInboundMessage` -- cabang itu selalu menjawab begitu kata
+     *   kuncinya kena, dan akan menelan isi balasan yang menyebut "harga".
+     *
+     * Alamat yang TIDAK terdaftar di `wa_command_admin` didiamkan: hasilnya
+     * `ditangani: false`, jadi pesannya lanjut ke penanganan biasa seolah fitur
+     * ini tidak ada.
+     */
+    const perintah = await cobaPerintahWaSafely({
+      chatId: message.from,
+      // Obrolan perorangan: pengirimnya adalah obrolannya sendiri. Bentuk kunci
+      // sesi jadi seragam dengan grup tanpa cabang NULL yang harus diingat.
+      pengirimId: message.from,
+      waMessageId: kunciPesanMasuk(message),
+      teks: message.body ?? '',
+      jenis: 'perorangan',
+      phoneE164,
+    });
+    if (perintah.ditangani) {
       await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164, dibalas: true });
       return;
     }

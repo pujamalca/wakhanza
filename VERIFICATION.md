@@ -4869,3 +4869,348 @@ terbukti separuh: penandanya memang maju ke `2026-08-13 13:00` sendiri.
 
 Jangan membalik klaim ini ke arah sebaliknya: nol baris di sini BUKAN bukti bahwa
 jalur terjadwalnya tidak bekerja.
+
+---
+
+## Audit kesesuaian fitur terhadap desain sistem (13 Agustus 2026)
+
+Sasarannya dua: membuktikan fitur yang berjalan memang sesuai desain, dan menambal
+bagian desain yang belum terdokumentasi. Hasilnya terbelah tajam -- **produknya
+lolos setiap invarian yang dijaga mesin**, sementara dokumen desainnya
+(`ARCHITECTURE.md`) berhenti di Fase 0-4.
+
+### Gerbang: seluruhnya lolos
+
+```
+tsc --noEmit                    0 galat
+eslint .                        0 galat
+jest                            50 suite / 852 uji lolos   (sebelumnya 849)
+jest --config jest.integration  3 suite / 46 uji lolos      (MariaDB sungguhan)
+
+npm run verify:db
+  [ok] sik      : tersambung, 1157 tabel, kolom lengkap
+  [ok] sik      : tulis DITOLAK (benar)
+  [ok] wakhanza : tersambung, 25 tabel
+  [ok] audit_log: DELETE/UPDATE DITOLAK (benar)
+
+npm run verify:plans            56 pemeriksaan, 239 baris EXPLAIN, lolos
+```
+
+### Temuan 1: gerbang label MENGKLAIM kelengkapan yang tidak dimilikinya
+
+`labels.test.ts` menjaga setiap kode pemicu punya label manusia -- kegagalan yang
+sudah terjadi TIGA kali (`FARMASI_PENGADAAN`/`_PEMESANAN`/`_HIBAH` hidup
+berbulan-bulan tanpa label, sehingga Antrean dan Log menampilkan kode mentah).
+Komentarnya menyatakan konstanta `TRIGGER_*` di `src/worker/*.ts` adalah
+"satu-satunya sumber kebenaran soal kode mana yang bisa muncul di layar".
+
+**Klaim itu keliru, dan terukur.** `outbox` produksi memuat 20 kode berbeda:
+
+```sql
+SELECT DISTINCT trigger_code FROM outbox ORDER BY 1;
+-- ADMINISTRASI, AUTO_REPLY, BILLING_READY, BOOK_CANCEL, BPJS_BATAL, BROADCAST,
+-- FARMASI_HIBAH, FARMASI_PENGADAAN, FARMASI_PENJUALAN, FARMASI_PENJUALAN_REKAP,
+-- FARMASI_PENYERAHAN, FARMASI_RESEP_REKAP, FARMASI_STOK_DARURAT, FARMASI_UJI,
+-- FARMASI_VALIDASI, KONTROL_TERBIT, LAB_REQUEST, PHARMACY_READY, QUEUE_REG,
+-- RESULT_READY
+```
+
+Gerbang lamanya menjaring 12 kode dan **meloloskan delapan**:
+
+```
+gerbang lama menjaring: 12 kode
+  BPJS_KONTROL        -> LOLOS (tak pernah diperiksa)
+  BPJS_BATAL          -> LOLOS
+  ADMINISTRASI        -> LOLOS
+  AUTO_REPLY          -> LOLOS
+  BROADCAST           -> LOLOS
+  FARMASI_UJI         -> LOLOS
+  FARMASI_VALIDASI    -> LOLOS
+  FARMASI_PENYERAHAN  -> LOLOS
+```
+
+Sebabnya: `outbox.trigger_code` lahir dari `PipelineContext.triggerCode`, dan itu
+diisi lewat **empat bentuk berbeda** -- konstanta runner, properti objek
+(`triggerCode: 'BROADCAST'`), parameter berdefault (`triggerCode =
+'ADMINISTRASI'` di `pipeline.ts`), dan argumen pertama `loadFarmasiContext()`.
+Bentuk kedua justru yang paling gampang dipakai fitur berikutnya.
+
+Kedelapannya kebetulan punya label hari ini, jadi **tidak ada bug yang sedang
+berjalan** -- tapi kebetulan bukan penegakan. Gerbangnya kini menjaring keempat
+bentuk (23 kode) dan sengaja TIDAK menjaring prefiks yang cuma dipakai sebagai
+kunci idempoten (`BPJS_BATAL_REKAP`, `BROADCAST_FOLLOWUP`, `BOOKING_SCAN`),
+karena ketiganya tidak pernah menjadi `trigger_code`.
+
+**Dibuktikan MENGGIGIT**, bukan diasumsikan -- label `BPJS_KONTROL` (salah satu
+dari delapan yang dulu lolos) dilepas sengaja lalu dikembalikan:
+
+```
+× setiap pemicu yang bisa masuk outbox punya label manusianya (2 ms)
+  +   "BPJS_KONTROL"
+Tests: 1 failed, 12 passed, 13 total
+```
+
+### Temuan 2: ERM_PENILAIAN_UMUM tertinggal dari daftar lewat jam tenang
+
+Kelas WAKTU dengan jam yang dipilih staf sendiri melewati jam tenang -- aturan
+yang sudah ditegakkan untuk `FARMASI_STOK_DARURAT`, `FARMASI_PENJUALAN_REKAP`,
+dan `FARMASI_RESEP_REKAP`, dengan alasan yang sama: menundukkannya berarti
+diam-diam mengabaikan jam yang baru saja mereka setel. `ERM_PENILAIAN_UMUM`
+memenuhi setiap syaratnya dan **tidak ada di daftar**.
+
+Itu KELALAIAN, bukan keputusan, dan dibuktikan dengan mencarinya:
+
+```
+grep -n "jam tenang|quiet|BYPASS" src/worker/penilaianRunner.ts \
+      migrations/044_erm_penilaian.sql src/app/(dashboard)/erm/penilaian-umum/*.tsx
+-> (kosong)
+```
+
+Tidak ada satu pun sebutan jam tenang di seluruh fitur itu. Kedua slot bawaannya
+(13:00 dan 19:30) kebetulan jatuh di luar jam tenang, jadi ia bekerja benar apa
+adanya -- dan justru itu yang membuat lubangnya tidak bergejala. Yang membukanya
+`migrations/044` sendiri, yang menuliskan `erm.penilaian_jam` "menerima daftar
+berapa pun": slot 21:30 karena itu pemakaian yang SAH menurut fiturnya sendiri,
+dan tanpa perbaikan ini ia tertahan sampai 07:00 keesokan hari.
+
+Ketiga rekap kini dipatok BERSAMA-SAMA, dan yang dijaga bukan nilai
+masing-masing melainkan bahwa ketiganya SAMA. Dibuktikan menggigit dengan
+mengomentari barisnya lalu mengembalikannya:
+
+```
+× ketiga rekap berjadwal sama-sama MELEWATI jam tenang (2 ms)
+Tests: 1 failed, 17 passed, 18 total
+```
+
+**Nol perubahan di produksi**: `erm.penilaian_enabled` masih mati. Berbeda dari
+keempat pemicu nota barang, yang komentarnya juga menyatakan "jam tenang
+dilewati" sementara perilakunya tidak -- keempatnya sedang MENYALA, jadi itu
+tetap tidak disentuh dan tetap keputusan pemilik sistem.
+
+### Temuan 3: identitas pasien SUNGGUHAN di dalam berkas uji
+
+`src/worker/bpjsRunner.int.test.ts` memakai `RISNAWATI`, `YESNI`, `LASTRI`, dan
+no. RM `000130`/`007360`. Diperiksa terhadap `alca` dengan `COUNT(*)` saja --
+tanpa menarik satu baris pun:
+
+```
+rm_000130_ada        1     <- nomor RM NYATA
+nama_cocok_rm        0     <- tapi bukan bernama RISNAWATI
+nama_risnawati_ada   2     <- nama itu ada pada 2 pasien sungguhan
+nama_yesni_ada       0
+nama_lastri_ada      7     <- dan ini pada 7 pasien sungguhan
+rm_007360            1     <- nomor RM NYATA
+```
+
+Pasangannya memang tidak cocok, jadi ia bukan salinan utuh satu rekam -- tapi
+nomor RM-nya nyata dan kedua namanya ada di tabel pasien. Berkas uji ikut
+ter-commit dan terdorong ke remote, sementara ini persis yang §9.7 larang keluar
+dari mesin ini. Kegagalannya tidak bergejala: uji itu hijau, dan hijau tidak
+mengatakan apa pun soal ini.
+
+Diganti dengan nilai yang terbukti nol baris di `pasien` (`PASIEN UJI SATU/DUA/
+TIGA`, RM `UJI0001`/`UJI0002`), berikut catatan di kepala berkas supaya bentuknya
+mustahil disalahpahami. `Jantung` sengaja DIBIARKAN: nama poli adalah katalog
+layanan yang memang diumumkan RS, bukan identitas seseorang. Uji integrasinya
+tetap lolos seluruhnya (46 uji, 3 suite) terhadap database sungguhan.
+
+### Yang ditambal di ARCHITECTURE.md
+
+Dokumen desainnya berhenti di Fase 0-4 sementara CLAUDE.md membawa seluruh
+keputusan sesudahnya. Itu pembagian yang salah: CLAUDE.md dimuat ke SETIAP sesi,
+sementara ARCHITECTURE.md justru yang ditunjuk sebagai bacaan wajib sebelum
+menyentuh kode. Selisihnya diukur, bukan dikira:
+
+| Seksi | Klaim lama | Kenyataan |
+|---|---|---|
+| §1 | "Next.js 14", "1.234 tabel", "node-cron (H-1, pembersihan)" | Next 16.2.12; 1157 tabel; 15 siklus pemicu |
+| §3 | 11 tabel `001_init` | **24 tabel** + 8 kolom baru di `outbox`, 2 di `template`, 1 nilai enum status |
+| §4.1 | "**Dua** kelas pemicu" | **enam** kelas, plus satu yang berkelas WAKTU tapi memberitakan KETIADAAN |
+| §4.2 | 7 pemicu | **21 baris**, plus 4 aturan bentuk kunci yang ketiganya gagal DIAM bila dilanggar |
+| §4.7 | 3 baris irama, "tiap query `LIMIT 200`" | dua angka interval + satu kekecualian terukur (0,07 ms); batas TIDAK seragam, dan yang mengikat adalah "batas yang tersentuh wajib terlihat" |
+| §4.8 | pindai penuh cuma untuk `booking_registrasi` | **sembilan izin**, per TABEL bukan per query, dua di antaranya sementara |
+| §5.2 | "**tanpa memandang daftar**" -- hasil/obat/diagnosis tidak pernah boleh masuk | **sudah tidak mutlak** sejak 026 dan 038, dan syarat yang membenarkannya |
+| §6.2 | dikecualikan: `BOOK_CANCEL` | **sebelas kode**, lewat tiga alasan sah |
+| §7 | diagram sesi sehat saja | + kunci port instance tunggal, probe `window.WWebJS`, watchdog 15 menit |
+| §8 | `^(stop\|berhenti\|unsubscribe)$`, "pesan masuk lain diabaikan" | frasa tiga kata yang dicocokkan sebagai BAGIAN kalimat; balasan otomatis ADA |
+
+Tiga di antaranya bukan sekadar tidak lengkap melainkan **menyesatkan**, dan itu
+lebih berbahaya: §5.2, §6.2, dan §8 sama-sama menuliskan aturan MUTLAK yang
+kodenya sudah punya kekecualian. Pembaca yang memercayainya akan menyimpulkan
+sistem ini tidak bisa melakukan sesuatu yang sebenarnya bisa -- §5.2 khususnya,
+karena yang dibantahnya adalah larangan privasi.
+
+Yang sengaja TIDAK dilakukan: menyalin DDL 15 tabel ke dalam dokumen. DDL yang
+disalin adalah DDL yang cepat atau lambat menyimpang dari migrasinya; yang
+dituliskan adalah bentuk dan ALASAN tiap tabel berdiri sendiri.
+
+## PERINTAH LEWAT WHATSAPP (`migrations/045`) -- arah masuk yang MENULIS
+
+### Gerbang
+
+```
+tsc --noEmit                    0 galat
+eslint .                        0 galat
+jest                            51 suite / 896 uji lolos   (sebelumnya 852)
+jest --config jest.integration  3 suite / 46 uji lolos      (MariaDB sungguhan)
+next build                      lolos
+
+npm run verify:db
+  [ok] sik      : tersambung, 1157 tabel, kolom lengkap
+  [ok] sik      : tulis DITOLAK (benar)
+  [ok] wakhanza : tersambung, 27 tabel      <- 25 sebelum migrasi 045
+  [ok] audit_log: DELETE/UPDATE DITOLAK (benar)
+
+npm run verify:plans            lolos
+```
+
+### Grant per-tabel TIDAK diwarisi -- pembuktian kedelapan
+
+Diperiksa EMPIRIS sebelum grant diterapkan, bukan diasumsikan:
+
+```
+INSERT INTO wa_command_admin ...            -> berhasil (grant skema-lebar)
+UPDATE wa_command_admin SET label='X' ...   -> ERROR 1142 (42000): UPDATE command denied
+DELETE FROM wa_command_session WHERE id=0;  -> ERROR 1142 (42000): DELETE command denied
+```
+
+Sesudah `GRANT UPDATE, DELETE` lewat root:
+
+```
+update_berhasil  1
+delete_berhasil  1
+sisa_admin  sisa_sesi
+0           0            <- baris uji dibersihkan
+```
+
+### Uji END-TO-END terhadap database wakhanza SUNGGUHAN
+
+Menjalankan `cobaPerintahWa()` yang SAMA dipakai worker -- bukan tiruan.
+Tujuannya JID grup yang tidak ada, jadi tidak satu pun pesan sampai ke orang
+sungguhan; seluruh baris dibersihkan di akhir.
+
+```
+1. Alamat TAK BERWENANG didiamkan
+  [ok] tidak ditangani            [ok] sebabnya tak_berwenang
+2. Pesan biasa dari alamat BERWENANG tetap lewat
+  [ok] tidak ditangani
+3. /tambah tiga langkah -> aturan tersimpan NONAKTIF
+  [ok] langkah 1 dijawab          [ok] bertanya nama aturan
+  [ok] bertanya kata kunci        [ok] bertanya isi balasan
+  [ok] petunjuk variabel TIDAK dirender jadi nama RS
+  [ok] aturan tersimpan           [ok] tersimpan NONAKTIF (sakelar mati)
+  [ok] kata kunci ternormalisasi  [ok] pelaku tercatat sebagai wa:<alamat>
+  [ok] sesi sudah dibersihkan
+4. Penyerahan ulang pesan yang SAMA tidak memajukan apa pun
+  [ok] ditandai diserahkan ulang  [ok] tidak membuka sesi baru
+5. Nama ganda ditolak, langkah TIDAK maju
+  [ok] ditolak dengan sebabnya    [ok] masih di langkah nama
+  [ok] /batal menutup sesi
+6. Variabel tak dikenal ditolak lewat chat, sama seperti dashboard
+  [ok] menyebut variabel yang salah
+  [ok] aturannya TIDAK tersimpan
+7. /daftar dan /uji
+  [ok] menyebut aturan yang baru dibuat
+  [ok] aturan NONAKTIF tidak menjawab apa pun
+8. /ubah -> aktifkan, lalu /uji menjawab
+  [ok] aturan uji ada di daftar bernomor   [ok] aturan jadi AKTIF
+  [ok] sekarang dijawab aturan itu         [ok] variabel dirender sungguhan
+9. /hapus dengan konfirmasi
+  [ok] minta konfirmasi YA
+  [ok] jawaban selain YA tidak menghapus   [ok] YA menghapus
+10. Sakelar mati -> perintah berhenti dilayani
+  [ok] tidak ditangani            [ok] sebabnya mati
+11. Semua balasan melewati outbox dengan kode pemicunya sendiri
+  [ok] ada baris outbox WA_PERINTAH
+  [ok] TIDAK ada yang menumpang AUTO_REPLY
+
+bersih-bersih: 23 baris outbox, 0 aturan, sesi & daftar putih uji dihapus
+=== 33 lolos, 0 gagal ===
+```
+
+Keadaan sesudahnya, diperiksa langsung:
+
+```
+autoreply.wa_perintah_enabled       0
+autoreply.wa_sesi_timeout_menit     10
+autoreply.wa_tambah_aktif_langsung  0
+
+sisa_admin  sisa_sesi  sisa_outbox  sisa_aturan_uji
+0           0          0            0
+```
+
+### Bug yang HANYA bisa ditemukan end-to-end
+
+Percobaan pertama gagal pada SATU asersi, dan yang gagal itu bug sungguhan:
+langkah 6 melaporkan `[GAGAL] menyebut variabel yang salah`.
+
+Sebabnya: balasan wizard bukan template, tapi tetap melewati `renderTemplate()`
+di dalam `enqueueMessage`. Variabel yang TIDAK dikenal dirender jadi string
+KOSONG, jadi pesan
+
+```
+Variabel tidak dikenal: {nama_pasien}.
+Yang tersedia: {nama_rs} {alamat_rs} ...
+```
+
+sampai ke staf sebagai `Variabel tidak dikenal: .` -- **kalimat yang ada justru
+untuk menyebutkan kesalahannya menghapus kesalahannya sendiri**, dan staf tidak
+punya cara mengetahui variabel mana yang harus dibetulkan.
+
+Yang penting dicatat: **41 uji unit mesin keadaan LOLOS seluruhnya** atas kode
+yang sama. Uji itu memeriksa nilai balik fungsi murni, yaitu SEBELUM perenderan
+pernah terjadi -- jadi ia tidak bisa dan tidak akan pernah bisa menangkapnya.
+Bentuk kegagalan yang sama pernah dibayar di bug `@lid` dan `@mention`: bagian
+yang "terlalu kecil untuk salah" adalah persis bagian yang tidak diuji.
+
+Diperbaiki lewat `varsBalasanApaAdanya()` (memetakan tiap variabel yang muncul
+ke bentuk literalnya sendiri, sehingga perenderan jadi operasi identitas), dan
+patokannya dipasang sebagai uji PERILAKU yang benar-benar merender:
+
+```
+√ petunjuk variabel tidak berubah jadi nilai sungguhannya
+√ nama variabel yang SALAH tetap tersebut sesudah dirender
+√ teks tanpa variabel tidak tersentuh
+```
+
+### Bite-proof: daftar bernomor yang dibekukan
+
+Aturan bisa dihapus lewat dashboard di sela dua pesan. Kalau nomor pilihan
+dibaca ulang dari daftar yang HIDUP alih-alih yang DITAMPILKAN, staf menghapus
+aturan yang bukan dilihatnya. Dirusak sengaja lalu dikembalikan:
+
+```
+× nomor menunjuk aturan yang DITAMPILKAN, bukan urutan terbaru
+  Expected: 20
+  Received: 30
+Tests: 1 failed, 40 passed, 41 total
+```
+
+### Bite-proof: gerbang label menangkap kode pemicu baru
+
+`WA_PERINTAH` adalah kode pemicu PERTAMA yang ditambahkan sesudah gerbang
+`labels.test.ts` diperbaiki (audit 13 Agustus 2026). Labelnya dilepas sengaja:
+
+```
+× setiap pemicu yang bisa masuk outbox punya label manusianya
+  + Array [
+  +   "WA_PERINTAH",
+  + ]
+Tests: 1 failed, 12 passed, 13 total
+```
+
+Ia dijaring lewat bentuk `triggerCode = 'WA_PERINTAH'` -- salah satu dari empat
+bentuk yang gerbang LAMA tidak kenali sama sekali. Dengan gerbang lama, kode ini
+akan lolos tanpa label persis seperti delapan kode sebelumnya.
+
+### Jam tenang
+
+`WA_PERINTAH` masuk `BYPASS_QUIET_HOURS`. Tanpa itu, staf yang mengetik nama
+aturan pukul 21.30 tidak pernah ditanyai kata kuncinya -- dan sesinya sendiri
+sudah kedaluwarsa (10 menit) jauh sebelum balasannya berangkat pukul 07.00, jadi
+fiturnya bukan sekadar lambat melainkan MUSTAHIL DIPAKAI selama sepuluh jam
+setiap hari. Kedua alasan sah pengecualian berlaku sekaligus di sini: ada orang
+yang sedang menunggu, DAN penerimanya staf.
+
+`OPT_OUT_TRIGGERS` sengaja TIDAK memuatnya -- tidak ada yang bisa "berhenti
+berlangganan" dari percakapan yang ia mulai sendiri.

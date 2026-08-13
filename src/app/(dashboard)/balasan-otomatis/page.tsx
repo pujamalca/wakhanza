@@ -5,6 +5,8 @@ import {
   AutoReplyRule,
   AutoReplyLog,
   InboundMessage,
+  WaCommandAdmin,
+  WaGroup,
   parseKeywords,
   getSettingBool,
   getSettingNumber,
@@ -18,6 +20,7 @@ import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
 import { RuleTable } from './RuleTable';
 import { KataTakTerjawab } from './KataTakTerjawab';
+import { PerintahWa } from './PerintahWa';
 
 // Angka ringkasan dan sakelar dibaca tiap kali halaman dibuka -- tidak boleh
 // tersaji dari cache build.
@@ -135,7 +138,22 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
   const { page: pageParam } = await searchParams;
   const p = hitungPaginasi(bacaHalaman(pageParam), await AutoReplyRule.count(), UKURAN_HALAMAN.konfigurasi);
 
-  const [enabled, rules, stat, pakai, maxPerJam, fallbackBody, simpanTeks, simpanInbox, kata] = await Promise.all([
+  const [
+    enabled,
+    rules,
+    stat,
+    pakai,
+    maxPerJam,
+    fallbackBody,
+    simpanTeks,
+    simpanInbox,
+    kata,
+    perintahAktif,
+    aktifLangsung,
+    timeoutMenit,
+    adminPerintah,
+    daftarGrup,
+  ] = await Promise.all([
     getSettingBool('autoreply.enabled', false),
     // Urutan `priority, id` adalah urutan yang MENENTUKAN aturan mana yang
     // menang -- jadi ia juga urutan halamannya. Aturan berprioritas tertinggi
@@ -161,6 +179,20 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
      */
     getSettingBool('inbox.simpan_teks', true),
     kataTakTerjawab(),
+    getSettingBool('autoreply.wa_perintah_enabled', false),
+    getSettingBool('autoreply.wa_tambah_aktif_langsung', false),
+    getSettingNumber('autoreply.wa_sesi_timeout_menit', 10),
+    /**
+     * Daftar putih perintah TIDAK dipaginasi, dan itu sengaja: jumlahnya
+     * ditentukan berapa orang yang diberi wewenang, bukan pemakaian. Daftar
+     * yang terpotong di sini gagal DIAM ke arah yang paling membingungkan --
+     * alamat yang sebenarnya terdaftar tidak terlihat, lalu staf menambahkannya
+     * lagi dan ditolak "sudah ada di daftar" atas baris yang tidak ada di
+     * layar. Alasan yang sama membuat pemilih grup di /farmasi tidak dipaginasi.
+     */
+    WaCommandAdmin.findAll({ order: [['isActive', 'DESC'], ['label', 'ASC']] }),
+    // Hanya dipakai mengisi dropdown pemilih grup; sama seperti /farmasi.
+    WaGroup.findAll({ order: [['nama', 'ASC']] }),
   ]);
 
   const adaFallback = Boolean(fallbackBody?.trim());
@@ -236,6 +268,19 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
           </div>
         </Card>
       </div>
+
+      {/* Ditaruh TEPAT sebelum tabel Aturan, bukan di puncak halaman: ia
+          menjawab "dari mana lagi aturan di bawah ini bisa lahir". Di atas, ia
+          terbaca sebagai fitur yang berdiri sendiri dan orang mencari tabelnya
+          sendiri; di bawah tabel, keputusan siapa-boleh-menulis terbaca sesudah
+          orangnya selesai menyusun aturan. */}
+      <PerintahWa
+        aktif={perintahAktif}
+        aktifLangsung={aktifLangsung}
+        timeoutMenit={timeoutMenit}
+        admin={adminPerintah.map((a) => ({ id: a.id, chatId: a.chatId, label: a.label, isActive: a.isActive }))}
+        grup={daftarGrup.map((g) => ({ chatId: g.chatId, nama: g.nama, jumlahPeserta: g.jumlahPeserta }))}
+      />
 
       <h2 className="mb-3 text-title">Aturan</h2>
 

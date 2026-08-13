@@ -139,37 +139,91 @@ describe('TRIGGER_SOURCE', () => {
  * ada galat, tidak ada baris kosong, cuma tulisan yang tidak berarti apa-apa
  * bagi petugas. Dan ia berulang -- tiga kali, pada tiga fitur berturut-turut.
  *
- * Acuannya dibaca dari `src/worker/*.ts`, bukan disalin jadi daftar kedua di
- * sini: konstanta `TRIGGER_*` di sanalah yang benar-benar dipakai saat menulis
- * baris `outbox`, jadi ia satu-satunya sumber kebenaran soal kode mana yang
- * bisa muncul di layar.
+ * Acuannya dibaca dari KODENYA, bukan disalin jadi daftar kedua di sini.
+ *
+ * Versi pertama gerbang ini cuma membaca `export const TRIGGER_* = '...'` di
+ * `src/worker/*.ts`, dan menyatakan dirinya "satu-satunya sumber kebenaran soal
+ * kode mana yang bisa muncul di layar". Klaim itu KELIRU, dan terukur: `outbox`
+ * produksi memuat 20 kode berbeda, delapan di antaranya tidak pernah diperiksa
+ * gerbang ini -- `ADMINISTRASI`, `AUTO_REPLY`, `BPJS_BATAL`, `BPJS_KONTROL`,
+ * `BROADCAST`, `FARMASI_UJI`, `FARMASI_VALIDASI`, `FARMASI_PENYERAHAN`.
+ * Kedelapannya kebetulan punya label, tapi kebetulan bukan penegakan.
+ *
+ * Sebabnya: `outbox.trigger_code` lahir dari `PipelineContext.triggerCode`, dan
+ * itu diisi lewat EMPAT bentuk berbeda -- konstanta runner, properti objek
+ * (`triggerCode: 'BROADCAST'`), parameter berdefault (`triggerCode =
+ * 'ADMINISTRASI'`), dan argumen pertama `loadFarmasiContext()`. Gerbang yang
+ * cuma mengenali bentuk pertama meloloskan tiga sisanya, dan bentuk kedualah
+ * yang paling gampang dipakai fitur berikutnya.
+ *
+ * Yang SENGAJA tidak ikut: prefiks yang cuma dipakai sebagai kunci idempoten
+ * (`BPJS_BATAL_REKAP`, `BROADCAST_FOLLOWUP`, `BOOKING_SCAN`). Ketiganya tidak
+ * pernah menjadi `trigger_code` -- barisnya ditulis dengan kode induknya --
+ * jadi menuntut label untuknya berarti menjanjikan baris yang tidak ada.
  */
-function kodePemicuDariRunner(): string[] {
-  const dir = join(AKAR, 'src', 'worker');
+const POLA_KODE_PEMICU = [
+  /^export const TRIGGER_[A-Z0-9_]+ = '([A-Z][A-Z0-9_]*)';/gm,
+  /triggerCode:\s*'([A-Z][A-Z0-9_]*)'/g,
+  /triggerCode\s*=\s*'([A-Z][A-Z0-9_]*)'/g,
+  /loadFarmasiContext\(\s*'([A-Z][A-Z0-9_]*)'/g,
+];
+
+function berkasSumber(dir: string, keluar: string[] = []): string[] {
+  for (const nama of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const p = join(dir, nama.name);
+    if (nama.isDirectory()) berkasSumber(p, keluar);
+    else if ((nama.name.endsWith('.ts') || nama.name.endsWith('.tsx')) && !nama.name.includes('.test.')) keluar.push(p);
+  }
+  return keluar;
+}
+
+function kodePemicuDariKode(): string[] {
   const kode: string[] = [];
-  for (const nama of readdirSync(dir).sort()) {
-    if (!nama.endsWith('.ts') || nama.endsWith('.test.ts') || nama.endsWith('.int.test.ts')) continue;
-    const isi = readFileSync(join(dir, nama), 'utf8');
-    for (const m of isi.matchAll(/^export const TRIGGER_[A-Z0-9_]+ = '([A-Z][A-Z0-9_]*)';/gm)) {
-      if (m[1]) kode.push(m[1]);
+  // `src/app` ikut karena `/administrasi` menulis barisnya sendiri dari server
+  // action, bukan lewat runner -- dan itu kode pemicu sungguhan di `outbox`.
+  for (const dir of [join(AKAR, 'src', 'worker'), join(AKAR, 'src', 'app')]) {
+    for (const berkas of berkasSumber(dir)) {
+      const isi = readFileSync(berkas, 'utf8');
+      for (const pola of POLA_KODE_PEMICU) {
+        for (const m of isi.matchAll(pola)) if (m[1]) kode.push(m[1]);
+      }
     }
   }
   return [...new Set(kode)].sort();
 }
 
 describe('label pemicu di luar tabel template', () => {
-  const dariRunner = kodePemicuDariRunner();
+  const dariKode = kodePemicuDariKode();
 
   it('menemukan konstanta pemicunya sama sekali', () => {
     // Kalau parsernya berhenti cocok (bentuk deklarasinya berubah), daftar ini
     // jadi kosong dan pemeriksaan di bawah lolos tanpa memeriksa apa pun --
     // gerbang yang rusak DIAM, persis kelas kegagalan yang ia jaga.
-    expect(dariRunner.length).toBeGreaterThanOrEqual(8);
-    expect(dariRunner).toContain('FARMASI_PENGADAAN');
+    expect(dariKode.length).toBeGreaterThanOrEqual(20);
+    expect(dariKode).toContain('FARMASI_PENGADAAN');
   });
 
-  it('setiap pemicu yang dipakai runner punya label manusianya', () => {
-    const tanpaLabel = dariRunner.filter((k) => !TRIGGER_LABEL[k]);
+  it('menjaring KEEMPAT bentuk deklarasinya, bukan cuma konstanta runner', () => {
+    // Satu wakil per bentuk. Kalau salah satu polanya rusak, yang gugur cuma
+    // sebagian daftar -- dan pemeriksaan "punya label" di bawah tetap hijau,
+    // karena yang tersisa memang berlabel. Jadi bentuknya dipatok di sini.
+    expect(dariKode).toContain('FARMASI_PENGADAAN'); // export const TRIGGER_*
+    expect(dariKode).toContain('BROADCAST'); //        triggerCode: '...'
+    expect(dariKode).toContain('ADMINISTRASI'); //     triggerCode = '...'
+    expect(dariKode).toContain('BPJS_KONTROL'); //     loadFarmasiContext('...'
+  });
+
+  it('tidak menuntut label untuk prefiks yang cuma kunci idempoten', () => {
+    // `BPJS_BATAL_REKAP`/`BROADCAST_FOLLOWUP`/`BOOKING_SCAN` tidak pernah jadi
+    // trigger_code -- barisnya ditulis dengan kode induknya. Menjaringnya
+    // berarti menuntut label untuk baris yang tidak akan pernah ada.
+    expect(dariKode).not.toContain('BPJS_BATAL_REKAP');
+    expect(dariKode).not.toContain('BROADCAST_FOLLOWUP');
+    expect(dariKode).not.toContain('BOOKING_SCAN');
+  });
+
+  it('setiap pemicu yang bisa masuk outbox punya label manusianya', () => {
+    const tanpaLabel = dariKode.filter((k) => !TRIGGER_LABEL[k]);
     expect(tanpaLabel).toEqual([]);
   });
 
@@ -178,7 +232,7 @@ describe('label pemicu di luar tabel template', () => {
     // tidak bergunanya dengan tidak punya label -- cuma lebih sulit disadari,
     // karena layarnya tampak wajar. Nyata di sini: keempat nota barang
     // sama-sama tergoda dinamai "nota <sesuatu>".
-    const label = dariRunner.map((k) => TRIGGER_LABEL[k]);
+    const label = dariKode.map((k) => TRIGGER_LABEL[k]);
     expect(new Set(label).size).toBe(label.length);
   });
 });

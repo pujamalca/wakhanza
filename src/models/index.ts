@@ -14,6 +14,8 @@ export { BroadcastTemplate } from './BroadcastTemplate';
 export { BroadcastSchedule } from './BroadcastSchedule';
 export { AutoReplyRule, parseKeywords, serializeKeywords } from './AutoReplyRule';
 export { AutoReplyLog, type AutoReplyOutcome } from './AutoReplyLog';
+export { WaCommandAdmin } from './WaCommandAdmin';
+export { WaCommandSession } from './WaCommandSession';
 export { FarmasiTarget } from './FarmasiTarget';
 export { BpjsTarget } from './BpjsTarget';
 export { ErmTarget } from './ErmTarget';

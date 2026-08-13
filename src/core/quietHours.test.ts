@@ -120,4 +120,24 @@ describe('computeScheduledAt', () => {
       expect(dijadwalkan.getHours()).toBe(7);
     }
   });
+
+  /**
+   * KETIGA rekap berjadwal melewati jam tenang, dan yang dijaga di sini juga
+   * bukan nilai masing-masing melainkan bahwa ketiganya SAMA.
+   *
+   * Ketiganya sekelas: dipicu WAKTU, jam kirimnya dipilih staf sendiri, dan
+   * penerimanya grup/petugas -- bukan pasien yang sedang tidur. Menundukkan
+   * salah satunya pada jam tenang berarti diam-diam mengabaikan jam yang baru
+   * saja disetel staf, dan kegagalannya tidak bergejala: rekapnya sekadar tiba
+   * keesokan pagi, setiap hari, tanpa satu pun galat.
+   *
+   * Jam ujinya 22:00 karena di situlah lubangnya nyata -- ia jam bawaan rekap
+   * resep, dan slot yang sah untuk kedua tetangganya.
+   */
+  it('ketiga rekap berjadwal sama-sama MELEWATI jam tenang', () => {
+    const eventAt = at(22);
+    for (const code of ['FARMASI_PENJUALAN_REKAP', 'FARMASI_RESEP_REKAP', 'ERM_PENILAIAN_UMUM']) {
+      expect(computeScheduledAt(eventAt, code, 21, 7)).toEqual(eventAt);
+    }
+  });
 });

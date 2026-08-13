@@ -1,7 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { AutoReplyRule, serializeKeywords, logAudit, setSetting } from '@/models';
+import { AutoReplyRule, WaCommandAdmin, serializeKeywords, logAudit, setSetting } from '@/models';
+import { parseTarget, type JenisTarget } from '@/core/farmasiTarget';
+import { mintaSyncGrup } from '@/lib/waGroups';
 import { findUnknownVariables, AUTOREPLY_TEMPLATE_VARIABLES, renderTemplate } from '@/core/template';
 import { matchRule, normalizeKeyword } from '@/core/autoReply';
 import { appendUniqueCode } from '@/core/uniqueCode';
@@ -147,6 +149,149 @@ export async function toggleAutoReplyAction(enabled: boolean): Promise<void> {
   await setSetting('autoreply.enabled', enabled ? '1' : '0');
   await logAudit(session!.user.username, 'auto_reply_toggle', 'autoreply.enabled', enabled ? 'nyala' : 'mati');
   revalidatePath('/balasan-otomatis');
+}
+
+// ---------------------------------------------------------------------------
+// PERINTAH LEWAT WHATSAPP (migrations/045)
+// ---------------------------------------------------------------------------
+
+export interface HasilPerintahForm {
+  error?: string;
+  sukses?: string;
+}
+
+/**
+ * Sakelar fiturnya. Dicatat `audit_log` sebagai peristiwanya sendiri, dengan
+ * alasan yang sama yang membuat `toggleAutoReplyAction` begitu: inilah momen
+ * `auto_reply_rule` berhenti hanya bisa disunting lewat dashboard yang
+ * berautentikasi, dan mulai bisa disunting dari sebuah nomor WhatsApp.
+ */
+export async function togglePerintahWaAction(enabled: boolean): Promise<void> {
+  const { session, response } = await requireRole('admin');
+  if (response) return;
+
+  await setSetting('autoreply.wa_perintah_enabled', enabled ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'wa_perintah_toggle',
+    'autoreply.wa_perintah_enabled',
+    enabled ? 'nyala' : 'mati',
+  );
+  revalidatePath('/balasan-otomatis');
+}
+
+/**
+ * Aturan baru dari WhatsApp langsung menyala atau tidak.
+ *
+ * Sakelar TERSENDIRI dan dicatat terpisah, bukan digabung ke atas: yang satu
+ * memutuskan siapa boleh menulis aturan, yang satu memutuskan apakah tulisan
+ * itu langsung dibaca pasien tanpa seorang pun meninjau. Yang kedua adalah
+ * jawaban atas pertanyaan yang CLAUDE.md catat masih terbuka ("siapa yang
+ * meninjau bahwa isi tiap aturan benar secara klinis"), jadi ia harus bisa
+ * ditelusuri sendiri.
+ */
+export async function toggleAktifLangsungAction(enabled: boolean): Promise<void> {
+  const { session, response } = await requireRole('admin');
+  if (response) return;
+
+  await setSetting('autoreply.wa_tambah_aktif_langsung', enabled ? '1' : '0');
+  await logAudit(
+    session!.user.username,
+    'wa_perintah_aktif_langsung',
+    'autoreply.wa_tambah_aktif_langsung',
+    enabled ? 'langsung aktif' : 'perlu ditinjau',
+  );
+  revalidatePath('/balasan-otomatis');
+}
+
+export async function tambahAdminPerintahAction(
+  _prev: HasilPerintahForm,
+  formData: FormData,
+): Promise<HasilPerintahForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const jenis: JenisTarget = formData.get('jenis') === 'personal' ? 'personal' : 'grup';
+  const label = String(formData.get('label') ?? '').trim();
+  const nilai = String(formData.get('nilai') ?? '');
+
+  if (!label) return { error: 'Beri nama alamat ini, mis. "HP Kepala Rekam Medis" — supaya bisa dikenali di daftar.' };
+  if (label.length > 80) return { error: 'Nama maksimal 80 karakter.' };
+
+  // Validasi alamat DIPAKAI BERSAMA dengan tujuan farmasi/BPJS/ERM, termasuk
+  // penolakan tautan undangan grup yang menyebut jalan keluarnya. Menyalinnya
+  // ke sini berarti satu tempat lagi yang harus ikut diperbarui saat bentuk JID
+  // grup berubah, dan yang tertinggal menolak alamat yang sah tanpa sebab.
+  const hasil = parseTarget(jenis, nilai);
+  if (!hasil.ok) return { error: hasil.error };
+
+  if (await WaCommandAdmin.findOne({ where: { chatId: hasil.chatId } })) {
+    return { error: 'Alamat itu sudah ada di daftar.' };
+  }
+
+  const dibuat = await WaCommandAdmin.create({
+    chatId: hasil.chatId,
+    label,
+    createdBy: session!.user.username,
+  });
+  await logAudit(
+    session!.user.username,
+    'wa_command_admin_create',
+    String(dibuat.id),
+    `${hasil.jenis} ${hasil.chatId} (${label})`,
+  );
+  revalidatePath('/balasan-otomatis');
+  return {
+    sukses:
+      hasil.jenis === 'grup'
+        ? `"${label}" ditambahkan. SETIAP anggota grup itu sekarang bisa menulis aturan balasan — tinjau dulu siapa saja yang ada di dalamnya.`
+        : `"${label}" ditambahkan. Coba ketik /bantuan dari nomor itu untuk memastikan.`,
+  };
+}
+
+export async function hapusAdminPerintahAction(id: number): Promise<HasilPerintahForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const row = await WaCommandAdmin.findByPk(id);
+  if (!row) return { error: 'Alamat tidak ditemukan.' };
+
+  await row.destroy();
+  await logAudit(session!.user.username, 'wa_command_admin_delete', String(id), `${row.chatId} (${row.label})`);
+  revalidatePath('/balasan-otomatis');
+  return { sukses: `"${row.label}" dikeluarkan dari daftar.` };
+}
+
+export async function toggleAdminPerintahAction(id: number, aktif: boolean): Promise<HasilPerintahForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const row = await WaCommandAdmin.findByPk(id);
+  if (!row) return { error: 'Alamat tidak ditemukan.' };
+
+  await row.update({ isActive: aktif });
+  await logAudit(
+    session!.user.username,
+    'wa_command_admin_toggle',
+    String(id),
+    `${row.label}: ${aktif ? 'aktif' : 'nonaktif'}`,
+  );
+  revalidatePath('/balasan-otomatis');
+  return { sukses: `"${row.label}" ${aktif ? 'diaktifkan' : 'dinonaktifkan'}.` };
+}
+
+/**
+ * Meminta worker membaca ulang daftar grup. Lewat `lib/waGroups.ts` yang SAMA
+ * dipakai `/farmasi` dan `/pesan-masuk` -- dua server action yang sama-sama
+ * menulis `wa_session.command` adalah duplikasi yang cepat atau lambat berbeda.
+ */
+export async function syncGrupPerintahAction(): Promise<HasilPerintahForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak diizinkan.' };
+
+  const hasil = await mintaSyncGrup(session!.user.username);
+  revalidatePath('/balasan-otomatis');
+  return hasil;
 }
 
 export interface PreviewResult {
