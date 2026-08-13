@@ -197,6 +197,22 @@ export const IconChat = (p: IconProps) => (
   </Icon>
 );
 
+/**
+ * Papan periksa berdetak -- menu ERM (rekam medis elektronik).
+ *
+ * Sengaja BUKAN stetoskop maupun palang: keduanya menandai "medis" secara umum,
+ * sementara yang dibedakan di sidebar ini adalah ERM dari sembilan menu lain
+ * yang juga milik rumah sakit. Papan periksa menandai PENCATATANNYA, dan itu
+ * yang membedakannya dari Farmasi (pil) atau Administrasi (berkas).
+ */
+export const IconClipboardPulse = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" />
+    <rect x="9" y="2" width="6" height="4" rx="1" />
+    <path d="M8 14h2l1.5-3 2 5 1.5-2H17" />
+  </Icon>
+);
+
 /** Dua lembar bertumpuk -- tombol salin ID. */
 export const IconCopy = (p: IconProps) => (
   <Icon {...p}>
@@ -231,6 +247,12 @@ export const IconChevronLeft = (p: IconProps) => (
   </Icon>
 );
 
+/**
+ * Juga dipakai sebagai penanda buka/tutup submenu di sidebar, DIPUTAR lewat
+ * `rotate-90` saat terbuka -- bukan diganti ikon panah-bawah tersendiri. Satu
+ * bentuk yang BERGERAK menandai bahwa itu kontrol yang sama dalam dua keadaan;
+ * dua ikon berbeda terbaca sebagai dua tombol berbeda.
+ */
 export const IconChevronRight = (p: IconProps) => (
   <Icon {...p}>
     <path d="m9.5 6 6 6-6 6" />

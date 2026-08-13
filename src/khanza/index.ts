@@ -23,3 +23,4 @@ export * from './kontrolTerbit';
 export * from './permintaanPenunjang';
 export * from './suratPasien';
 export * from './dokumenHasil';
+export * from './penilaianAwal';

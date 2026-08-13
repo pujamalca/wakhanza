@@ -4435,3 +4435,437 @@ npm run build       -> Compiled successfully
 berjalan di atas database produksi, jadi instance PM2 itulah lingkungan yang
 sesungguhnya). Sesudah restart: `/login` 200, `/farmasi` 307 (redirect ke login,
 otorisasi tetap tegak).
+
+## ERM / PENILAIAN UMUM (`migrations/044`) -- pemicu pertama yang memberitakan sesuatu yang TIDAK terjadi
+
+Seluruh angka di bawah hasil pengukuran terhadap database produksi (`alca`) pada
+2026-08-13, bukan perkiraan.
+
+### Bentuk data yang menentukan desainnya
+
+```
+-- status_lanjut x status_poli, SELURUH reg_periksa
+Ralan / Lama   7485
+Ralan / Baru   4869
+Ranap / *         0      <- RS ini murni rawat jalan
+```
+
+Jadi `penilaian_awal_keperawatan_ralan` satu-satunya tabel asesmen yang relevan.
+Dari 31 tabel `penilaian_awal_keperawatan_*` di Khanza, hanya itu yang berisi:
+
+```
+penilaian_awal_keperawatan_ralan            COUNT(*) = 1954
+penilaian_awal_keperawatan_ralan_masalah    772
+penilaian_awal_keperawatan_ralan_rencana    286
+29 tabel lainnya                              0
+```
+
+`information_schema.TABLE_ROWS` melaporkan **1699** untuk tabel pertama; `COUNT(*)`
+menjawab **1954**. Pelajaran migrations/030 terulang persis, dan angka perkiraan
+InnoDB tidak dipakai untuk menyimpulkan apa pun.
+
+### Cakupan: 65% pasien baru TIDAK punya asesmen sama sekali
+
+```
+-- 90 hari, status_poli='Baru' AND status_lanjut='Ralan'
+total_baru  550
+ada_asesmen 191   (34,7%)
+tanpa       359   (65,3%)
+```
+
+Poli: `UMUM` **550 dari 550**. Tidak ada poli lain yang menerima pasien baru,
+sehingga `erm.penilaian_poli` kosong dan `['UMUM']` menghasilkan daftar yang sama
+persis hari ini.
+
+### Kenapa "lengkap" TIDAK boleh berarti "semua kolom terisi"
+
+Seluruh 57 kolom bertipe `NOT NULL`, jadi Khanza menyimpan STRING KOSONG. Diukur
+pada 191 baris yang ADA:
+
+```
+keluhan_utama    0 kosong  (selalu diisi)
+td              51 kosong  (27%)
+suhu            53 kosong  (28%)
+nadi            68 kosong  (36%)
+rr              68 kosong  (36%)
+bb             144 kosong  (75%)
+tb             173 kosong  (91%)
+```
+
+`bb`/`tb` karena itu di LUAR kolom inti bawaan: memasukkannya membuat golongan
+"terisi sebagian" menelan hampir seluruh golongan "lengkap".
+
+Tabel turunan `_masalah` dan `_rencana` mengembalikan **NULL** (nol baris) untuk
+seluruh 191 asesmen dalam 90 hari -- keduanya bukan bagian alur kerja sekarang,
+jadi sengaja TIDAK masuk definisi kelengkapan.
+
+### Jam rekap: 13:00 dan 19:30, DIUKUR
+
+```
+-- jeda registrasi -> asesmen (menit), 90 hari
+n=191  min=0  rata=119  maks=3756  beda_hari=7
+```
+
+3.756 menit = 62 jam, dan 7 asesmen diisi pada hari yang berbeda dari
+pendaftarannya. Rekap tunggal sore hari akan menuduh pasien "belum diisi" saat
+perawatnya memang belum sempat.
+
+```
+-- sebaran HOUR(tanggal) pengisian asesmen, 90 hari
+08:5  09:3  10:16 11:15 12:14 13:14 14:15 15:14
+16:20 17:21 18:31 19:26 20:5  21+:0
+```
+
+Memuncak 18:00-19:00, jatuh ke 5 pada pukul 20, **nol sesudahnya**. Karena itu
+13:00 = pengingat, 19:30 = hitungan akhir.
+
+### Pemangkas `no_rawat` EKSAK, dan rencana query-nya
+
+```
+-- prefix no_rawat vs tgl_registrasi, SELURUH tabel
+total 12354   cocok 12354   menyimpang 0
+```
+
+Bentuknya `YYYY/MM/DD/NNNNNN` -- GARIS MIRING, bukan tanda hubung. Sekelas
+`nota_jual` (040), tanpa margin.
+
+```
+$ npm run verify:plans
+[ok] ERM_PENILAIAN_AWAL   r  range PRIMARY  rows~668
+[ok] ERM_PENILAIAN_AWAL   ps eq_ref PRIMARY rows~1
+[ok] ERM_PENILAIAN_AWAL   pk eq_ref PRIMARY rows~1
+[ok] ERM_PENILAIAN_AWAL   d  eq_ref PRIMARY rows~1
+[ok] ERM_PENILAIAN_AWAL   p  eq_ref PRIMARY rows~1
+
+verify:plans lolos.
+```
+
+TANPA izin pindai penuh. Ambangnya `MAX_ROWS_JENDELA_30_HARI` (3000), sekelas
+QUEUE_REG -- bawaan 500 gagal pada 668 bukan karena query-nya buruk melainkan
+karena angka itu tidak pernah dikalibrasi untuk tabel ini.
+
+### Penyaring poli di SQL terbukti LEBIH MAHAL
+
+Bentuk pertama memakai `AND r.kd_poli IN (:kdPoli)`. EXPLAIN-nya:
+
+```
+[ok] ERM_PENILAIAN_AWAL_POLI r ref|filter kd_poli|status_lanjut rows~5054 (7%)
+```
+
+5.054 baris diperiksa berbanding **668** lewat jendela tanggal saja -- optimizer
+menilai `kd_poli` selektif padahal nyaris seluruh kunjungan bernilai `UMUM`.
+Penyaringnya dipindah ke sisi Node, dan pemeriksaan rencana keduanya dihapus:
+satu bentuk SQL berarti satu rencana yang dijaga.
+
+### Rekap multi-slot: uji unit, dan KEDUANYA dibuktikan MENGGIGIT
+
+```
+$ npx jest src/core/rekapJadwal
+Tests: 24 passed, 24 total
+```
+
+Dirusak sengaja untuk membuktikan asersinya bukan hiasan:
+
+```
+### RUSAK 1: perbandingan >  ->  !==
+Tests: 1 failed, 23 passed, 24 total
+   (gagal: "menghapus slot yang sudah berbunyi tidak membangkitkan kiriman lama")
+
+### RUSAK 2: penanda bertanggal saja (pola jatuhTempoHarian)
+Tests: 1 failed, 23 passed, 24 total
+   (gagal: "penanda slot pertama TIDAK menahan slot kedua")
+
+### dipulihkan:
+Tests: 24 passed, 24 total
+```
+
+RUSAK 2 adalah bug yang fitur ini ada untuk menghindarinya: dengan penanda
+bertanggal, rekap 19:30 tidak pernah berangkat.
+
+### Sanitasi nama pasien -- kewajiban `MULTILINE_VARIABLES`
+
+```
+$ npx jest src/core/penilaianRekap
+Tests: 17 passed, 17 total
+
+### RUSAK: sanitizeValue dilepas dari nama pasien
+  x sanitasi nama pasien -- kewajiban MULTILINE_VARIABLES >
+    nama berisi baris baru TIDAK menambah baris pada hasil render
+Tests: 1 failed, 16 passed, 17 total
+```
+
+### Pagar privasi diperiksa pada OBJEK BARISNYA
+
+```
+$ npm run dryrun:penilaian -- alca 2026-08-12
+
+=== PAGAR PRIVASI ===
+kolom yang benar-benar terbaca: noRawat, noRkmMedis, namaPasien, jamReg,
+                                kdPoli, namaPoli, namaDokter, status, kosong, diisiPada
+[ok] tidak satu pun kolom rekam medis ikut terbaca
+```
+
+Daftar terlarang yang diperiksa: `keluhan_utama`, `rpd`, `rpk`, `rpo`, `alergi`,
+`status_psiko`, `ket_psiko`, `nyeri`, `skala_nyeri`, `lokasi`, `ekonomi`,
+`hub_keluarga`, `tinggal_dengan`, `adl`, `total_hasil`, `hasil`. Skripnya keluar
+dengan **kode 1** bila salah satunya muncul.
+
+### Rekap sungguhan atas data produksi
+
+```
+=== RINGKASAN ===   (alca, 2026-08-12)
+pasien baru      : 11
+  lengkap        : 6
+  belum diisi    : 1
+  terisi sebagian: 4
+perlu ditindak   : 5
+```
+
+Ketiga golongan muncul pada data nyata, jadi penggolongannya terbukti membedakan
+sesuatu -- bukan cabang yang tidak pernah terpakai. Pesan yang dihasilkan 556
+karakter, satu bagian (jauh di bawah batas 12.000 yang diukur di migrations/022).
+Nama pasien sungguhnya sengaja TIDAK disalin ke berkas ini.
+
+Satu cacat pratinjau ikut ditemukan dan diperbaiki di sini: dryrun mula-mula
+merender `{nama_rs}` KOSONG, karena `identityVars()` disisipkan `enqueueMessage()`
+sebagai dasar dan skripnya tidak memanggilnya. Pratinjau yang berbeda dari
+kenyataan adalah persis yang membuat staf membuang variabel yang sebenarnya sudah
+benar (pelajaran `worker/triggerVars.ts`). Sesudah diperbaiki, baris keduanya
+terisi nama rumah sakit dari `sik.setting`.
+
+### Grant: tidak diwarisi, untuk KETUJUH kalinya
+
+Diuji empiris lewat koneksi `wakhanza_rw` yang sesungguhnya, SEBELUM grant:
+
+```
+[BISA]    INSERT
+[BISA]    SELECT
+[DITOLAK] UPDATE -- UPDATE command denied to user wakhanza_rw for table erm_target
+[DITOLAK] DELETE -- DELETE command denied to user wakhanza_rw for table erm_target
+```
+
+Sesudah `GRANT UPDATE, DELETE ON wakhanza.erm_target` lewat root:
+
+```
+[BISA]   SELECT
+[BISA]   UPDATE
+[BISA]   DELETE
+sisa baris uji: 0
+```
+
+(INSERT lalu ditolak `uq_chat` -- itu unique key bekerja, bukan grant.)
+
+### Runner benar-benar berjalan, dan pagar tujuannya menahan
+
+Diuji dengan sakelar dinyalakan SEMENTARA selagi `erm_target` KOSONG, sehingga
+runner berhenti di pemeriksaan tujuan sebelum menyentuh `sik` -- nol risiko
+mengirim apa pun:
+
+```
+tujuan terdaftar: 0
+semula: erm=0 penilaian=0 jam=13:00,19:30
+-- memanggil runPenilaianRekapIfDue() --
+-- selesai tanpa melempar --
+penanda sesudahnya: ""
+[ok] penanda TIDAK maju -- benar: keadaan salah setel harus bisa dibetulkan lalu jalan lagi
+sakelar dikembalikan ke keadaan semula.
+
+WARN: rekap penilaian jatuh tempo tapi belum ada tujuan aktif  slot: "00:00"
+```
+
+Keadaan sesudahnya diperiksa: kesebelas kunci `erm.*` kembali ke nilai semula,
+`erm_target` 0 baris, dan loop terdaftar (`src/worker/index.ts:564`).
+
+### Gerbang penuh
+
+```
+npm run typecheck    -> bersih
+npm run lint         -> bersih
+npm test             -> 50 suite, 849 uji, seluruhnya lolos
+npm run build        -> Compiled successfully (/erm dan /erm/penilaian-umum terdaftar)
+npm run verify:db    -> lolos (sik tulis DITOLAK, audit_log append-only tegak)
+npm run verify:plans -> lolos
+```
+
+`npm test` sempat GAGAL satu, dan itu gerbang yang bekerja:
+
+```
+x label pemicu di luar tabel template > setiap pemicu yang dipakai runner punya label manusianya
+  + Array [ "ERM_PENILAIAN_UMUM" ]
+```
+
+`TRIGGER_LABEL` belum memuat pemicu barunya. Diperbaiki, bukan dilonggarkan.
+
+### Dijalankan lewat PM2, bukan server uji terpisah
+
+```
+pm2 restart wakhanza-web
+/login                 -> 200
+/erm/penilaian-umum    -> 307 (redirect ke login; otorisasi tegak tanpa sesi)
+penanda fitur di build -> .next/server/chunks/ssr/src_app_(dashboard)_erm_penilaian-umum_*.js
+```
+
+Worker dimulai ulang lewat prosedur tiga langkah yang terdokumentasi:
+
+```
+pm2 stop wakhanza-worker
+Chromium pemegang sesi tersisa: 0
+pm2 start wakhanza-worker
+-> online, restart counter TETAP 8 (tidak ada kaskade)
+-> wa_session.status = 'ready', heartbeat umur 4 detik, zona sesi '+00:00'
+```
+
+Umur denyut dibaca lewat `TIMESTAMPDIFF` MENTAH karena jalurnya Sequelize
+(`@@session.time_zone = '+00:00'`, jadi `NOW()` ikut UTC). Memakai `CONVERT_TZ`
+di jalur itu menghasilkan galat 7 jam dengan tanda terbalik.
+
+### Tombol uji mengirim rekap PRODUKSI -- dibuktikan lewat tombolnya sendiri
+
+Seluruh bukti di bawah diambil 2026-08-13 terhadap instance PM2 yang benar-benar
+dipakai (`wakhanza-web`, port 3100) di atas database produksi. Bukan `next start`
+di port terpisah -- lihat "Dijalankan lewat PM2" di atas.
+
+#### Keadaan awal: fitur SUDAH menyala, dan tidak satu pun rekap pernah terkirim
+
+```
+erm.enabled              = "1"
+erm.penilaian_enabled    = "1"
+erm.penilaian_jam        = "13:00,19:30"
+erm.penilaian_kolom_inti = "td,nadi,suhu,rr,keluhan_utama"
+erm.penilaian_last_run   = "2026-08-13 13:00"
+erm_target               : 1 baris (grup, aktif=true, terima=true)
+
+outbox WHERE trigger_code = 'ERM_PENILAIAN_UMUM'  ->  0 baris
+```
+
+Penanda menyatakan slot 13:00 sudah berjalan sementara `outbox` kosong. Itu BUKAN
+kegagalan melainkan cabang "sengaja diam" yang bekerja persis seperti rancangannya
+-- dan sebabnya terukur:
+
+```
+tanggal      total  baru  ralan_baru
+2026-08-13       3     0          0     <- ketiganya pasien LAMA
+2026-08-12      30    11         11
+2026-08-11      26     6          6
+2026-08-10      48    13         13
+```
+
+Hari itu nol pasien baru, jadi `rekapKosong()` benar dan `template_penilaian_kosong`
+memang dikosongkan. Yang salah bukan perilakunya melainkan bahwa **tidak ada satu
+pun cara melihat buktinya**: tombol uji yang lama mengirim teks contoh.
+
+#### Yang dikirim tombol LAMA vs tombol BARU
+
+```
+#46269  sent  ack=-  panjang= 137   <- teks contoh, ditekan 14:37
+#46284  sent  ack=2  panjang= 819   <- rekap sungguhan, ditekan 14:50
+```
+
+`ack=2` (`ACK_DEVICE`) pada baris kedua adalah konfirmasi WhatsApp bahwa pesannya
+sampai ke perangkat, bukan sekadar diterima servernya -- bukti yang lebih kuat
+daripada `sent`, dan yang justru TIDAK dipunyai baris lama.
+
+#### Tombolnya benar-benar ditekan, lewat peramban
+
+Bukan memanggil server action dari skrip: yang perlu dibuktikan adalah TOMBOLNYA.
+Akun admin sementara dibuat lewat `npm run users -- add`, dipakai, lalu dihapus di
+alur yang sama (`npm run users -- list` sesudahnya kembali menampilkan dua akun
+yang sah).
+
+```
+sesudah login  : http://127.0.0.1:3100/ringkasan
+halaman        : http://127.0.0.1:3100/erm/penilaian-umum?dari=2026-08-12&sampai=2026-08-12
+judul          : Penilaian umum
+chip golongan  : Semua (11) | Belum diisi (1) | Terisi sebagian (4) | Lengkap (6)
+tombol         : ditemukan, menekan...
+dialog         : Kirim rekap uji / Asesmen akan menerima rekap 2026-08-12 -- sama
+                 persis dengan yang berangkat terjadwal, termasuk nama pasien dan
+                 nomor rekam medis, bukan kalimat contoh. Pesannya ditandai
+                 [UJI COBA] di baris pertama.
+konfirmasi     : menekan "Kirim sekarang"...
+
+=== HASIL TOMBOL ===
+Rekap 2026-08-12 diantrekan ke "Asesmen" -- 1 belum diisi, 4 terisi sebagian.
+```
+
+Angka pada pesan hasil (**1 belum, 4 sebagian**) cocok persis dengan chip saringan
+yang dibaca dari halaman SEBELUM tombolnya ditekan. Itu yang membuktikan halaman
+dan pesan berangkat dari penurunan yang sama, bukan dua hitungan yang kebetulan
+mirip.
+
+Dua penyaring yang wajib ada di skrip ujinya, keduanya pelajaran yang sudah dibayar:
+
+- **Tombol disaring VISIBILITAS dan `!b.closest('dialog')`** -- halaman memuat
+  `<dialog>` yang selalu ada di DOM, dan tombol di dalamnya berteks serupa
+  (jebakan `/farmasi`).
+- **Kondisi tunggu dibatasi ke elemen `<p>`, bukan `document.body`** -- halaman ini
+  menjelaskan dirinya panjang lebar, dan teks statisnya nyaris selalu memuat kata
+  yang sedang ditunggu (jebakan verifikasi kelima, `/farmasi`).
+
+#### Isi pesan yang benar-benar masuk `outbox`
+
+Nama pasien dan nomor rekam medis SENGAJA disamarkan di bawah -- berkas ini
+tercatat di repositori publik. Yang disamarkan cuma identitasnya; strukturnya apa
+adanya.
+
+```
+*[UJI COBA]* Kiriman ini ditekan manual dari dasbor, bukan rekap terjadwal.
+Isinya data sungguhan hari ini -- silakan diperiksa, tapi jangan dianggap sebagai rekap resmi.
+
+*Asesmen Awal Keperawatan*
+<nama RS dari sik.setting>
+
+Tanggal : 2026-08-12
+Pasien baru : 11
+Sudah lengkap : 6
+Belum diisi : 1
+Terisi sebagian : 4
+
+*Belum diisi* (1)
+- «nama disamarkan» / «RM» (13:18) - belum diisi
+
+*Terisi sebagian* (4)
+- «nama disamarkan» / «RM» (12:36) - belum: tekanan darah, nadi, pernapasan
+- «nama disamarkan» / «RM» (16:30) - belum: tekanan darah, nadi, suhu, pernapasan
+- «nama disamarkan» / «RM» (16:39) - belum: tekanan darah
+- «nama disamarkan» / «RM» (17:16) - belum: tekanan darah, nadi, pernapasan
+
+Mohon dilengkapi melalui SIMRS.
+
+Kode Pengiriman : 2026-08-13 14:50:54 <kode>
+```
+
+Yang terbukti sekaligus di satu pesan ini: penanda `[UJI COBA]`, identitas RS
+terisi dari `sik.setting` (bukan kosong -- pelajaran `identityVars()` di
+`dryrun:penilaian`), kedua kelompok terpisah dengan judul dan jumlahnya, nama
+kolom yang kurang diterjemahkan lewat `NAMA_KOLOM` ("td" -> "tekanan darah"), dan
+baris kode pengiriman unik ikut ditempelkan.
+
+Angka `6 + 1 + 4 = 11` berjumlah -- `jumlah_perlu_diisi` memang diturunkan, bukan
+di-query terpisah.
+
+#### Gerbang penuh sesudah perubahan
+
+```
+npm run typecheck    -> bersih
+npm run lint         -> bersih
+npm test             -> 50 suite, 849 uji, seluruhnya lolos
+npm run build        -> Compiled successfully (/erm dan /erm/penilaian-umum terdaftar)
+npm run verify:plans -> lolos
+npm run verify:db    -> lolos (sik tulis DITOLAK, audit_log append-only tertegak)
+pm2 restart wakhanza-web -> online
+```
+
+#### Yang BELUM terbukti, dan sengaja dikatakan
+
+Jalur TERJADWAL (`runPenilaianRekapIfDue` -> `enqueueMessage`) belum pernah
+menghasilkan satu baris `outbox` pun di produksi, karena satu-satunya slot yang
+jatuh tempo sejak fiturnya dinyalakan jatuh pada hari yang nol pasien baru. Yang
+sudah terbukti adalah SELURUH rantai di bawahnya -- `susunRekapPenilaian()`,
+`loadFarmasiContext()`, `enqueueMessage()`, pemecahan bagian, dispatcher, dan ack
+-- karena tombol uji memakai fungsi yang sama persis. Yang tersisa tak terbukti
+tinggal `slotJatuhTempo()` yang benar-benar memicu pengiriman, dan itu pun sudah
+terbukti separuh: penandanya memang maju ke `2026-08-13 13:00` sendiri.
+
+Jangan membalik klaim ini ke arah sebaliknya: nol baris di sini BUKAN bukti bahwa
+jalur terjadwalnya tidak bekerja.

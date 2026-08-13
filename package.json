@@ -30,7 +30,8 @@
     "dryrun:penjualan": "tsx scripts/dryrun-penjualan.ts",
     "dryrun:resep": "tsx scripts/dryrun-resep.ts",
     "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts",
-    "dryrun:stok": "tsx scripts/dryrun-stok.ts"
+    "dryrun:stok": "tsx scripts/dryrun-stok.ts",
+    "dryrun:penilaian": "tsx scripts/dryrun-penilaian.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

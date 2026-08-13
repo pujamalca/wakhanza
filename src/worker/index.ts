@@ -20,6 +20,7 @@ import { runPengadaanCycle } from './pengadaanRunner';
 import { runPenjualanCycle } from './penjualanRunner';
 import { runPenjualanRekapIfDue } from './penjualanRekapRunner';
 import { runResepRekapIfDue } from './resepRekapRunner';
+import { runPenilaianRekapIfDue } from './penilaianRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
 import { startScheduler } from './scheduler';
@@ -539,6 +540,28 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('resep-rekap', runResepRekapIfDue, scanIntervalMs);
+
+  /**
+   * REKAP ASESMEN AWAL KEPERAWATAN (`/erm/penilaian-umum`, migrations/044) --
+   * kelas WAKTU seperti kedua rekap farmasi di atas, tapi dengan satu perbedaan
+   * yang tidak dipunyai satu pun siklus lain di berkas ini: ia bisa berbunyi
+   * BEBERAPA KALI dalam sehari.
+   *
+   * Ketiga rekap lain memakai `jatuhTempoHarian()`, yang penandanya bertanggal
+   * -- begitu rekap pertama menulis "hari ini", yang kedua membacanya sebagai
+   * "sudah" dan tidak pernah berangkat. Yang ini memakai `slotJatuhTempo()`
+   * dengan penanda bertanggal BERIKUT SLOTNYA, dan kunci idempotennya memuat
+   * slot itu. Lihat `core/rekapJadwal.ts`.
+   *
+   * Interval pindai, dengan alasan yang sama: yang dikerjakan tiap siklus cuma
+   * membaca pengaturan dan membandingkan jam. Pembacaan `sik` baru terjadi pada
+   * siklus yang benar-benar jatuh tempo.
+   *
+   * Ia menjaga KEDUA sakelarnya sendiri (`erm.enabled` dan
+   * `erm.penilaian_enabled`, keduanya default MATI) dan memeriksa tujuan sebelum
+   * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('erm-penilaian', runPenilaianRekapIfDue, scanIntervalMs);
   void dispatcherLoop();
   /**
    * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan

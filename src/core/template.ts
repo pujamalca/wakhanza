@@ -556,6 +556,41 @@ export const REKAP_RESEP_TEMPLATE_VARIABLES = [
   'kontak_rs',
 ] as const;
 
+/**
+ * REKAP ASESMEN AWAL KEPERAWATAN (`/erm/penilaian-umum`, migrations/044).
+ *
+ * Daftar pertama di berkas ini yang memuat NAMA PASIEN sementara penerimanya
+ * BUKAN pasien itu sendiri -- dan itu memang inti fiturnya: rekap yang tidak
+ * menyebut siapa tidak bisa ditindaklanjuti perawat mana pun. Pembatasannya
+ * karena itu ada di tempat lain, bukan di daftar ini: `erm.penilaian_enabled`
+ * default MATI, dan `erm.penilaian_rincian` bisa diturunkan jadi `ringkas`
+ * sehingga `{daftar_pasien}` dirender kosong sementara angkanya tetap utuh.
+ *
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya: seluruh isi asesmennya --
+ * `{keluhan_utama}`, `{alergi}`, `{skala_nyeri}`, `{status_psiko}`, `{rpd}`.
+ * `khanza/penilaianAwal.ts` memang tidak pernah men-SELECT satu pun, jadi
+ * merendernya bukan terlarang melainkan MUSTAHIL (§5.2). Yang beredar cuma
+ * apakah kolomnya KOSONG, tidak pernah isinya.
+ *
+ * `{daftar_pasien}` masuk MULTILINE_VARIABLES -- aman HANYA karena
+ * `core/penilaianRekap.ts` memanggil sanitizeValue() sendiri untuk tiap
+ * `nm_pasien`, dipatok unit test tersendiri di `penilaianRekap.test.ts`.
+ */
+export const REKAP_PENILAIAN_TEMPLATE_VARIABLES = [
+  'tanggal_rekap',
+  'jumlah_total',
+  'jumlah_belum',
+  'jumlah_sebagian',
+  'jumlah_lengkap',
+  'jumlah_perlu_diisi',
+  'daftar_pasien',
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
 
 /**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
@@ -632,6 +667,7 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...PENJUALAN_TEMPLATE_VARIABLES,
     ...REKAP_PENJUALAN_TEMPLATE_VARIABLES,
     ...REKAP_RESEP_TEMPLATE_VARIABLES,
+    ...REKAP_PENILAIAN_TEMPLATE_VARIABLES,
     ...HIBAH_TEMPLATE_VARIABLES,
     ...PEMESANAN_TEMPLATE_VARIABLES,
     ...BPJS_BATAL_TEMPLATE_VARIABLES,
@@ -726,6 +762,13 @@ const MULTILINE_VARIABLES = new Set<string>([
   // dijaga adalah akibatnya, dan akibat itu gagal DIAM -- daftarnya cuma
   // terlipat jadi satu baris lalu terpotong di 60 karakter.
   'rincian_dokter',
+  // Rekap asesmen awal keperawatan (044). Dirakit `core/penilaianRekap.ts`,
+  // yang memanggil sanitizeValue() sendiri untuk tiap `nm_pasien` -- input
+  // bebas petugas pendaftaran Khanza, dan di sini taruhannya lebih tinggi
+  // daripada nama dokter: isinya NAMA PASIEN yang dikirim ke sebuah grup, jadi
+  // nama yang memuat baris baru bisa menyisipkan barisnya sendiri ke dalam
+  // pesan. Patokannya di penilaianRekap.test.ts, sesuai kewajiban di atas.
+  'daftar_pasien',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

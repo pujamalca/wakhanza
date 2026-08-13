@@ -127,6 +127,16 @@ export const TRIGGER_LABEL: Record<string, string> = {
   FARMASI_PENJUALAN: 'Apotek: nota penjualan',
   FARMASI_PENJUALAN_HAPUS: 'Apotek: nota penjualan DIBATALKAN',
   FARMASI_PENJUALAN_REKAP: 'Apotek: rekap penjualan harian',
+  // Awalan "ERM:" sengaja dipakai sejak pemicu PERTAMA di keluarga itu, bukan
+  // ditambahkan belakangan saat yang kedua datang. Menu ini direncanakan tumbuh
+  // mengikuti 31 tabel asesmen Khanza, dan mengganti awalan pada baris `outbox`
+  // yang sudah terlanjur tercatat adalah persis yang TIDAK bisa dilakukan --
+  // riwayat tidak ditulis ulang (pelajaran RESULT_READY di migrations/034).
+  //
+  // Penerimanya PERAWAT, bukan pasien, dan labelnya menyebut itu lewat kata
+  // "rekap": baris di Antrean/Log tidak boleh terbaca sebagai pemberitahuan yang
+  // gagal sampai ke pasien padahal memang tidak pernah ditujukan ke sana.
+  ERM_PENILAIAN_UMUM: 'ERM: rekap asesmen awal',
   // BPJS_BATAL ke loket, BPJS_KONTROL ke pasien -- dan bedanya ditulis di
   // labelnya, dengan alasan yang sama seperti ketiga baris apotek di atas:
   // baris di Antrean/Log tidak boleh terbaca sebagai pemberitahuan yang gagal

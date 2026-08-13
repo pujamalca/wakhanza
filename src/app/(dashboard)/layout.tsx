@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
-import { AppShell, type NavGroup, type NavIcon } from '@/components/AppShell';
+import { AppShell, type NavGroup, type NavIcon, type NavItem } from '@/components/AppShell';
 import { Button, IconLogout } from '@/components/ui';
 
 /**
@@ -10,7 +10,25 @@ import { Button, IconLogout } from '@/components/ui';
  * yang tidak bisa dipakai tidak ikut tampil -- gerbang sesungguhnya tetap
  * `proxy.ts` (halaman) dan `requireRole('admin')` (route/server action).
  */
-const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: NavIcon; adminOnly?: boolean }[] }[] = [
+interface MenuItem {
+  href: string;
+  label: string;
+  icon: NavIcon;
+  adminOnly?: boolean;
+  /**
+   * Submenu. Dipakai ERM, yang sengaja BUKAN halaman bertab.
+   *
+   * Bedanya bukan gaya: tab hidup DI DALAM satu halaman, jadi seluruh isinya
+   * dimuat sebagai satu rute dan jumlahnya dibatasi lebar layar. `/farmasi`
+   * sudah menabrak batas itu -- delapan tab, dan yang kesembilan tidak akan
+   * muat. ERM direncanakan tumbuh jauh lebih banyak dari itu (penilaian umum,
+   * gigi, mata, kebidanan, dan seterusnya mengikuti 31 tabel asesmen Khanza),
+   * jadi tiap submenu berdiri sebagai rutenya sendiri sejak awal.
+   */
+  children?: MenuItem[];
+}
+
+const NAV_GROUPS: { label: string; items: MenuItem[] }[] = [
   {
     label: 'Pemantauan',
     items: [
@@ -45,6 +63,24 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: N
     ],
   },
   {
+    // Grup TERSENDIRI, bukan diselipkan ke "Kirim pesan", dan itu bukan
+    // kerapian: sembilan menu di grup itu semuanya menjawab "pesan apa yang
+    // keluar dari nomor RS". ERM menjawab pertanyaan yang berbeda -- "apa yang
+    // belum dikerjakan di rekam medis" -- dan rekapnya cuma salah satu caranya
+    // sampai ke orang. Halamannya berguna penuh bahkan saat sakelar rekapnya
+    // mati, karena tabelnya sendiri sudah menjawab pertanyaannya.
+    label: 'Rekam medis',
+    items: [
+      {
+        href: '/erm',
+        label: 'ERM',
+        icon: 'erm',
+        adminOnly: true,
+        children: [{ href: '/erm/penilaian-umum', label: 'Penilaian umum', icon: 'erm', adminOnly: true }],
+      },
+    ],
+  },
+  {
     label: 'Data pasien',
     items: [
       { href: '/nomor-bermasalah', label: 'Nomor bermasalah', icon: 'phone' },
@@ -76,11 +112,36 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!session?.user) redirect('/login');
 
   const { username, role } = session.user;
+
+  /**
+   * Penyaringan peran REKURSIF, dan induk yang kehilangan seluruh anaknya ikut
+   * dibuang.
+   *
+   * Bentuk datar yang lama cukup menyaring satu tingkat. Sejak ada submenu, dua
+   * hal bisa gagal diam-diam: anak `adminOnly` yang ikut tampil karena induknya
+   * lolos, dan -- kebalikannya -- induk yang tersisa sebagai tombol lipat yang
+   * membuka kekosongan. Yang kedua tidak membocorkan apa pun tapi terbaca
+   * sebagai menu rusak.
+   *
+   * Ini tetap murni supaya menu yang tidak bisa dipakai tidak ikut tampil.
+   * Gerbang sesungguhnya tetap `proxy.ts` (halaman) dan `requireRole('admin')`
+   * (route/server action) -- menu yang disembunyikan bukan menu yang dijaga.
+   */
+  const saring = (items: MenuItem[]): NavItem[] =>
+    items
+      .filter((item) => !item.adminOnly || role === 'admin')
+      .map(({ href, label, icon, children }) => {
+        const anak = children ? saring(children) : undefined;
+        return { href, label, icon, ...(anak && anak.length > 0 ? { children: anak } : {}) };
+      })
+      .filter((item) => {
+        const asli = items.find((i) => i.href === item.href);
+        return !asli?.children || asli.children.length === 0 || (item.children?.length ?? 0) > 0;
+      });
+
   const groups: NavGroup[] = NAV_GROUPS.map((group) => ({
     label: group.label,
-    items: group.items
-      .filter((item) => !item.adminOnly || role === 'admin')
-      .map(({ href, label, icon }) => ({ href, label, icon })),
+    items: saring(group.items),
   })).filter((group) => group.items.length > 0);
 
   return (
