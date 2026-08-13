@@ -160,7 +160,7 @@ export default async function RingkasanPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
-          <h2 className="font-medium">Per jenis pesan</h2>
+          <h2 className="text-title">Per jenis pesan</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{CHART_DAYS} hari terakhir, termasuk yang dilewati.</p>
 
           {triggers.length === 0 ? (
@@ -193,7 +193,7 @@ export default async function RingkasanPage() {
           <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="font-medium">Perlu ditinjau</h2>
+              <h2 className="text-title">Perlu ditinjau</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Pesan yang sudah kehabisan percobaan otomatis. Kirim ulang setelah penyebabnya diperbaiki.
               </p>

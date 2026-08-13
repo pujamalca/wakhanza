@@ -90,7 +90,7 @@ export function VolumeChart({ days }: { days: DayVolume[] }) {
     <figure className={cardClassName}>
       <figcaption className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
-          <h2 className="font-medium">Aktivitas kirim {days.length} hari terakhir</h2>
+          <h2 className="text-title">Aktivitas kirim {days.length} hari terakhir</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Hanya pesan yang benar-benar dicoba kirim. Yang dilewati karena tanpa nomor atau menolak tidak ikut dihitung.
           </p>

@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import { BpjsTarget, WaGroup, WaSession, getSetting, getSettingBool, getSettingNumber } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { bacaHariSebelum } from '@/core/bpjs';
-import { Callout, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { Callout, HelpPanel, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { BantuanBpjs } from './bantuan';
 import { MasterSwitch, BatalSwitch, KontrolSwitch } from './Switches';
 import { TargetTable, type TargetRow, type GrupRow } from './TargetTable';
 import { BatalForm, type NilaiBatal } from './BatalForm';
@@ -108,6 +109,11 @@ export default async function BpjsPage({
       <PageHeader
         title="BPJS"
         description="Pemberitahuan pembatalan dari Mobile JKN ke loket, dan pengingat surat kontrol ke pasien."
+        help={
+          <HelpPanel title="Tentang tab ini">
+            <BantuanBpjs tab={tab} />
+          </HelpPanel>
+        }
       />
 
       <Tabs
@@ -198,14 +204,6 @@ async function TabTujuan({
     <section>
       <MasterSwitch enabled={enabled} adaTujuan={adaTujuan} />
 
-      <Callout collapsible className="mb-4" title="Satu daftar tujuan, dipakai kedua fitur di tab sebelah">
-        Dua centang di tiap baris menjawab dua pertanyaan yang berbeda:{' '}
-        <span className="font-medium text-foreground">Terima pembatalan</span> menerima pemberitahuan saat pasien
-        membatalkan lewat Mobile JKN, dan{' '}
-        <span className="font-medium text-foreground">Terima salinan kontrol</span> menerima tembusan pengingat yang
-        dikirim ke pasien.
-      </Callout>
-
       <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
       <Pagination
         page={p.halaman}
@@ -221,10 +219,13 @@ async function TabTujuan({
         </p>
       )}
 
+      {/* TIDAK dilipat sejak keterangan halaman ini ditata ulang: ini pagar
+          privasi yang harus terbaca sebelum sebuah grup dicentang, bukan
+          orientasi. Keterangan pengantar tab pindah ke laci bantuan; yang ini
+          tetap terbentang. Lihat DESIGN_SYSTEM.md §5. */}
       <Callout
         variant="privasi"
         className="mt-8"
-        collapsible
         title="Pembatalan berisi data pasien; pengingat kontrol tidak berisi data klinis"
       >
         <p>
@@ -268,26 +269,7 @@ async function TabBatal({ enabled, adaPenerima }: { enabled: boolean; adaPenerim
 
   return (
     <section>
-      <Callout collapsible className="mb-4" title="Penerimanya LOKET, bukan pasien — supaya slot kosong bisa ditawarkan lagi">
-        Dibaca dari <span className="font-mono">referensi_mobilejkn_bpjs_batal</span> milik SIMRS Khanza — pembatalan
-        yang dilakukan pasien <span className="font-medium text-foreground">sendiri lewat aplikasi Mobile JKN</span>.
-        Pasiennya sudah tahu, ia yang menekan tombolnya.
-      </Callout>
-
       <BatalSwitch enabled={enabled} adaPenerima={adaPenerima} />
-
-      <Callout collapsible className="mb-4" title="Jam tenang dilewati, dan daftar tolak pasien tidak berlaku">
-        <p>
-          <span className="font-medium text-foreground">Jam tenang dilewati.</span> Penerimanya staf, bukan orang yang
-          sedang tidur di rumah — dan slot yang batal sering untuk besok pagi. Pembatalan pukul 21.30 yang baru
-          diberitahukan pukul 07.00 tiba bersamaan dengan pasiennya sendiri datang.
-        </p>
-        <p className="mt-2">
-          <span className="font-medium text-foreground">Permintaan “Berhenti Kirim Otomatis” tidak berlaku.</span> Pesan
-          ini tidak dikirim ke pasien, jadi tidak ada nomor pasien yang bisa dicocokkan ke daftar tolak — dan koordinasi
-          kerja internal bukan sesuatu yang bisa dihentikan pasien.
-        </p>
-      </Callout>
 
       <BatalForm nilai={nilai} />
     </section>
@@ -327,11 +309,6 @@ async function TabKontrol({
 
   return (
     <section>
-      <Callout collapsible className="mb-4" title="Dipicu WAKTU — sekali sehari pada jam yang dipilih di bawah">
-        Dibaca dari <span className="font-mono">bridging_surat_kontrol_bpjs</span> — rencana kunjungan berikutnya yang
-        sudah dijadwalkan saat pasien pulang, sering berminggu-minggu di muka.
-      </Callout>
-
       <KontrolSwitch enabled={enabled} kePasien={kePasien} adaPenerima={adaPenerima} />
 
       <Callout

@@ -31,7 +31,7 @@ export function TestBox() {
     <Card>
       <div className="space-y-3">
         <div>
-          <h3 className="font-medium">Uji coba</h3>
+          <h3 className="text-title-sm">Uji coba</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Ketik pesan seperti yang akan dikirim pasien. Tidak ada pesan yang benar-benar terkirim, dan tidak ada yang tercatat.
           </p>

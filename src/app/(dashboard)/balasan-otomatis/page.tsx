@@ -12,7 +12,8 @@ import {
 } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { hitungKataTakTerjawab } from '@/core/pertanyaanTakTerjawab';
-import { PageHeader, Card, Callout, Pagination } from '@/components/ui';
+import { PageHeader, Card, HelpPanel, Pagination } from '@/components/ui';
+import { BantuanBalasanOtomatis } from './bantuan';
 import { MasterSwitch } from './MasterSwitch';
 import { TestBox } from './TestBox';
 import { RuleTable } from './RuleTable';
@@ -169,6 +170,11 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
       <PageHeader
         title="Balasan otomatis"
         description="Membalas sendiri pesan yang masuk dari pasien berdasarkan kata kunci — misalnya mengirimkan jadwal dokter saat pasien menanyakannya."
+        help={
+          <HelpPanel>
+            <BantuanBalasanOtomatis />
+          </HelpPanel>
+        }
       />
 
       <MasterSwitch enabled={enabled} canEdit />
@@ -222,30 +228,7 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
               <span className="font-medium">Bukan untuk pertanyaan medis.</span> Sistem ini hanya mencocokkan kata kunci — tidak
               memahami keluhan. Pesan yang tidak cocok sengaja dibiarkan tanpa jawaban supaya tetap dibaca petugas.
             </div>
-            <Callout collapsible title="Cara kerjanya: aturan pertama yang cocok menang, satu pesan satu balasan">
-              <ol className="ml-4 list-decimal space-y-1.5">
-                <li>
-                  Pasien mengirim pesan ke nomor WhatsApp rumah sakit. Permintaan{' '}
-                  <span className="font-mono text-xs">Berhenti Kirim Otomatis</span> selalu diperiksa lebih dulu dan tidak pernah
-                  bisa disandera aturan di bawah.
-                </li>
-                <li>
-                  Aturan diperiksa berurutan dari{' '}
-                  <span className="font-medium text-foreground">urutan terkecil</span>. Yang pertama cocok yang dipakai.
-                </li>
-                <li>
-                  Balasannya masuk ke antrean kirim yang sama dengan notifikasi lain, jadi ikut tercatat di Antrean dan Log. Jam
-                  tenang <span className="font-medium text-foreground">tidak berlaku</span> di sini: pasien sedang menunggu jawaban
-                  atas pesannya sendiri.
-                </li>
-                <li>
-                  Pasien yang meminta <span className="font-mono text-xs">Berhenti Kirim Otomatis</span>{' '}
-                  <span className="font-medium text-foreground">tetap dibalas di sini</span> — yang ia hentikan adalah pemberitahuan
-                  otomatis (antrian, hasil, obat, tagihan, pengingat jadwal), bukan jawaban atas pesan yang ia kirim sendiri.
-                </li>
-              </ol>
-            </Callout>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               Pesan cadangan saat tidak ada yang cocok: {adaFallback ? 'aktif' : <span className="font-medium">tidak ada (diam)</span>}
               . Menyimpan teks pesan pasien untuk penyetelan kata kunci:{' '}
               {simpanTeks ? <span className="font-medium text-warning">menyala</span> : 'mati'}. Keduanya diatur di Pengaturan.
@@ -254,7 +237,7 @@ export default async function BalasanOtomatisPage({ searchParams }: { searchPara
         </Card>
       </div>
 
-      <h2 className="mb-1 font-medium">Aturan</h2>
+      <h2 className="mb-3 text-title">Aturan</h2>
 
       <RuleTable
         hariRingkasan={HARI_RINGKASAN}

@@ -13,15 +13,54 @@
     --muted-foreground: 215 16% 47%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
+    /**
+     * Merah PADAT untuk bidang terisi berteks putih -- peran yang berbeda dari
+     * `--destructive`, dan pemisahannya lahir dari pengukuran.
+     *
+     * Satu token tidak bisa melayani keduanya: sebagai TEKS ia harus cukup
+     * terang untuk terbaca di atas kartu gelap, sebagai LATAR ia harus cukup
+     * gelap untuk teks putih di atasnya. Dijajaki, tidak ada satu pun kecerahan
+     * yang lolos 4,5:1 pada kedua peran sekaligus -- pada mode gelap, L60
+     * menghasilkan teks 4,45:1 (gagal tipis) dan putih-di-atasnya 3,82:1 (gagal
+     * jelas), dan menggeser L ke mana pun memperbaiki satu sambil merusak yang
+     * lain.
+     *
+     * Nilai ini sama di kedua tema: ia latar, jadi yang harus dilawannya teks
+     * putih di atasnya -- bukan permukaan di belakangnya. Putih vs ini 6,03:1.
+     */
+    --destructive-solid: 0 72% 44%;
     --border: 214 32% 91%;
     --card: 0 0% 100%;
     --ring: 158 64% 32%;
+
+    /* Permukaan BERTINGKAT. Sebelum ini hanya ada dua (`--background` dan
+       `--card`), sehingga panel di DALAM sebuah card -- kepala tabel, blok
+       pratinjau, kotak ringkasan -- tidak punya bidang sendiri dan hanya bisa
+       dibedakan lewat garis. Halaman yang isinya bersarang tiga tingkat lalu
+       terbaca sebagai satu bidang datar.
+
+       `raised` sengaja SAMA dengan `--card` di mode terang: di atas kertas
+       putih yang memisahkan card dari halaman adalah bayangan dan garis, bukan
+       beda warna. Di mode gelap keduanya memang berbeda (lihat .dark). */
+    --surface-raised: 0 0% 100%;
+    --surface-sunken: 210 40% 98%;
 
     /* Status selain "bahaya". Ada di sini, bukan sebagai green-700/amber-700
        langsung di Badge, karena aturan proyek: warna baru ditambahkan sebagai
        token di :root DAN .dark, tidak dihardcode per komponen. */
     --success: 142 72% 29%;
     --warning: 26 90% 37%;
+
+    /* Biru keterangan, TERPISAH dari `--primary`. Sebelum ini `Callout
+       variant="info"` memakai `border-primary/25 bg-primary/5`, sehingga kotak
+       yang cuma menerangkan sesuatu memakai warna yang sama dengan tombol
+       tindakan utama -- dua peran yang berlawanan (satu minta dibaca, satu
+       minta ditekan) dengan tanda visual yang identik.
+
+       Biru dipilih karena ia satu-satunya keluarga yang belum terpakai di sini:
+       hijau sudah jadi merek DAN sukses, kuning peringatan, merah bahaya.
+       Kontras vs putih 5,9:1 (AA untuk teks normal). */
+    --info: 214 84% 44%;
 
     /* Warna grafik. TIDAK sama dengan --primary/--destructive: pasangan
        hijau-merah adalah kasus terburuk buta warna deutan, dan --primary
@@ -34,6 +73,17 @@
        nilai ini berarti menjalankan ulang validasinya, bukan menebak. */
     --chart-sent: 166 55% 42%;
     --chart-failed: 0 72% 51%;
+
+    /* Elevasi. Bayangan bawaan Tailwind adalah hitam beropasitas rendah, dan di
+       atas bidang GELAP itu praktis tidak terbaca -- sehingga card di mode gelap
+       kehilangan satu-satunya tanda bahwa ia terangkat. Warna dan kekuatannya
+       karena itu jadi token yang berganti per tema, bukan nilai tetap.
+
+       Terukur di berkas ini sebelum perubahan: `shadow-sm` dipakai 3 kali dan
+       `shadow-lg` 2 kali di SELURUH dashboard -- bukan skala elevasi, melainkan
+       lima kebetulan. */
+    --shadow-color: 222 47% 11%;
+    --shadow-strength: 0.05;
   }
 
   .dark {
@@ -44,8 +94,12 @@
     --primary-foreground: 0 0% 100%;
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
-    --destructive: 0 70% 60%;
+    /* 63%, bukan 60%. Terukur: pada 60% teks merah di atas kartu gelap hanya
+       mencapai 4,45:1 -- gagal AA sebesar 0,05, cukup untuk gagal dan terlalu
+       tipis untuk terlihat saat ditinjau dengan mata. 63% -> 4,91:1. */
+    --destructive: 0 70% 63%;
     --destructive-foreground: 0 0% 100%;
+    --destructive-solid: 0 72% 44%;
     --border: 217 33% 20%;
     /* Sedikit lebih terang dari --background -- di halaman terang cukup
        border, tapi di gelap card butuh beda kecerahan supaya panel
@@ -53,13 +107,31 @@
     --card: 222 40% 13%;
     --ring: 158 55% 45%;
 
+    /* Di gelap ketiganya BENAR-BENAR berbeda kecerahan, kebalikan dari mode
+       terang: tanpa bayangan yang terbaca di atas bidang gelap, satu-satunya
+       yang bisa menyusun kedalaman adalah tangga kecerahan itu sendiri.
+       Sunken lebih GELAP dari card (mundur), raised sama dengan card. */
+    --surface-raised: 222 40% 13%;
+    --surface-sunken: 222 44% 10%;
+
     --success: 142 69% 58%;
     --warning: 43 96% 56%;
+
+    /* Didesaturasi dan diterangkan untuk bidang gelap, bukan dibalik dari nilai
+       terang -- aturan yang sama sudah dibayar pada --chart-*. Kontras vs
+       --card (#141c2e) 6,8:1. */
+    --info: 213 90% 68%;
 
     /* Bukan pembalikan otomatis dari nilai terang: dipilih ulang untuk
        permukaan gelap dan divalidasi ulang terhadapnya (lihat catatan di :root). */
     --chart-sent: 166 55% 38%;
     --chart-failed: 0 70% 60%;
+
+    /* Hitam murni dan JAUH lebih kuat: di atas bidang gelap bayangan baru mulai
+       terbaca sekitar 0,4 ke atas. Ini bukan penyetelan halus melainkan syarat
+       supaya elevasi ada sama sekali di tema ini. */
+    --shadow-color: 0 0% 0%;
+    --shadow-strength: 0.45;
   }
 }
 
@@ -72,6 +144,46 @@
     transition:
       background-color 0.15s ease,
       color 0.15s ease;
+  }
+
+  /* Angka TABULAR di seluruh tabel dan bidang angka.
+     Dengan angka proporsional (bawaan hampir semua font teks) lebar tiap digit
+     berbeda -- "1" jauh lebih sempit dari "8" -- sehingga kolom jumlah, rupiah,
+     dan stempel waktu bergoyang baris demi baris. Pembacanya melihat "kolomnya
+     berantakan" tanpa bisa menunjuk sebabnya, dan tidak ada penataan ulang
+     spasi yang bisa memperbaikinya karena sebabnya ada di dalam fontnya.
+
+     Dipasang di `table` supaya seluruh tabel data dapat ini tanpa satu pun
+     halaman perlu mengingatnya; `.tabular` untuk angka yang berdiri di luar
+     tabel (kotak KPI, ringkasan). */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Judul mewarisi bobot dari skala `fontSize` di tailwind.config.ts, bukan dari
+     sini -- tapi peramban memberi <h1>..<h6> ukuran bawaannya sendiri yang tidak
+     ada hubungannya dengan skala kita. Dinolkan supaya satu-satunya yang
+     menentukan ukuran judul adalah kelas peran yang dipilih sadar-sadar. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+}
+
+@layer utilities {
+  /* Membatasi panjang baris teks yang untuk DIBACA.
+     Aturan tipografi: 60-75 karakter per baris. Di monitor loket 1920px, satu
+     paragraf bantuan yang dibiarkan selebar halaman menghasilkan baris ~180
+     karakter -- mata kehilangan tempatnya saat kembali ke awal baris, dan
+     paragrafnya berhenti terbaca justru karena ruangnya berlimpah. */
+  .measure {
+    max-width: 68ch;
   }
 }
 

@@ -104,7 +104,7 @@ export function ComposeForm({
         if (!ok) e.preventDefault();
       }}
     >
-      <h2 className="font-medium">Susun pesan</h2>
+      <h2 className="text-title">Susun pesan</h2>
 
       {Object.entries(hiddenFilters).map(([name, values]) =>
         values.map((v) => <input key={`${name}-${v}`} type="hidden" name={name} value={v} />),

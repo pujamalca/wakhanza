@@ -41,7 +41,7 @@ export function PengadaanSwitch({
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-medium">Notifikasi pengadaan</h3>
+              <h3 className="text-title-sm">Notifikasi pengadaan</h3>
               <Badge variant={enabled ? 'success' : 'warning'}>{enabled ? 'Menyala' : 'Mati'}</Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">

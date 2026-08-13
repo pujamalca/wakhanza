@@ -89,7 +89,7 @@ export function PesanForm({ nilai }: { nilai: NilaiPesan }) {
       </Card>
 
       <Card>
-        <h3 className="text-sm font-medium">Pesan untuk poli sensitif</h3>
+        <h3 className="text-title-sm">Pesan untuk poli sensitif</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           Dipakai menggantikan pesan di atas bila resepnya berasal dari poli yang ditandai sensitif di halaman
           Pengaturan. Sengaja <span className="font-medium text-foreground">tetap dikirim</span>, bukan didiamkan —
@@ -107,7 +107,7 @@ export function PesanForm({ nilai }: { nilai: NilaiPesan }) {
       </Card>
 
       <Card>
-        <h3 className="text-sm font-medium">Pesan rekap saat sedang ramai</h3>
+        <h3 className="text-title-sm">Pesan rekap saat sedang ramai</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           Bila satu putaran pemeriksaan menemukan lebih banyak resep dari ambang di bawah, yang dikirim adalah{' '}
           <span className="font-medium text-foreground">satu pesan rekap</span>, bukan sekian puluh pesan satuan.

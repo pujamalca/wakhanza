@@ -40,7 +40,7 @@ export function KontrolForm({ nilai }: { nilai: NilaiKontrol }) {
     <>
       <form action={formAction} className="space-y-4">
         <Card>
-          <h3 className="text-sm font-medium">Kapan diingatkan</h3>
+          <h3 className="text-title-sm">Kapan diingatkan</h3>
           <div className="mt-3 flex flex-wrap gap-4">
             <label className="block max-w-56 grow space-y-1">
               <span className="block text-xs font-medium">Berapa hari sebelum tanggal kontrol</span>
@@ -122,7 +122,7 @@ export function KontrolForm({ nilai }: { nilai: NilaiKontrol }) {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <h3 className="text-sm font-medium">Isi pengingat</h3>
+            <h3 className="text-title-sm">Isi pengingat</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               <span className="font-mono">{'{sisa_hari}'}</span> sudah berbentuk kalimat (“besok”, “7 hari lagi”), bukan
               angka. <span className="font-mono">{'{nama_poli}'}</span> dan{' '}
@@ -140,7 +140,7 @@ export function KontrolForm({ nilai }: { nilai: NilaiKontrol }) {
           </Card>
 
           <Card>
-            <h3 className="text-sm font-medium">Pesan untuk poli sensitif</h3>
+            <h3 className="text-title-sm">Pesan untuk poli sensitif</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Boleh <span className="font-medium text-foreground">dikosongkan</span> — bila kosong, yang dipakai adalah
               pesan generik di halaman Pengaturan, sama seperti notifikasi pasien lainnya. Isi di sini hanya bila kanal
@@ -170,7 +170,7 @@ export function KontrolForm({ nilai }: { nilai: NilaiKontrol }) {
       {/* Di LUAR form di atas: menekannya tidak boleh ikut mengirimkan form,
           dan sebaliknya menyimpan pengaturan tidak boleh ikut menjalankan. */}
       <Card className="mt-4">
-        <h3 className="text-sm font-medium">Jalankan sekarang</h3>
+        <h3 className="text-title-sm">Jalankan sekarang</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           Jadwal harian punya masa tunggu yang panjang: setelan yang baru diubah tidak bisa dibuktikan sampai besok pada
           jam kirimnya. Tombol ini menjalankan pekerjaan yang{' '}

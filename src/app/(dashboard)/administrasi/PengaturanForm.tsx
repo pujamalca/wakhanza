@@ -30,7 +30,7 @@ export function MasterSwitch({ aktif }: { aktif: boolean }) {
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="font-medium">Pengiriman dokumen ke pasien</h2>
+          <h2 className="text-title">Pengiriman dokumen ke pasien</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Saat menyala, staf bisa mengirim surat keterangan sakit dan sehat sebagai berkas PDF lewat WhatsApp resmi
             rumah sakit. Surat tetap dibuat di SIMRS Khanza — halaman ini hanya mengirimkannya.
@@ -86,7 +86,7 @@ export function DiagnosaSwitch({ aktif }: { aktif: boolean }) {
     <Card className="mt-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="font-medium">Cetak diagnosa di surat keterangan sakit</h2>
+          <h2 className="text-title">Cetak diagnosa di surat keterangan sakit</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Saat ini <strong>{aktif ? 'ikut tercetak' : 'tidak tercetak'}</strong>.
           </p>
@@ -153,7 +153,7 @@ export function AutoSwitch({
     <Card className="mt-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="font-medium">Kirim otomatis saat surat disimpan di Khanza</h2>
+          <h2 className="text-title">Kirim otomatis saat surat disimpan di Khanza</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Saat menyala, setiap surat keterangan sakit yang disimpan dokter di SIMRS Khanza dikirimkan sendiri ke
             nomor WhatsApp pasiennya — tanpa ada yang menekan tombol. Diperiksa setiap 5 menit.
@@ -271,7 +271,7 @@ export function TeksForm({
     // membungkusnya dengan <div> hanya demi gaya akan memisahkan tombol Simpan
     // dari form-nya.
     <form action={action} className={`${cardClassName} mt-6`}>
-        <h2 className="mb-4 flex items-center gap-1 font-medium">
+        <h2 className="mb-4 flex items-center gap-1 text-title">
           Teks pengantar dan catatan kaki
           <Petunjuk untuk="Teks pengantar dan catatan kaki">
             Pesan pengantar adalah keterangan yang menyertai berkas di WhatsApp. Karena ada lampiran, WhatsApp

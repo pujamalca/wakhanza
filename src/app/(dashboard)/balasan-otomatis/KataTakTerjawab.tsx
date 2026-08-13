@@ -34,7 +34,7 @@ export function KataTakTerjawab({
     <Card>
       <div className="space-y-3 text-sm">
         <div>
-          <h3 className="font-medium">Kata yang sering ditanya tapi belum punya aturan</h3>
+          <h3 className="text-title-sm">Kata yang sering ditanya tapi belum punya aturan</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Dihitung dari {jumlahPesan} pesan perorangan yang tidak dibalas dalam {hari} hari terakhir. Kata yang sudah
             dipakai aturan mana pun tidak ditampilkan, jadi yang tersisa adalah yang benar-benar belum punya jawaban.

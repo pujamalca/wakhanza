@@ -17,7 +17,7 @@ export function FormNama({ namaSekarang }: { namaSekarang: string }) {
   return (
     <Card className="space-y-3">
       <div>
-        <h2 className="font-medium">Nama tampilan</h2>
+        <h2 className="text-title">Nama tampilan</h2>
         <p className="text-xs text-muted-foreground">
           Nama yang dilihat rekan kerja di jejak audit. Tidak pernah ikut terkirim ke pasien.
         </p>
@@ -59,7 +59,7 @@ export function FormSandi() {
   return (
     <Card className="space-y-3">
       <div>
-        <h2 className="font-medium">Ganti kata sandi</h2>
+        <h2 className="text-title">Ganti kata sandi</h2>
         <p className="text-xs text-muted-foreground">
           Kata sandi saat ini wajib diisi &mdash; itu yang memastikan bukan orang lain yang menggantinya lewat komputer
           yang Anda tinggalkan terbuka.

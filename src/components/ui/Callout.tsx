@@ -49,8 +49,12 @@ export type CalloutVariant = 'warning' | 'privasi' | 'info' | 'neutral';
 const KOTAK: Record<CalloutVariant, string> = {
   warning: 'border-warning/30 bg-warning/5',
   privasi: 'border-warning/30 bg-warning/5',
-  info: 'border-primary/25 bg-primary/5',
-  neutral: 'border-border/60',
+  // Biru `--info`, BUKAN `--primary` seperti sebelumnya. Kotak yang cuma
+  // menerangkan sesuatu dan tombol yang minta ditekan adalah dua peran yang
+  // berlawanan; memberi keduanya warna merek yang sama membuat halaman penuh
+  // bidang hijau yang tidak satu pun bisa ditebak gunanya sebelum dibaca.
+  info: 'border-info/25 bg-info/5',
+  neutral: 'border-border/60 bg-surface-sunken',
 };
 
 const IKON: Record<CalloutVariant, ComponentType<IconProps> | null> = {
@@ -65,7 +69,7 @@ const IKON: Record<CalloutVariant, ComponentType<IconProps> | null> = {
 const WARNA_IKON: Record<CalloutVariant, string> = {
   warning: 'text-warning',
   privasi: 'text-warning',
-  info: 'text-primary',
+  info: 'text-info',
   neutral: '',
 };
 
@@ -88,7 +92,12 @@ export function Callout({
   defaultOpen = false,
   className = '',
 }: CalloutProps) {
-  const kotak = `rounded-lg border p-3 text-xs ${KOTAK[variant]} ${className}`;
+  // `text-prose` (14px/1.7), bukan `text-xs` (12px/1.5) seperti sebelumnya.
+  // Kotak ini berisi KALIMAT, dan 12px adalah ukuran untuk metadata -- stempel
+  // waktu, kode mesin. Menaruh paragraf di sana membuatnya terbaca sebagai
+  // catatan kaki yang boleh dilewati, yang persis kebalikan dari gunanya pada
+  // varian `warning`/`privasi`.
+  const kotak = `rounded-lg border p-3 text-prose ${KOTAK[variant]} ${className}`;
   const Ikon = IKON[variant];
 
   /**
@@ -115,7 +124,7 @@ export function Callout({
     return (
       <div className={kotak}>
         <p className="font-medium">{judul}</p>
-        <div className={`mt-1 text-muted-foreground ${jarakIsi}`}>{children}</div>
+        <div className={`measure mt-1 text-muted-foreground ${jarakIsi}`}>{children}</div>
       </div>
     );
   }
@@ -126,7 +135,7 @@ export function Callout({
     // dibuka ikut hilang. Perataannya dikerjakan span di dalamnya.
     <details className={kotak} open={defaultOpen}>
       <summary className="cursor-pointer font-medium marker:text-muted-foreground">{judul}</summary>
-      <div className={`mt-2 text-muted-foreground ${jarakIsi}`}>{children}</div>
+      <div className={`measure mt-2 text-muted-foreground ${jarakIsi}`}>{children}</div>
     </details>
   );
 }

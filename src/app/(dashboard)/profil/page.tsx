@@ -37,7 +37,7 @@ export default async function ProfilPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="space-y-3">
-          <h2 className="font-medium">Akun</h2>
+          <h2 className="text-title">Akun</h2>
           <dl className="space-y-2 text-sm">
             <Baris label="Nama pengguna">
               <span className="font-mono text-xs">{user.username}</span>

@@ -43,7 +43,7 @@ export function GrupPanel({
     <section className="mb-8">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-sm font-medium">Grup yang diikuti nomor rumah sakit</h2>
+          <h2 className="text-title">Grup yang diikuti nomor rumah sakit</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Kode grup di sini yang dipakai di halaman <span className="font-medium">Farmasi</span>. Ia tidak bisa dilihat
             dari aplikasi WhatsApp — tautan undangan (chat.whatsapp.com/…) bukan kode grup.

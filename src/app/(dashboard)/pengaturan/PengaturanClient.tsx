@@ -277,7 +277,7 @@ function SettingsForm({ initial, isAdmin }: { initial: Record<string, string>; i
       <div className="columns-1 gap-4 lg:columns-2">
         {GROUPS.map((group) => (
           <Card key={group.title} className="mb-4 break-inside-avoid">
-            <h2 className="mb-3 text-sm font-semibold">{group.title}</h2>
+            <h2 className="mb-3 text-title">{group.title}</h2>
             <div className="space-y-3">
               {group.fields.map((field) =>
                 field.variables ? (

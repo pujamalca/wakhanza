@@ -82,7 +82,7 @@ export function Modal({
       <div className="max-h-[85vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-4 border-b p-4">
           <div className="min-w-0">
-            <h2 className="font-medium">{title}</h2>
+            <h2 className="text-title">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
           </div>
           <button
@@ -135,7 +135,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+            className="h-9 rounded-md border px-4 text-body transition-colors hover:bg-muted"
           >
             Batal
           </button>
@@ -143,7 +143,11 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={pending}
-            className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            // `bg-destructive-solid`, bukan `bg-destructive`: yang terakhir
+            // disetel untuk dibaca sebagai TEKS di atas kartu, dan teks putih di
+            // atasnya cuma mencapai 3,82:1 di mode gelap -- gagal AA pada tombol
+            // yang justru paling tidak boleh salah tekan.
+            className="h-9 rounded-md bg-destructive-solid px-4 text-body font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {pending ? pendingLabel : confirmLabel}
           </button>

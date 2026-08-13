@@ -10,10 +10,18 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   ghost: 'hover:bg-muted',
 };
 
+/**
+ * Tinggi DIPAKU, tidak lagi lahir dari padding + ukuran font.
+ *
+ * Sebelumnya tombol, kotak isian, dan dropdown yang berdiri bersebelahan di satu
+ * baris saringan berakhir dengan tiga tinggi yang berbeda beberapa piksel --
+ * cukup untuk terbaca sebagai "tidak rapi", tidak cukup untuk siapa pun bisa
+ * menunjuk sebabnya. Sekarang `md` = 36px di ketiganya.
+ */
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  xs: 'px-2 py-1 text-xs',
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-sm',
+  xs: 'h-7 px-2 text-caption',
+  sm: 'h-8 px-3 text-label',
+  md: 'h-9 px-4 text-body',
 };
 
 // Dipakai bersama oleh Button (<button>) dan LinkButton (<Link>) supaya

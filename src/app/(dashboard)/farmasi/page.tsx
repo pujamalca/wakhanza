@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import { FarmasiTarget, StokAlertSchedule, WaGroup, WaSession, getSetting, getSettingBool, getSettingNumber } from '@/models';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { daftarJenisBarang } from '@/khanza/stokDarurat';
-import { Callout, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { Callout, HelpPanel, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { BantuanFarmasi } from './bantuan';
 import { MasterSwitch } from './MasterSwitch';
 import { TargetTable, type TargetRow, type GrupRow } from './TargetTable';
 import { PesanForm, type NilaiPesan } from './PesanForm';
@@ -256,6 +257,11 @@ export default async function FarmasiPage({
       <PageHeader
         title="Farmasi"
         description="Pemberitahuan ke grup atau petugas apotek, balasan stok dan harga obat, dan peringatan persediaan menipis."
+        help={
+          <HelpPanel title="Tentang tab ini">
+            <BantuanFarmasi tab={tab} />
+          </HelpPanel>
+        }
       />
 
       <Tabs
@@ -329,26 +335,11 @@ export default async function FarmasiPage({
         <TabPenjualan enabled={penjualanEnabled} adaTujuan={jumlahTujuanPenjualan > 0} />
       )}
 
-      {/* Berlaku untuk SEMUA pesan farmasi, jadi ditaruh di luar tab mana pun --
-          tapi dilipat, karena keduanya jawaban atas pertanyaan yang muncul
-          sekali lalu tidak lagi. */}
-      <Callout
-        className="mt-8"
-        collapsible
-        title="Daftar tolak pasien tidak berlaku di sini, dan jam tenang dilewati"
-      >
-        <p>
-          <span className="font-medium text-foreground">Permintaan “Berhenti Kirim Otomatis” dari pasien tidak
-          berlaku.</span>{' '}
-          Pesan di halaman ini tidak dikirim ke pasien melainkan ke staf, jadi tidak ada nomor pasien yang bisa
-          dicocokkan ke daftar tolak — dan koordinasi kerja internal memang bukan sesuatu yang bisa dihentikan pasien.
-        </p>
-        <p className="mt-2">
-          <span className="font-medium text-foreground">Jam tenang dilewati.</span> Jam tenang melindungi orang yang
-          sedang tidur di rumah, bukan shift malam yang justru menunggu pesan ini. Menahannya sampai pagi juga akan
-          membuat seluruh resep semalam menumpuk lalu terkirim serentak sebagai puluhan pesan basi sekaligus.
-        </p>
-      </Callout>
+      {/* Keterangan yang dulu duduk di sini -- daftar tolak tidak berlaku, jam
+          tenang dilewati -- pindah ke laci bantuan (`bantuan.tsx`), dan muncul
+          di SETIAP tab karena memang berlaku untuk seluruh halaman. Ia tingkat
+          orientasi: dibaca sekali saat memahami halaman ini, bukan pagar yang
+          harus terbaca sebelum sebuah sakelar ditekan. */}
     </div>
   );
 }
@@ -396,19 +387,6 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
 
   return (
     <section>
-      <Callout collapsible className="mb-4" title="Satu daftar tujuan, dipakai keenam fitur di tab sebelah">
-        Enam centang di tiap baris menjawab enam pertanyaan yang
-        berbeda: <span className="font-medium text-foreground">Aktif</span> menerima notifikasi resep,{' '}
-        <span className="font-medium text-foreground">Boleh tanya</span> boleh membuat nomor rumah sakit menjawab,{' '}
-        <span className="font-medium text-foreground">Darurat stok</span> menerima rekap persediaan,{' '}
-        <span className="font-medium text-foreground">Pengadaan</span> menerima nota pembelian,{' '}
-        <span className="font-medium text-foreground">Hibah</span> menerima nota barang pemberian, dan{' '}
-        <span className="font-medium text-foreground">Pemesanan</span> menerima nota pesanan ke pemasok. Sengaja
-        terpisah — sebuah grup sangat wajar perlu tahu tiap resep tanpa ikut membaca harga beli dari pemasok, nilai
-        barang hibah punya batas kerahasiaan yang lain lagi, dan memantau apa yang sedang <em>dipesan</em> adalah
-        pekerjaan yang berbeda dari mencocokkan apa yang sudah <em>datang</em>.
-      </Callout>
-
       <TargetTable targets={barisTarget} grup={barisGrup} waSiap={sesi?.status === 'ready'} />
       <Pagination
         page={p.halaman}
@@ -505,10 +483,6 @@ async function TabResep({
 
       <MasterSwitch enabled={enabled} adaTargetAktif={adaTujuanAktif} />
 
-      <p className="mb-3 text-xs text-muted-foreground">
-        Kedua kejadian di bawah dibaca dari tabel <span className="font-mono">resep_obat</span> milik SIMRS Khanza.
-        wakhanza tidak pernah menulis apa pun ke sana.
-      </p>
       <PesanForm nilai={nilaiPesan} />
 
       {/* ------------------------------------------------------------------ */}
@@ -519,31 +493,7 @@ async function TabResep({
       {/* itulah urutan orang memikirkannya ("saya sudah tahu tiap resep,     */}
       {/* sekarang saya mau angka hariannya"), bukan urutan pentingnya.       */}
       {/* ------------------------------------------------------------------ */}
-      <h2 className="mb-3 mt-10 border-t border-border pt-6 font-medium">Rekap harian</h2>
-
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Satu pesan sehari berisi ANGKA saja — tanpa satu pun nama pasien"
-      >
-        <p>
-          Pada jam yang disetel di bawah, sistem membaca seluruh resep satu hari lalu mengirim{' '}
-          <span className="font-medium text-foreground">satu pesan</span> berisi totalnya: jumlah resep, baris obat,
-          racikan, berapa yang sudah diserahkan dan berapa yang belum, plus rincian per dokter.
-        </p>
-        <p className="mt-2">
-          Berbeda dari notifikasi di atas, rekap ini{' '}
-          <span className="font-medium text-foreground">tidak menyentuh tabel pasien sama sekali</span> &mdash; bukan
-          &ldquo;dibaca lalu tidak ditampilkan&rdquo;, melainkan <span className="font-mono">reg_periksa</span> dan{' '}
-          <span className="font-mono">pasien</span> memang tidak ikut dalam query-nya, sehingga tidak ada jalan apa pun
-          menuju identitas seseorang. Nama obat dan aturan pakai juga tidak; yang dihitung cuma banyaknya.
-        </p>
-        <p className="mt-2 text-muted-foreground">
-          Karena itu rekap bisa dipakai <span className="font-medium text-foreground">tanpa</span> menyalakan notifikasi
-          per resep di atas &mdash; dan bagi RS yang belum memutuskan soal data pasien di grup, itulah kombinasi yang
-          masuk akal.
-        </p>
-      </Callout>
+      <h2 className="mb-3 mt-10 border-t border-border pt-6 text-title">Rekap harian</h2>
 
       <RekapResepSwitch
         enabled={rekapEnabled}
@@ -590,28 +540,6 @@ async function TabStok({ mode }: { mode: NilaiStok['mode'] }) {
 
   return (
     <section>
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Arah MASUK — menjawab pertanyaan yang dikirim ke nomor rumah sakit"
-      >
-        Pertanyaan seperti “stok paracetamol?” dijawab dengan data dari <span className="font-mono">databarang</span>{' '}
-        dan <span className="font-mono">gudangbarang</span> milik SIMRS Khanza. Punya sakelarnya sendiri:{' '}
-        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep maupun
-        sakelar di Balasan otomatis.
-      </Callout>
-
-      <Callout
-        variant="warning"
-        collapsible
-        className="mb-4"
-        title="Ini katalog apotek, bukan resep siapa pun"
-      >
-        Yang dibaca hanya daftar barang beserta harga dan stok gudang — tidak ada kolom yang menghubungkan sebuah obat
-        dengan seorang pasien, dan pertanyaan dari sebuah nomor tidak pernah dipakai untuk mencari pasien. Yang tetap
-        keputusan apotek: apakah <span className="font-medium text-foreground">persediaan dan daftar harga</span> boleh
-        dijawab otomatis, dan kepada siapa.
-      </Callout>
 
       <StokForm nilai={nilaiStok} />
     </section>
@@ -692,19 +620,6 @@ async function TabDarurat({
 
   return (
     <section>
-      <Callout collapsible className="mb-4" title="Dipicu WAKTU — bukan oleh kejadian apa pun di Khanza">
-        Pada jam yang dijadwalkan, sistem membaca barang yang stoknya sudah menyentuh atau turun di bawah{' '}
-        <span className="font-mono">stokminimal</span> di Khanza, lalu mengirimkan daftarnya. Sakelarnya sendiri,{' '}
-        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab Notifikasi resep.
-      </Callout>
-
-      <Callout collapsible className="mb-4" title="Barang tanpa ambang minimal tidak ikut dihitung">
-        Khanza membandingkan stok dengan <span className="font-mono">stokminimal</span> apa adanya, sehingga barang yang
-        ambangnya belum pernah disetel (stok 0, minimum 0) ikut terhitung darurat — di database ini 141 dari 348. Itu
-        bukan keadaan darurat melainkan entri katalog yang belum pernah distok, dan daftar yang dipenuhi kebisingan
-        berhenti dibaca dalam seminggu. Yang dilaporkan hanya barang yang ambangnya memang disetel apotek.
-      </Callout>
-
       <DaruratSwitch enabled={enabled} adaTujuan={adaTujuan} adaJadwal={adaJadwal} />
 
       <DaruratForm nilai={nilaiDarurat} jadwal={barisJadwal} jenis={jenisBarang} adaTujuan={adaTujuan} />
@@ -729,37 +644,6 @@ async function TabPengadaan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Berbunyi saat pembelian disimpan di Khanza, dan sakelarnya berdiri sendiri"
-      >
-        Setiap pembelian yang disimpan lewat menu{' '}
-        <span className="font-medium text-foreground">Transaksi Pengadaan Obat, Alkes &amp; BHP Medis</span> dikirim
-        sebagai nota berisi pemasok, daftar barang, dan totalnya.{' '}
-        <span className="font-medium text-foreground">Tidak</span> terpengaruh sakelar di tab Notifikasi resep.
-      </Callout>
-
-      {/* Isinya kebalikan dari peringatan di tab Notifikasi resep: yang di sana
-          memperingatkan adanya data pasien, yang di sini justru menjelaskan
-          ketiadaannya. Keduanya perlu dikatakan, karena tanpa ini pembacanya
-          wajar mengira seluruh halaman Farmasi membawa risiko yang sama -- dan
-          rumah sakit yang menunda menyalakan notifikasi resep akan ikut menunda
-          yang ini tanpa sebab.
-
-          DILIPAT sejak keterangan halaman ini ditata ulang, dan itu TIDAK
-          membatalkan alasan di atas: yang harus terbaca adalah kesimpulannya,
-          dan kesimpulan itu ADA DI JUDULNYA -- judul yang tetap terlihat tanpa
-          dibuka. Yang pindah ke balik lipatan cuma tabel mana yang dibaca.
-          Melipat kotak yang JUDULNYA tidak utuh sendirian tetap terlarang. */}
-      <Callout collapsible className="mb-4" title="Nota pembelian tidak menyebut satu pun pasien">
-        Yang dibaca hanya <span className="font-mono">pembelian</span> dan <span className="font-mono">detailbeli</span>{' '}
-        beserta master pemasok, barang, dan petugas — tidak ada satu kolom pun yang menautkan sebuah pembelian dengan
-        seorang pasien, dan variabel pasien memang tidak tersedia untuk ditambahkan ke isi pesan. Yang tetap perlu
-        dipertimbangkan adalah <span className="font-medium text-foreground">harga beli dari pemasok</span>, yang punya
-        nilai dagang tersendiri — lihat sakelarnya di bawah.
-      </Callout>
-
       <PengadaanSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
 
       <PengadaanForm nilai={nilai} adaTujuan={adaTujuan} />
@@ -784,32 +668,13 @@ async function TabHibah({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: b
 
   return (
     <section>
+      {/* TETAP di halaman dan TIDAK dilipat: ini pagar yang harus dibaca sebelum
+          sakelarnya ditekan, bukan orientasi. Menyalakan fitur yang tabel
+          sumbernya kosong menghasilkan sakelar menyala yang tidak pernah
+          mengirim apa pun -- gagal DIAM, dan staf menyimpulkan sistemnya rusak.
+          Keterangan pengantar tab ini pindah ke laci bantuan; yang ini tidak. */}
       <Callout
-        collapsible
-        className="mb-4"
-        title="Berbunyi saat penerimaan hibah disimpan di Khanza, dan sakelarnya berdiri sendiri"
-      >
-        Setiap penerimaan yang disimpan lewat menu{' '}
-        <span className="font-medium text-foreground">Hibah Obat &amp; BHP</span> dikirim sebagai nota berisi asal
-        hibah, daftar barang, dan nilainya. <span className="font-medium text-foreground">Tidak</span> terpengaruh
-        sakelar di tab Notifikasi resep maupun Pengadaan.
-      </Callout>
-
-      {/* Dilipat, sama seperti padanannya di tab Pengadaan -- dan lewat alasan
-          yang sama: kesimpulannya ada di JUDUL, yang tetap terlihat. */}
-      <Callout collapsible className="mb-4" title="Nota hibah tidak menyebut satu pun pasien">
-        Yang dibaca hanya <span className="font-mono">hibah_obat_bhp</span> dan{' '}
-        <span className="font-mono">detailhibah_obat_bhp</span> beserta master pemberi, barang, dan petugas — tidak ada
-        satu kolom pun yang menautkan sebuah penerimaan hibah dengan seorang pasien, dan variabel pasien memang tidak
-        tersedia untuk ditambahkan ke isi pesan.
-      </Callout>
-
-      {/* Dilipat, karena ini keterangan yang dibaca sekali saat memutuskan
-          apakah fiturnya perlu dinyalakan -- bukan peringatan yang harus
-          terbaca tiap kali halaman dibuka. Judulnya tetap utuh sendirian:
-          itulah bagian yang selalu terlihat. */}
-      <Callout
-        collapsible
+        variant="warning"
         className="mb-4"
         title="Rumah sakit ini belum pernah mencatat satu pun hibah di Khanza"
       >
@@ -850,17 +715,6 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Berbunyi saat pesanan disimpan di Khanza, dan sakelarnya berdiri sendiri"
-      >
-        Setiap pesanan yang disimpan lewat menu{' '}
-        <span className="font-medium text-foreground">Surat Pemesanan Obat &amp; BHP</span> dikirim sebagai nota berisi
-        pemasok, daftar barang, dan harganya. <span className="font-medium text-foreground">Tidak</span> terpengaruh
-        sakelar di tab mana pun yang lain.
-      </Callout>
-
       {/* Perbedaan yang paling gampang keliru dipahami di halaman ini, jadi ia
           TIDAK dilipat: dua tab bersebelahan yang sama-sama menyebut "pemasok"
           dan "harga" akan terbaca sebagai fitur yang sama, lalu salah satunya
@@ -882,21 +736,11 @@ async function TabPemesanan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
         </p>
       </Callout>
 
-      {/* Dilipat, sama seperti padanannya di tab Pengadaan dan Hibah: yang
-          harus terbaca adalah kesimpulannya, dan itu ada di judulnya. */}
-      <Callout collapsible className="mb-4" title="Nota pemesanan tidak menyebut satu pun pasien">
-        Yang dibaca hanya <span className="font-mono">surat_pemesanan_medis</span> dan{' '}
-        <span className="font-mono">detail_surat_pemesanan_medis</span> beserta master pemasok, barang, dan pegawai —
-        tidak ada satu kolom pun yang menautkan sebuah pesanan dengan seorang pasien, dan variabel pasien memang tidak
-        tersedia untuk ditambahkan ke isi pesan.
-      </Callout>
-
-      {/* Dilipat, karena ini keterangan yang dibaca sekali saat memutuskan
-          apakah fiturnya perlu dinyalakan -- bukan peringatan yang harus
-          terbaca tiap kali halaman dibuka. Judulnya tetap utuh sendirian:
-          itulah bagian yang selalu terlihat. */}
+      {/* TETAP di halaman dan TIDAK dilipat, alasan sama dengan padanannya di
+          tab Hibah: menyalakan fitur yang menu sumbernya praktis tak dipakai
+          menghasilkan sakelar menyala yang tidak pernah mengirim apa pun. */}
       <Callout
-        collapsible
+        variant="warning"
         className="mb-4"
         title="Menu ini hampir tidak pernah dipakai di rumah sakit ini — periksa dulu sebelum menyalakan"
       >
@@ -977,18 +821,6 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
 
   return (
     <section>
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Berbunyi saat nota penjualan disimpan di Khanza — DAN saat nota dihapus"
-      >
-        Setiap nota yang disimpan lewat menu{' '}
-        <span className="font-medium text-foreground">Transaksi Penjualan Obat, Alkes &amp; BHP</span> dikirim berisi
-        daftar barang dan totalnya, dan setiap nota yang{' '}
-        <span className="font-medium text-foreground">dihapus</span> dikabarkan sebagai pembatalan. Sakelarnya sendiri,{' '}
-        <span className="font-medium text-foreground">tidak</span> terpengaruh sakelar di tab mana pun yang lain.
-      </Callout>
-
       {/* TIDAK dilipat, dan ini satu-satunya peringatan privasi di halaman ini
           yang berbunyi berbeda dari ketiga tab nota barang lain. Di sana
           kalimatnya "tidak ada kolom pasiennya"; di sini kolomnya ADA dan yang
@@ -1016,29 +848,6 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
         </p>
       </Callout>
 
-      {/* Dilipat: keterangan yang dibaca sekali saat memutuskan, bukan
-          peringatan yang harus terbaca tiap kali halaman dibuka. Judulnya utuh
-          sendirian, karena cuma judul yang selalu terlihat. */}
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Bagaimana pembatalan bisa terdeteksi, padahal barisnya sudah tidak ada"
-      >
-        <p>
-          Nota yang dihapus di Khanza tidak meninggalkan apa pun untuk dibaca &mdash; yang hilang terlihat persis sama
-          dengan yang tidak pernah ada. Jadi sistem menyimpan sendiri daftar nomor nota yang sudah dikabarkan, lalu tiap
-          siklus membandingkannya dengan nota yang masih ada di dalam jendela. Nomor yang tercatat tapi hilang berarti
-          barisnya memang sudah dihapus.
-        </p>
-        <p className="mt-2">
-          Konsekuensinya ada dua, dan keduanya wajar tapi perlu diketahui. Pertama, hanya nota yang{' '}
-          <span className="font-medium text-foreground">pernah dikabarkan</span> yang bisa dilaporkan dibatalkan &mdash;
-          nota lama yang jatuh di bawah lantai aktivasi tidak. Kedua, hanya selama nomornya masih di dalam{' '}
-          <span className="font-medium text-foreground">jendela pindai</span>; nota yang dihapus sebulan kemudian sudah
-          di luar jangkauan.
-        </p>
-      </Callout>
-
       <PenjualanSwitch enabled={enabled} adaTujuan={adaTujuan} sejak={sejak ?? ''} />
 
       <PenjualanForm nilai={nilai} adaTujuan={adaTujuan} />
@@ -1052,18 +861,7 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
       {/* --------------------------------------------------------------- */}
       <hr className="my-8 border-border" />
 
-      <h3 className="mb-2 text-base font-medium">Rekap harian</h3>
-      <Callout
-        collapsible
-        className="mb-4"
-        title="Satu pesan sehari, dan sakelarnya berdiri sendiri dari nota per transaksi"
-      >
-        Dipicu <span className="font-medium text-foreground">WAKTU</span>, bukan kejadian &mdash; pada jam yang disetel
-        di bawah, sistem membaca seluruh penjualan satu hari lalu mengirim satu pesan berisi totalnya. Tujuannya sama
-        dengan nota per transaksi (yang mencentang &ldquo;Penjualan&rdquo;), tapi rekap bisa dipakai{' '}
-        <span className="font-medium text-foreground">tanpa</span> menyalakan kabar per nota &mdash; dan itu justru
-        pemakaian yang paling masuk akal bagi grup yang tidak ingin puluhan pesan sehari.
-      </Callout>
+      <h3 className="mb-3 text-title">Rekap harian</h3>
 
       <RekapSwitch
         enabled={rekapEnabled}

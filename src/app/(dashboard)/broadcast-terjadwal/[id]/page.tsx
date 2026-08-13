@@ -201,7 +201,7 @@ export default async function DetailJadwalPage({
       </div>
 
       <Card className="mb-4">
-        <h2 className="mb-3 font-medium">Pengaturan</h2>
+        <h2 className="mb-3 text-title">Pengaturan</h2>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Baris label="Status">
             <Badge variant={schedule.isActive ? 'success' : 'neutral'}>{schedule.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
@@ -219,7 +219,7 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-2 font-medium">Sasaran &mdash; {describeWindowConfig(config)}</h2>
+        <h2 className="mb-2 text-title">Sasaran &mdash; {describeWindowConfig(config)}</h2>
         <p className="mb-3 text-sm text-muted-foreground">{jelaskanSasaran(config)}</p>
         {/* Filter yang tertinggal pada jadwal berdaftar WAJIB ditandai mati.
             Ia sengaja tidak dihapus -- ia satu-satunya catatan tentang
@@ -241,7 +241,7 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-2 flex items-center gap-1 font-medium">
+        <h2 className="mb-2 flex items-center gap-1 text-title">
           Isi pesan
           <Petunjuk untuk="Isi pesan jadwal">
             Variabel seperti <span className="font-mono">{'{nama_pasien}'}</span> diisi per pasien saat jadwal jalan,
@@ -254,7 +254,7 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-1 font-medium">
+        <h2 className="mb-1 text-title">
           Bila jalan sekarang &mdash; {summary.total} pasien
           {summary.total > 0 && <span className="text-muted-foreground"> ({summary.reachable} bisa dihubungi)</span>}
         </h2>
@@ -363,7 +363,7 @@ export default async function DetailJadwalPage({
       </Card>
 
       <Card className="mb-4">
-        <h2 className="mb-3 flex items-center gap-1 font-medium">
+        <h2 className="mb-3 flex items-center gap-1 text-title">
           Riwayat pengiriman
           <Petunjuk untuk="Riwayat pengiriman">
             Satu baris per kali jadwal ini benar-benar jalan. Jumlahnya dihitung langsung dari antrean pesan saat
@@ -432,7 +432,7 @@ export default async function DetailJadwalPage({
 
       {bukaKampanye && (
         <Card>
-          <h2 className="mb-3 flex items-center gap-1 font-medium">
+          <h2 className="mb-3 flex items-center gap-1 text-title">
             Penerima kampanye #{campaignId}
             <Petunjuk untuk="Penerima kampanye">
               Ini yang BENAR-BENAR dikirimi saat itu, apa adanya dari antrean pesan &mdash; bukan dihitung ulang dari

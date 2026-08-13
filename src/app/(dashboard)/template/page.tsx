@@ -3,7 +3,8 @@ import { auth } from '@/auth';
 import { previewUniqueCodeFooter } from '@/worker/pipeline';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { TriggerTemplateTable, BroadcastTemplateTable } from './TemplateTable';
-import { PageHeader, Pagination, Callout } from '@/components/ui';
+import { PageHeader, Pagination, Callout, HelpPanel } from '@/components/ui';
+import { BantuanTemplate } from './bantuan';
 
 export default async function TemplatePage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const session = await auth();
@@ -47,75 +48,44 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Template pesan"
         description={readOnly ? 'Hanya admin yang bisa menyunting template.' : 'Perubahan berlaku langsung, tanpa perlu restart.'}
+        help={
+          <HelpPanel>
+            <BantuanTemplate footerKode={uniqueCodeFooter || null} />
+          </HelpPanel>
+        }
       />
 
-      {uniqueCodeFooter && (
-        <Callout collapsible className="mb-6" title="Satu baris kode unik ditambahkan otomatis di akhir setiap pesan">
-          Bentuknya <span className="font-mono">{uniqueCodeFooter}</span>, berbeda untuk setiap pesan — supaya kiriman
-          massal tidak berisi teks yang identik, yang terbaca sebagai spam oleh WhatsApp. Tidak perlu ditulis di
-          template. Atur atau matikan di Pengaturan.
-        </Callout>
-      )}
-
-      <h2 className="mb-1 font-medium">Template pemicu otomatis</h2>
-      <Callout collapsible className="mb-3" title="Dipakai otomatis oleh worker — staf tidak pernah memilihnya">
-        <p>
-          Satu template per pemicu, dan daftarnya bertambah hanya saat ada pemicu baru. Di bawah tiap nama tertulis{' '}
-          <span className="font-medium text-foreground">tabel Khanza yang dibaca</span> dan{' '}
-          <span className="font-medium text-foreground">kapan pesannya berbunyi</span>; keterangan lengkapnya muncul
-          saat tombol Ubah ditekan. Sistem ini hanya{' '}
-          <span className="font-medium text-foreground">membaca</span> — tidak pernah menulis apa pun ke database
-          Khanza.
-        </p>
-        <p className="mt-2">
-          Tombol <span className="font-medium text-foreground">Tujuan</span> mengatur ke mana pesannya dikirim.
-          Bawaannya hanya ke nomor pasien yang bersangkutan; bisa ditambah (atau diganti) grup WhatsApp / nomor
-          petugas — sama seperti notifikasi farmasi.
-        </p>
-      </Callout>
+      <h2 className="mb-3 text-title">Template pemicu otomatis</h2>
 
       {/*
         Peringatan tabrakan KONTROL_ULANG x BOOK_REMIND.
 
-        Ditampilkan sebagai peringatan TERBENTANG hanya saat keduanya benar-benar
-        aktif -- itulah satu-satunya keadaan yang merugikan pasien, dan
-        melipatnya di situ menukar halaman yang lebih pendek dengan pasien yang
-        menerima dua pesan tanpa seorang pun tahu kenapa. Di luar itu ia tetap
-        ada tapi dilipat, supaya alasannya bisa dibaca SEBELUM sakelarnya
-        dinyalakan alih-alih sesudah keluhan masuk.
+        Dulu kotak ini SELALU dirender -- terbentang saat bentrok, dilipat saat
+        tidak. Bentuk terlipatnya membayar satu baris judul di setiap pembukaan
+        halaman untuk peringatan yang belum berlaku, dan itu persis kebisingan
+        yang penataan ulang ini ada untuk menghilangkan.
+        Sekarang: muncul HANYA pada keadaan yang benar-benar merugikan pasien.
+        Alasannya, untuk dibaca SEBELUM sakelarnya dinyalakan, pindah ke laci
+        bantuan -- tetap ada, tidak lagi menghalangi.
       */}
       {(() => {
         const aktif = (kode: string) => templates.some((t) => t.triggerCode === kode && t.isActive);
-        const bentrok = aktif('KONTROL_ULANG') && aktif('BOOK_REMIND');
+        if (!aktif('KONTROL_ULANG') || !aktif('BOOK_REMIND')) return null;
         return (
           <Callout
-            variant={bentrok ? 'warning' : 'neutral'}
+            variant="warning"
             className="mb-3"
-            collapsible={!bentrok}
-            title={
-              bentrok
-                ? 'Pengingat kontrol (non-BPJS) dan Pengingat H-1 sama-sama aktif — sebagian pasien menerima DUA pesan'
-                : 'Kalau menyalakan “Pengingat kontrol (non-BPJS)”, periksa dulu “Pengingat H-1”'
-            }
+            title="Pengingat kontrol (non-BPJS) dan Pengingat H-1 sama-sama aktif — sebagian pasien menerima DUA pesan"
           >
             <p>
-              Khanza punya setelan <span className="font-mono">JADIKANBOOKINGSURATKONTROL</span> di berkas konfigurasi
-              kliennya — <span className="font-medium">tidak terlihat dari dashboard ini</span>. Bila menyala, setiap surat
-              kontrol yang disimpan juga membuat satu booking untuk pasien dan tanggal yang sama, sehingga Pengingat H-1 sudah
-              mengingatkan pasien itu dan Pengingat kontrol akan mengirim pesan kedua untuk kunjungan yang sama.
+              Bila setelan Khanza <span className="font-mono text-caption">JADIKANBOOKINGSURATKONTROL</span>{' '}
+              menyala, setiap surat kontrol yang disimpan juga membuat satu booking untuk pasien dan
+              tanggal yang sama — sehingga Pengingat H-1 sudah mengingatkan pasien itu dan Pengingat
+              kontrol mengirim pesan kedua untuk kunjungan yang sama.
             </p>
             <p className="mt-1">
-              Pada surat kontrol terakhir yang dibuat di server ini,{' '}
-              <span className="font-medium">tidak ada booking yang ikut terbentuk</span> — jadi sejauh yang terlihat, keduanya
-              tidak bertabrakan di sini. Tapi setelan itu dipegang klien Khanza, bukan sistem ini: kalau IT rumah sakit
-              mengubahnya, tabrakannya muncul tanpa ada tanda apa pun di sini. Kalau Anda menyalakan Pengingat H-1 juga,
-              periksa sekali apakah pasien menerima dua pesan.
-            </p>
-            <p className="mt-1">
-              Catatan variabel: <span className="font-mono">{'{nama_poli}'}</span> hanya terisi bila setelan Khanza itu menyala
-              — poli tidak disimpan di tabel suratnya. Karena di sini tidak terbentuk booking,{' '}
-              <span className="font-medium">variabel itu akan tampil kosong</span>; jangan dipakai kecuali Anda sudah
-              memastikan bookingnya terbentuk.
+              Periksa sekali apakah pasien benar-benar menerima dua pesan, lalu matikan salah satunya.
+              Keterangan lengkapnya ada di tombol Bantuan.
             </p>
           </Callout>
         );
@@ -141,12 +111,7 @@ export default async function TemplatePage({ searchParams }: { searchParams: Pro
         }))}
       />
 
-      <h2 className="mb-1 mt-8 font-medium">Template broadcast</h2>
-      <Callout collapsible className="mb-3" title="Dipilih MANUAL saat menyusun broadcast — kebalikan dari yang di atas">
-        Gunanya supaya pesan yang sering dipakai tidak diketik ulang; boleh sebanyak yang diperlukan. Variabelnya lebih
-        sedikit karena satu broadcast bisa merentang banyak kunjungan, sehingga hal seperti nomor antrian atau nama
-        poli tidak punya arti tunggal.
-      </Callout>
+      <h2 className="mb-3 mt-10 text-title">Template broadcast</h2>
       <BroadcastTemplateTable
         readOnly={readOnly}
         rows={broadcastTemplates.map((t) => ({ id: t.id, name: t.name, body: t.body, isActive: t.isActive }))}

@@ -49,7 +49,7 @@ export function ScheduleForm({
 
   return (
     <form action={formAction} className={`mt-4 space-y-3 ${cardClassName}`}>
-      <h2 className="font-medium">Susun jadwal broadcast</h2>
+      <h2 className="text-title">Susun jadwal broadcast</h2>
 
       {Object.entries(hiddenFilters).map(([name, values]) =>
         values.map((v) => <input key={`${name}-${v}`} type="hidden" name={name} value={v} />),

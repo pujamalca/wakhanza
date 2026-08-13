@@ -20,7 +20,7 @@ export function SimpanTeksSwitch({ aktif, hariSimpan }: { aktif: boolean; hariSi
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-medium">Simpan isi pesan</h2>
+            <h2 className="text-title">Simpan isi pesan</h2>
             <Badge variant={aktif ? 'success' : 'neutral'}>{aktif ? 'Disimpan' : 'Tidak disimpan'}</Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">

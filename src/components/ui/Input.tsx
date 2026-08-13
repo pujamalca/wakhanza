@@ -2,9 +2,21 @@ import { forwardRef, type InputHTMLAttributes } from 'react';
 
 type FieldSize = 'sm' | 'md';
 
+/**
+ * `text-base sm:text-body` pada ukuran `md`, dan itu BUKAN kelebihan hati-hati.
+ *
+ * Safari iOS memperbesar halaman sendiri begitu sebuah kotak isian yang di-fokus
+ * berukuran di bawah 16px, lalu tidak mengembalikannya. Di tablet loket, tiap
+ * kali petugas menyentuh kotak pencarian seluruh halaman melompat dan mereka
+ * harus mencubit untuk kembali -- gejala yang terbaca sebagai "aplikasinya
+ * rusak", bukan sebagai setelan tipografi.
+ *
+ * Jadi 16px di layar kecil (tempat masalahnya ada), 14px sejak `sm` ke atas
+ * (tempat kerapatannya berguna dan tidak ada peramban yang memperbesar).
+ */
 const SIZE_CLASSES: Record<FieldSize, string> = {
-  sm: 'px-2 py-1 text-xs',
-  md: 'px-3 py-2 text-sm',
+  sm: 'px-2 py-1 text-body sm:text-caption',
+  md: 'h-9 px-3 py-1.5 text-base sm:text-body',
 };
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {

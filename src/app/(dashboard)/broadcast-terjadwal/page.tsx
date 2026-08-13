@@ -113,7 +113,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
       )}
 
       <Card className="mb-6">
-        <h2 className="mb-3 font-medium">Jadwal tersimpan</h2>
+        <h2 className="mb-3 text-title">Jadwal tersimpan</h2>
         <div className={tableWrapperClass}>
           <table className="w-full text-sm">
             <thead className={theadClass}>
@@ -199,7 +199,7 @@ export default async function BroadcastTerjadwalPage({ searchParams }: { searchP
         />
       </Card>
 
-      <h2 className="mb-2 font-medium">Buat jadwal baru</h2>
+      <h2 className="mb-2 text-title">Buat jadwal baru</h2>
 
       <form id={FORM_FILTER} method="get" className={`mb-4 space-y-3 ${cardClassName}`}>
         {/* WAJIB paling awal: tanpa ini, Enter di kotak cari mengaktifkan tombol

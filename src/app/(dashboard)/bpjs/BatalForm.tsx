@@ -27,7 +27,7 @@ export function BatalForm({ nilai }: { nilai: NilaiBatal }) {
     <form action={formAction} className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h3 className="text-sm font-medium">Isi pemberitahuan</h3>
+          <h3 className="text-title-sm">Isi pemberitahuan</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             <span className="font-mono">{'{tanggal}'}</span> dan <span className="font-mono">{'{jam}'}</span> adalah
             jadwal yang <span className="font-medium text-foreground">dibatalkan</span> — slot yang jadi kosong.{' '}
@@ -44,7 +44,7 @@ export function BatalForm({ nilai }: { nilai: NilaiBatal }) {
         </Card>
 
         <Card>
-          <h3 className="text-sm font-medium">Pesan untuk poli sensitif</h3>
+          <h3 className="text-title-sm">Pesan untuk poli sensitif</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             Menggantikan pesan di samping bila bookingnya menuju poli yang ditandai sensitif di halaman Pengaturan.
             Sengaja <span className="font-medium text-foreground">tetap dikirim</span>, bukan didiamkan — kalau
@@ -62,7 +62,7 @@ export function BatalForm({ nilai }: { nilai: NilaiBatal }) {
         </Card>
 
         <Card className="lg:col-span-2">
-          <h3 className="text-sm font-medium">Pesan rekap saat pembatalan menumpuk</h3>
+          <h3 className="text-title-sm">Pesan rekap saat pembatalan menumpuk</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             Bila satu putaran menemukan lebih banyak pembatalan dari ambang di bawah, yang dikirim adalah{' '}
             <span className="font-medium text-foreground">satu pesan rekap</span>. Keadaan itu nyata: seorang dokter

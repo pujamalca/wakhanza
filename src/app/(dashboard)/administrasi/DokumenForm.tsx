@@ -132,7 +132,7 @@ export function DokumenSwitch({
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="font-medium">{JUDUL[jenis]}</h2>
+          <h2 className="text-title">{JUDUL[jenis]}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{ISI[jenis]}</p>
         </div>
         <Button
@@ -178,7 +178,7 @@ export function RincianObatSwitch({ aktif, notaAktif }: { aktif: boolean; notaAk
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h2 className="flex items-center gap-1 font-medium">
+          <h2 className="flex items-center gap-1 text-title">
             Nama obat pada nota
             <Petunjuk untuk="Nama obat pada nota">
               Saat dimatikan, baris obat diringkas jadi satu <span className="font-medium text-foreground">Subtotal</span>.
@@ -226,7 +226,7 @@ export function TeksDokumenForm({
   return (
     <form action={formAction} className={`space-y-4 ${cardClassName}`}>
       <div>
-        <h2 className="flex items-center gap-1 font-medium">
+        <h2 className="flex items-center gap-1 text-title">
           Pesan pengantar &amp; catatan kaki
           <Petunjuk untuk="Pesan pengantar dan catatan kaki">
             <p>

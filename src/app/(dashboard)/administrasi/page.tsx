@@ -34,7 +34,8 @@ import {
   PESAN_BAWAAN as PESAN_BAWAAN_DOKUMEN,
 } from '@/lib/dokumen';
 import { Template } from '@/models';
-import { Callout, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { Callout, HelpPanel, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { BantuanAdministrasi } from './bantuan';
 import { SuratTable, type BarisSurat } from './SuratTable';
 import { MasterSwitch, AutoSwitch, DiagnosaSwitch, TeksForm } from './PengaturanForm';
 import { DokumenSwitch, RincianObatSwitch, TeksDokumenForm } from './DokumenForm';
@@ -258,6 +259,11 @@ export default async function AdministrasiPage({
       <PageHeader
         title="Administrasi"
         description="Mengirim surat keterangan sakit dan sehat ke pasien sebagai berkas PDF lewat WhatsApp."
+        help={
+          <HelpPanel title="Tentang tab ini">
+            <BantuanAdministrasi tab={tab} />
+          </HelpPanel>
+        }
       />
 
       <Tabs
@@ -361,26 +367,6 @@ export default async function AdministrasiPage({
           />
           <RincianObatSwitch aktif={dok.rincianObat} notaAktif={dok.aktif.nota} />
 
-          <Callout className="mb-4" title="Bagaimana lampirannya bekerja, dan apa yang terjadi kalau gagal" collapsible>
-            <p>
-              Lampiran ini menempel pada tiga pemicu yang sudah ada — tidak ada pemberitahuan baru, dan pasien tetap
-              menerima <strong>satu</strong> WhatsApp per kejadian. Selama pemicunya nonaktif di halaman Template, tidak
-              ada pesan yang keluar sama sekali dan sakelar di sini tidak melakukan apa-apa.
-            </p>
-            <p className="mt-2">
-              Berkasnya dirender oleh worker saat kejadiannya terdeteksi, dengan batas 5 dokumen per siklus supaya
-              peramban pencetak PDF tidak menumpuk di proses yang juga memegang sesi WhatsApp. Bila jatahnya habis atau
-              rendernya gagal, <strong>pesannya tetap terkirim tanpa berkas</strong> — teks template biasa, persis
-              seperti sebelum fitur ini ada. Pasien tidak pernah kehilangan pemberitahuannya karena lampirannya
-              bermasalah; yang hilang cuma lampirannya, dan berkasnya tetap bisa diambil di rumah sakit.
-            </p>
-            <p className="mt-2">
-              Pemeriksaan yang tetap berlaku seperti pemicu lain: daftar tolak, jam tenang, dan penggantian pesan untuk
-              poli sensitif. Untuk memeriksa isinya sebelum menyalakan, jalankan{' '}
-              <code>npm run dryrun:dokumen</code> di server — ia menghasilkan berkas PDF-nya tanpa mengirim apa pun.
-            </p>
-          </Callout>
-
           <TeksDokumenForm
             pesanLab={dok.pesanLab}
             pesanRad={dok.pesanRad}
@@ -418,20 +404,7 @@ export default async function AdministrasiPage({
             </Callout>
           )}
 
-          {tab === 'sakit' ? (
-            <Callout className="mb-4" title="Surat dibuat di Khanza — di sini hanya dikirimkan" collapsible>
-              <p>
-                Daftar ini membaca tabel <code>suratsakit</code>: satu baris per surat yang sudah dibuat dokter lewat
-                SIMRS Khanza, lengkap dengan nomor surat dan lama istirahatnya. Halaman ini tidak pernah membuat,
-                mengubah, atau menghapus surat — Khanza dibaca <strong>read-only</strong>.
-              </p>
-              <p className="mt-2">
-                Rentang tanggal mengikuti tanggal surat <strong>dibuat</strong> (yang tersandi di nomor suratnya), bukan
-                tanggal mulai istirahat — keduanya kerap berbeda, misalnya surat yang dibuat Jumat untuk istirahat mulai
-                Senin.
-              </p>
-            </Callout>
-          ) : (
+          {tab === 'sakit' ? null : (
             <Callout variant="warning" className="mb-4" title="Surat sehat TIDAK punya catatan di Khanza — baca ini dulu">
               <p>
                 Berbeda dari surat sakit. Khanza mencetak surat keterangan sehat langsung dari layar registrasi, jadi

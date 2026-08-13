@@ -4254,3 +4254,184 @@ Belum diserahkan : 5
 
 Ini sekaligus kiriman pertama yang membawa `{nilai_obat}` ke penerima sungguhan.
 
+
+## Design system: token DIUKUR, dan prosa yang pindah keluar kanvas
+
+Seluruh angka di bawah hasil pengukuran atas kode yang berjalan, bukan perkiraan.
+
+### Diagnosis: keadaan sebelum perubahan
+
+Diukur atas `src/app/(dashboard)/**` + `src/components/**`:
+
+```
+=== ukuran teks dipakai ===
+    477 text-xs
+    186 text-sm
+      3 text-lg
+      1 text-xl
+      1 text-base
+      1 text-3xl
+      1 text-2xl
+
+=== font-weight ===
+    474 font-medium
+     13 font-semibold
+      2 font-normal
+      1 font-bold
+
+=== shadow ===
+      3 shadow-sm
+      2 shadow-lg
+```
+
+Jadi **97% teks hidup di dua ukuran yang berjarak 2px** dan **97% teks bertekanan
+punya berat yang sama**; elevasi 5 pemakaian di seluruh dashboard. `layout.tsx`
+tidak memuat typeface sama sekali (diperiksa: tidak ada `next/font` maupun
+`@font-face`).
+
+Volume prosa, diukur lewat penghitung text-node JSX + literal kalimat:
+
+```
+rute                    karakter   blok  berkas
+farmasi                    32039    320      19
+administrasi                9334     83       5
+bpjs                        6577     62       5
+broadcast-terjadwal         6480     50       5
+components/ui               5090     34       9
+template                    4821     47       3
+...
+TOTAL                      83948    766
+```
+
+### Font: self-hosted, nol permintaan keluar
+
+Sesudah `npm run build`:
+
+```
+=== berkas font self-hosted ===
+.next/static/media/1bffadaabf893a1e-s.3-6t-g6q0vh0a.woff2
+.next/static/media/2bbe8d2671613f1f-s.0k62hbripvv8p.woff2
+(+3 lagi)
+
+=== permintaan ke fonts.googleapis di hasil build ===
+(nol -- tidak ada permintaan keluar)
+```
+
+Diverifikasi pada instance PM2 yang benar-benar melayani (port 3100), bukan pada
+server uji terpisah:
+
+```
+<html lang="id" class="inter_31011fd-module__jtyeTG__variable">
+--font-sans:"Inter", "Inter Fallback"
+```
+
+### Token baru hidup di CSS produksi
+
+Dibaca dari berkas CSS yang benar-benar disajikan PM2:
+
+```
+--destructive-solid  --destructive-solid:0 72% 44%
+--info               --info:213 90% 68%  --info:214 84% 44%
+--shadow-strength    --shadow-strength:.05  --shadow-strength:.45
+--surface-sunken     --surface-sunken:210 40% 98%  --surface-sunken:222 44% 10%
+--font-sans          --font-sans:"Inter", "Inter Fallback"
+```
+
+`tabular-nums` juga ada (aturan pada `table` di `globals.css`).
+
+### Kontras: DIHITUNG, di kedua mode secara terpisah
+
+```
+== TERANG (teks vs card) ==
+  fg           17.87:1  AA        info          5.62:1  AA
+  muted         4.70:1  AA        warning       5.05:1  AA
+  primary       4.53:1  AA        success       5.08:1  AA
+  destructive   4.80:1  AA
+== GELAP (teks vs card) ==
+  fg           15.52:1  AA        info          6.75:1  AA
+  muted         6.63:1  AA        warning      10.04:1  AA
+  primary       6.35:1  AA        success       9.76:1  AA
+  destructive   4.91:1  AA
+== LATAR terisi ==
+  destructive-solid + teks putih  6.03:1  AA
+
+[ok] SEMUA token lolos WCAG AA di KEDUA mode
+```
+
+### Cacat aksesibilitas yang ditemukan pengukuran, dan perbaikannya
+
+`--destructive` di mode gelap bernilai `0 70% 60%` dan hanya mencapai **4,45:1**
+terhadap `--card` — gagal AA sebesar 0,05. Terlalu tipis untuk terlihat saat
+ditinjau dengan mata, dan hanya muncul karena rasionya dihitung.
+
+Yang lebih buruk ada di peran keduanya. Token yang sama dipakai sebagai LATAR
+terisi berteks putih pada tombol konfirmasi hapus (`ConfirmDialog`), dan di sana
+putih di atasnya hanya **3,82:1** — gagal jelas, pada tombol yang justru paling
+tidak boleh salah tekan.
+
+Dijajaki seluruh rentang kecerahannya, dan **tidak ada satu pun nilai yang lolos
+4,5:1 pada kedua peran sekaligus**:
+
+```
+L%   hex       teks-vs-card   putih-vs-bg
+56   #dd4040       3.95          4.30
+58   #df4949       4.20          4.05
+60   #e05252       4.45          3.82   <- nilai lama
+62   #e25a5a       4.73          3.59
+64   #e36363       5.04          3.37
+```
+
+Karena itu tokennya DIPECAH menurut perannya: `--destructive` (teks/garis,
+gelap dinaikkan ke 63% -> 4,91:1) dan `--destructive-solid` (latar terisi, 44%
+-> putih 6,03:1, sama di kedua tema karena yang dilawannya teks di atasnya
+bukan permukaan di belakangnya). Hanya SATU tempat di seluruh dashboard yang
+memakai latar merah penuh (`grep -rn "bg-destructive[^/]"` -> 1 hasil), jadi
+perubahannya berlingkup sempit dan terbukti.
+
+### Prosa: pindah, bukan dihapus -- terukur di rute terberat
+
+`/farmasi` (38% seluruh prosa dashboard, 8 tab dalam satu rute):
+
+```
+=== prosa per berkas di /farmasi (sesudah) ===
+page.tsx          3133 karakter   33 blok
+bantuan.tsx       5107 karakter   55 blok
+
+=== page.tsx SEBELUM (dari git) ===
+page.tsx          8205 karakter   86 blok
+```
+
+Jadi **8.205 -> 3.133 karakter tergambar di kanvas (-62%)**, **86 -> 33 blok
+(-62%)**, `Callout` **21 -> 5 (-76%)**. Nol prosa hilang: 5.107 karakter pindah
+ke `bantuan.tsx`, dirender di server ke dalam `HelpPanel`, jadi tetap ada di HTML
+halaman dan tetap terjangkau Ctrl+F maupun pembaca layar.
+
+Kelima `Callout` yang tinggal semuanya pagar, dan **dua di antaranya justru
+DINAIKKAN** dari `collapsible` menjadi `variant="warning"` terbentang: "hibah
+belum pernah tercatat" dan "menu pemesanan praktis tak dipakai". Keduanya
+periksa-dulu-sebelum-menyalakan — menyalakan fitur yang tabel sumbernya kosong
+menghasilkan sakelar menyala yang tidak pernah mengirim apa pun, gagal DIAM.
+
+### Sapuan hierarki judul
+
+```
+48 judul dinaikkan di 29 berkas
+```
+
+`<h2>`/`<h3>` ber-`font-medium`/`text-sm` diganti peran (`text-title` /
+`text-title-sm`). Skripnya menyentuh HANYA elemen `<h2>`/`<h3>` — penggantian
+buta akan menaikkan label form ikut jadi judul.
+
+### Gerbang penuh
+
+```
+npm run typecheck   -> bersih
+npm run lint        -> bersih (0 error, 0 warning)
+npm test            -> 48 suite, 808 uji, seluruhnya lolos
+npm run build       -> Compiled successfully
+```
+
+`wakhanza-web` dimulai ulang lewat PM2 (bukan server uji terpisah — instalasi ini
+berjalan di atas database produksi, jadi instance PM2 itulah lingkungan yang
+sesungguhnya). Sesudah restart: `/login` 200, `/farmasi` 307 (redirect ke login,
+otorisasi tetap tegak).
