@@ -98,6 +98,40 @@ async function bolehBertanya(mode: ModeStok, asal: AsalPertanyaan): Promise<{ bo
 }
 
 /**
+ * Izin bertanya stok untuk sebuah alamat, modenya dibaca sendiri.
+ *
+ * Diekspor supaya `/bantuan` (`worker/commandReply.ts`) menjawab pertanyaan
+ * "boleh tidak alamat ini bertanya stok" lewat penurunan yang SAMA dipakai
+ * gerbangnya. Bantuan yang menghitung izinnya sendiri cepat atau lambat menyebut
+ * kemampuan yang tidak dimiliki pembacanya, dan yang muncul bukan galat
+ * melainkan orang yang mengetik apa yang disuruh lalu didiamkan. Bentuk
+ * kegagalan yang sudah berkali-kali dibayar (`respectsOptOut()`,
+ * `core/outboxStatus.ts`, `kunciPesanMasuk()`, `core/tujuanPemicu.ts`).
+ *
+ * `terdaftar` hanya berarti sesuatu saat `boleh` -- pada mode `mati` tidak ada
+ * yang perlu dibedakan, dan menghitungnya berarti satu query untuk jawaban yang
+ * tidak dipakai siapa pun.
+ */
+export async function izinTanyaStok(
+  asal: AsalPertanyaan,
+): Promise<{ boleh: boolean; terdaftar: boolean }> {
+  const mode = await bacaModeStok();
+  if (mode === 'mati') return { boleh: false, terdaftar: false };
+  return bolehBertanya(mode, asal);
+}
+
+/**
+ * Izin meminta REKAP gudang. Sengaja terpisah dari `izinTanyaStok`, dan bukan
+ * demi kerapian: di sini tidak ada mode `semua` sama sekali -- penanya WAJIB
+ * terdaftar `boleh_tanya`, perorangan maupun grup. Alasannya di
+ * `cobaBalasDarurat` di bawah.
+ */
+export async function izinTanyaDarurat(asal: AsalPertanyaan): Promise<boolean> {
+  if (!(await daruratTanyaAktif())) return false;
+  return (await FarmasiTarget.count({ where: { chatId: asal.chatId, bolehTanya: true } })) > 0;
+}
+
+/**
  * Kuota jawaban per GRUP, dihitung dari `outbox` dan bukan `auto_reply_log`.
  *
  * Dua sebabnya, dan yang pertama akan jadi bug diam bila diabaikan:
@@ -363,8 +397,6 @@ export async function cobaBalasDarurat(
   idempotencyKey: string,
   asalMasuk?: AsalPertanyaan,
 ): Promise<HasilStokReply> {
-  if (!(await daruratTanyaAktif())) return TIDAK_DITANGANI;
-
   const asal: AsalPertanyaan = asalMasuk ?? {
     jenis: 'perorangan',
     chatId: `${msg.phoneE164}@c.us`,
@@ -374,9 +406,7 @@ export async function cobaBalasDarurat(
   // Izin SEBELUM frasa dibaca, sama seperti balasan stok: nomor tak berhak
   // harus jatuh ke jalur berikutnya seolah fitur ini tidak ada, bukan
   // "tertangani" lalu didiamkan.
-  if ((await FarmasiTarget.count({ where: { chatId: asal.chatId, bolehTanya: true } })) === 0) {
-    return TIDAK_DITANGANI;
-  }
+  if (!(await izinTanyaDarurat(asal))) return TIDAK_DITANGANI;
 
   const frasa = parseFrasaDarurat((await getSetting('farmasi.darurat_keywords', '')) ?? '');
   const permintaan = deteksiPermintaanDarurat(msg.text, frasa);
@@ -489,9 +519,6 @@ export async function cobaBalasStok(
     phoneE164: msg.phoneE164,
   };
 
-  const mode = await bacaModeStok();
-  if (mode === 'mati') return TIDAK_DITANGANI;
-
   /**
    * Pemeriksaan izin dikerjakan SEBELUM kata kunci dibaca, dan urutan itu
    * disengaja: nomor yang tidak berhak harus jatuh ke aturan kata kunci biasa
@@ -499,7 +526,7 @@ export async function cobaBalasStok(
    * nomor tak berhak "tertangani" lalu didiamkan -- dan aturan /balasan-otomatis
    * yang sebenarnya cocok tidak pernah sempat dijalankan.
    */
-  const izin = await bolehBertanya(mode, asal);
+  const izin = await izinTanyaStok(asal);
   if (!izin.boleh) return TIDAK_DITANGANI;
 
   const ctxAwal = await loadAutoReplyContext('');

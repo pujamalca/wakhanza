@@ -5214,3 +5214,79 @@ yang sedang menunggu, DAN penerimanya staf.
 
 `OPT_OUT_TRIGGERS` sengaja TIDAK memuatnya -- tidak ada yang bisa "berhenti
 berlangganan" dari percakapan yang ia mulai sendiri.
+
+### `/bantuan` menerangkan keadaan, dan kemampuannya per-ALAMAT
+
+Diverifikasi saat fiturnya SUDAH MENYALA di produksi (`wa_perintah_enabled` 1,
+satu alamat terdaftar, enam aturan tersimpan -- salah satunya memang lahir lewat
+WhatsApp, `created_by` berawalan `wa:`). Karena itu ujinya **tidak menyentuh satu
+pun setelan**: yang dibuat cuma dua alamat uji berupa JID grup yang dibuktikan
+lebih dulu tidak bertabrakan dengan apa pun (`wa_command_admin`, `farmasi_target`,
+dan `wa_group` semuanya 0), lalu dihapus di akhir.
+
+```
+tsc --noEmit     0 galat
+eslint .         0 galat
+jest             51 suite / 907 uji lolos   (sebelumnya 896)
+next build       lolos
+npm run verify:db     [ok] wakhanza 27 tabel; sik tulis DITOLAK
+npm run verify:plans  lolos
+```
+
+Uji end-to-end menjalankan `cobaPerintahWa()` yang SAMA dipakai worker, lalu
+membaca teks yang benar-benar masuk `outbox` -- sesudah `renderTemplate()`, yaitu
+celah tempat bug 045 hidup:
+
+```
+1. Alamat yang HANYA berwenang atas perintah
+  [ok] dijawab                        [ok] menyebut alamatnya berwenang
+  [ok] menyebut keadaan balasan otomatis
+  [ok] menyebut jumlah aturan tersimpan   [ok] menyebut nasib aturan baru
+  [ok] menyebut aturan yang SUDAH ada     [ok] setiap perintah disebut
+  [ok] TIDAK menawarkan tanya stok        [ok] TIDAK menawarkan rekap gudang
+  [ok] menyebut sebab dan jalan keluarnya
+  [ok] variabel template TIDAK terender
+2. Alamat yang JUGA boleh bertanya stok
+  [ok] menawarkan tanya stok          [ok] menyebut kata kunci sungguhan
+  [ok] menyebut kata tanya ketersediaan
+  [ok] menyebut jawaban rinci untuk yang terdaftar
+  [ok] menawarkan rekap gudang        [ok] menyebut frasa rekap sungguhan
+3. /help dan /perintah sama dengan /bantuan
+  [ok] /help sama persis              [ok] /perintah sama persis
+4. Panjangnya masih wajar untuk satu pesan WhatsApp
+  polos 1638 karakter, apotek 1834 karakter
+  [ok] di bawah 4096
+5. Tidak menyentuh apa pun milik produksi
+  [ok] bantuan tidak membuka sesi
+
+bersih-bersih: 4 baris outbox uji dihapus
+=== 22 lolos, 0 gagal ===
+```
+
+Sesudahnya, diperiksa langsung: `sisa_admin` 0, `sisa_farmasi` 0, `sisa_sesi` 0,
+`sisa_outbox` 0, sementara `admin_produksi` tetap 1 dan `aturan_produksi` tetap 6
+-- sama persis dengan sebelum uji dijalankan.
+
+**Bite-proof: bantuan tidak boleh menawarkan yang tidak dimiliki pembacanya.**
+Pagar izinnya dilepas sengaja (`if (kemampuan.bolehTanyaStok)` -> `if (true)`):
+
+```
+× TIDAK menawarkan tanya stok kepada alamat yang tidak berhak
+  Expected substring: not "Stok & harga obat"
+Tests: 1 failed, 53 passed, 54 total
+```
+
+Ini kegagalan yang paling tidak bergejala di fitur ini: bantuannya tampil wajar,
+orangnya mengetik apa yang disuruh, lalu tidak dijawab -- dan tidak ada satu pun
+galat yang menyebut sebabnya, karena memang tidak ada yang salah selain
+alamatnya. Wewenang perintah (`wa_command_admin`) dan wewenang bertanya stok
+(`farmasi_target.boleh_tanya`) memang dua daftar terpisah, dan itu keputusan yang
+paling ditekankan migrasi 045 sendiri.
+
+**Refaktor `stokReply.ts` nol-perubahan-perilaku.** `izinTanyaStok()` dan
+`izinTanyaDarurat()` diekspor lalu dipakai gerbangnya sendiri, supaya bantuan
+menjawab lewat penurunan yang sama alih-alih menghitung ulang. Predikatnya
+identik dan urutan hubung-singkatnya dipertahankan (`mode === 'mati'` lebih dulu;
+`daruratTanyaAktif()` sebelum `count`); yang berpindah cuma penyusunan `asal`
+yang murni. Fitur stok sedang MENYALA di mesin ini (`stok_mode` = `semua`,
+`darurat_enabled` = 1), jadi ini bukan refaktor atas kode yang menganggur.

@@ -6,6 +6,7 @@ import {
   WaCommandSession,
   parseKeywords,
   serializeKeywords,
+  getSetting,
   getSettingBool,
   getSettingNumber,
   logAudit,
@@ -20,10 +21,14 @@ import {
   type EfekPerintah,
   type HasilPerintah,
   type KeadaanWizard,
+  type KemampuanAlamat,
   type KonteksPerintah,
   type RingkasanAturan,
 } from '@/core/waCommand';
 import { matchRule } from '@/core/autoReply';
+import { parseStokKeywords } from '@/core/stokObat';
+import { parseFrasaDarurat } from '@/core/stokDarurat';
+import { izinTanyaStok, izinTanyaDarurat, type AsalPertanyaan } from './stokReply';
 import { AUTOREPLY_TEMPLATE_VARIABLES, renderTemplate } from '@/core/template';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadAutoReplyContext, enqueueMessage } from './pipeline';
@@ -110,7 +115,49 @@ async function kirimBalasan(pesan: PesanPerintahMasuk, teks: string): Promise<vo
   );
 }
 
-async function bacaKonteks(): Promise<KonteksPerintah> {
+/**
+ * Kemampuan ALAMAT INI, untuk `/bantuan`.
+ *
+ * Izinnya dibaca lewat `izinTanyaStok`/`izinTanyaDarurat` yang SAMA dipakai
+ * gerbangnya sendiri di `stokReply.ts`, bukan dihitung ulang di sini -- lihat
+ * alasannya di sana.
+ *
+ * Dibaca untuk SETIAP perintah, bukan cuma `/bantuan`, dan itu keputusan sadar:
+ * bidang yang kadang terisi kadang tidak adalah bentuk yang cepat atau lambat
+ * membuat bantuan tampil tanpa bagian ini tanpa satu pun galat. Biayanya nol
+ * yang berarti -- jalur ini baru sampai di sini sesudah pesannya terbukti
+ * perintah DARI alamat berwenang (yaitu beberapa pesan yang diketik manusia,
+ * bukan lalu lintas latar), `app_setting` punya cache 5 detik, dan kedua
+ * `count`-nya mengenai indeks unik pada tabel konfigurasi kecil di `wakhanza` --
+ * bukan `sik` yang kolamnya sengaja dibatasi dua koneksi.
+ */
+async function bacaKemampuan(pesan: PesanPerintahMasuk): Promise<KemampuanAlamat> {
+  const asal: AsalPertanyaan = {
+    jenis: pesan.jenis,
+    chatId: pesan.chatId,
+    phoneE164: pesan.phoneE164,
+  };
+  const [balasanOtomatisAktif, stok, bolehTanyaDarurat, ketat, longgar, frasa] = await Promise.all([
+    getSettingBool('autoreply.enabled', false),
+    izinTanyaStok(asal),
+    izinTanyaDarurat(asal),
+    getSetting('farmasi.stok_keywords', 'stok,harga'),
+    getSetting('farmasi.stok_keywords_ketersediaan', ''),
+    getSetting('farmasi.darurat_keywords', ''),
+  ]);
+  return {
+    balasanOtomatisAktif,
+    bolehTanyaStok: stok.boleh,
+    stokRinci: stok.terdaftar,
+    bolehTanyaDarurat,
+    // Kedua golongan digabung: yang membaca bantuan perlu tahu kata apa saja
+    // yang MENJARING, bukan golongan mana yang boleh gugur diam-diam.
+    kataKunciStok: [...parseStokKeywords(ketat ?? ''), ...parseStokKeywords(longgar ?? '')],
+    frasaDarurat: parseFrasaDarurat(frasa ?? ''),
+  };
+}
+
+async function bacaKonteks(pesan: PesanPerintahMasuk): Promise<KonteksPerintah> {
   const rows = await AutoReplyRule.findAll({ order: [['priority', 'ASC'], ['id', 'ASC']] });
   const aturan: RingkasanAturan[] = rows.map((r) => ({
     id: r.id,
@@ -120,11 +167,11 @@ async function bacaKonteks(): Promise<KonteksPerintah> {
     priority: r.priority,
     isActive: r.isActive,
   }));
-  return {
-    aturan,
-    aktifLangsung: await getSettingBool('autoreply.wa_tambah_aktif_langsung', false),
-    variabelDikenal: AUTOREPLY_TEMPLATE_VARIABLES,
-  };
+  const [aktifLangsung, kemampuan] = await Promise.all([
+    getSettingBool('autoreply.wa_tambah_aktif_langsung', false),
+    bacaKemampuan(pesan),
+  ]);
+  return { aturan, aktifLangsung, variabelDikenal: AUTOREPLY_TEMPLATE_VARIABLES, kemampuan };
 }
 
 /**
@@ -352,7 +399,7 @@ export async function cobaPerintahWa(pesan: PesanPerintahMasuk): Promise<HasilPe
 
   if (!perintah && !sesi) return TIDAK_DITANGANI;
 
-  const ctx = await bacaKonteks();
+  const ctx = await bacaKonteks(pesan);
 
   /**
    * Perintah baru di tengah percakapan MENGGANTIKAN yang sedang berjalan, tidak

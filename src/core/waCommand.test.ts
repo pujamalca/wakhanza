@@ -5,8 +5,10 @@ import {
   uraikanKataKunci,
   isLangkah,
   varsBalasanApaAdanya,
+  susunBantuan,
   MAKS_LABEL,
   MAKS_ISI,
+  type KemampuanAlamat,
   type KonteksPerintah,
   type RingkasanAturan,
   type HasilPerintah,
@@ -22,16 +24,32 @@ const aturan = (over: Partial<RingkasanAturan> & { id: number; label: string }):
   ...over,
 });
 
+/** Alamat yang cuma boleh mengatur aturan -- keadaan paling sempit, dan bawaannya. */
+const kemampuanDasar: KemampuanAlamat = {
+  balasanOtomatisAktif: true,
+  bolehTanyaStok: false,
+  stokRinci: false,
+  bolehTanyaDarurat: false,
+  kataKunciStok: [],
+  frasaDarurat: [],
+};
+
 const ctxKosong: KonteksPerintah = {
   aturan: [],
   aktifLangsung: false,
   variabelDikenal: AUTOREPLY_TEMPLATE_VARIABLES,
+  kemampuan: kemampuanDasar,
 };
 
-const ctxDengan = (list: RingkasanAturan[], aktifLangsung = false): KonteksPerintah => ({
+const ctxDengan = (
+  list: RingkasanAturan[],
+  aktifLangsung = false,
+  kemampuan: Partial<KemampuanAlamat> = {},
+): KonteksPerintah => ({
   aturan: list,
   aktifLangsung,
   variabelDikenal: AUTOREPLY_TEMPLATE_VARIABLES,
+  kemampuan: { ...kemampuanDasar, ...kemampuan },
 });
 
 /** Menjalankan beberapa jawaban berturut-turut, seperti percakapan sungguhan. */
@@ -462,5 +480,131 @@ describe('/batal dan /bantuan', () => {
     for (const nama of ['/tambah', '/daftar', '/ubah', '/hapus', '/uji', '/batal']) {
       expect(h.balasan).toContain(nama);
     }
+  });
+});
+
+/**
+ * `/bantuan` (juga `/help`) adalah satu-satunya tempat orang yang mengatur
+ * balasan otomatis LEWAT WHATSAPP bisa melihat keadaan konfigurasinya. Yang
+ * dijaga di bawah bukan susunan kalimatnya melainkan tiap fakta yang, kalau
+ * hilang, membuat pembacanya menyimpulkan hal yang keliru.
+ */
+describe('/bantuan menerangkan keadaan, bukan cuma daftar perintah', () => {
+  const bantuan = (ctx: KonteksPerintah): string => {
+    const h = mulai('/bantuan', ctx);
+    if (h.aksi !== 'selesai') throw new Error('harusnya selesai');
+    return h.balasan;
+  };
+
+  it('/help dan /perintah menempuh jalur yang sama dengan /bantuan', () => {
+    expect(bantuan(ctxKosong)).toBe(susunBantuan(ctxKosong));
+    expect(parsePerintah('/help')?.jenis).toBe('bantuan');
+    expect(parsePerintah('/perintah')?.jenis).toBe('bantuan');
+  });
+
+  it('menyebut aturan yang SUDAH ADA berikut status dan kata kuncinya', () => {
+    const teks = bantuan(
+      ctxDengan([
+        aturan({ id: 1, label: 'Jadwal praktik', keywords: ['jadwal', 'jam praktik'] }),
+        aturan({ id: 2, label: 'Alamat klinik', keywords: ['alamat'], isActive: false }),
+      ]),
+    );
+    expect(teks).toContain('Jadwal praktik');
+    expect(teks).toContain('jam praktik');
+    expect(teks).toContain('Alamat klinik');
+    // Status per aturan wajib ikut: aturan nonaktif tidak menjawab siapa pun,
+    // dan daftar tanpa status membuat keduanya terbaca sama.
+    expect(teks).toContain('NONAKTIF');
+    // Dua aturan, satu di antaranya nonaktif -- angka aktifnya menghitung yang
+    // benar-benar menjawab, bukan yang tersimpan.
+    expect(teks).toContain('2 (1 aktif)');
+  });
+
+  it('mengatakan aturannya belum ada, bukan menampilkan daftar kosong', () => {
+    expect(bantuan(ctxKosong)).toContain('Belum ada satu pun');
+  });
+
+  it('daftar panjang dipotong berikut cara melihat sisanya', () => {
+    const banyak = Array.from({ length: 14 }, (_, i) => aturan({ id: i + 1, label: `Aturan ${i + 1}` }));
+    const teks = bantuan(ctxDengan(banyak));
+    expect(teks).toContain('Aturan 10');
+    expect(teks).not.toContain('Aturan 11');
+    expect(teks).toContain('dan 4 lagi');
+    expect(teks).toContain('/daftar');
+  });
+
+  /**
+   * Fakta paling mahal kalau hilang: sakelar `autoreply.enabled` yang mati
+   * membuat SETIAP aturan diam, termasuk yang bertanda aktif. Tidak ada satu pun
+   * jalan lain melihatnya dari WhatsApp, dan orang yang baru menulis aturan lalu
+   * mengujinya akan menyimpulkan aturannyalah yang salah.
+   */
+  it('mengatakan saat balasan otomatis MATI, walau ada aturan bertanda aktif', () => {
+    const teks = bantuan(ctxDengan([aturan({ id: 1, label: 'Jadwal' })], false, { balasanOtomatisAktif: false }));
+    expect(teks).toContain('*MATI*');
+    expect(teks).toContain('termasuk yang bertanda aktif');
+  });
+
+  it('mengatakan nasib aturan baru, dan kalimatnya berbeda per setelan', () => {
+    expect(bantuan(ctxDengan([], false))).toContain('nonaktif');
+    expect(bantuan(ctxDengan([], true))).toContain('langsung aktif');
+  });
+
+  /**
+   * Wewenang perintah (`wa_command_admin`) dan wewenang bertanya stok
+   * (`farmasi_target.boleh_tanya`) memang dua daftar terpisah. Bantuan yang
+   * menyebut kemampuan yang tidak dimiliki pembacanya menghasilkan orang yang
+   * mengetik apa yang disuruh lalu didiamkan -- tanpa satu pun galat, karena
+   * tidak ada yang salah selain alamatnya.
+   */
+  it('TIDAK menawarkan tanya stok kepada alamat yang tidak berhak', () => {
+    const teks = bantuan(ctxKosong);
+    expect(teks).not.toContain('Stok & harga obat');
+    expect(teks).not.toContain('Rekap barang di bawah stok minimal');
+    // Diam saja tidak cukup -- sebabnya harus disebut, kalau tidak orangnya
+    // mencoba, tidak dijawab, lalu menyimpulkan nomornya rusak.
+    expect(teks).toContain('Boleh tanya');
+  });
+
+  it('menyebut kata kunci stok yang SUNGGUHAN kepada alamat yang berhak', () => {
+    const teks = bantuan(ctxDengan([], false, {
+      bolehTanyaStok: true,
+      stokRinci: true,
+      kataKunciStok: ['stok', 'harga', 'adakah'],
+      bolehTanyaDarurat: true,
+      frasaDarurat: ['rekap stok'],
+    }));
+    expect(teks).toContain('stok, harga, adakah');
+    expect(teks).toContain('sisa stok, satuan, dan harga');
+    expect(teks).toContain('rekap stok');
+  });
+
+  it('membedakan jawaban rinci dari jawaban ringkas', () => {
+    const teks = bantuan(ctxDengan([], false, { bolehTanyaStok: true, stokRinci: false, kataKunciStok: ['stok'] }));
+    expect(teks).toContain('tanpa angka sisa');
+  });
+
+  /**
+   * Bantuan melewati `renderTemplate()` seperti setiap balasan wizard lain, dan
+   * ia satu-satunya yang memuat teks dari DATABASE (nama aturan, kata kunci).
+   * Nama aturan yang kebetulan berbentuk variabel karena itu harus selamat --
+   * kalau tidak, aturan bernama "{nama_rs}" membuat bantuan menyebut nama rumah
+   * sakit di tempat nama aturannya, dan staf tidak menemukannya di dashboard.
+   */
+  /**
+   * `/bantuan` di tengah wizard MENUTUP wizardnya, sama seperti perintah lain --
+   * `aksi: 'selesai'` membuat runner menghapus sesinya. Dipatok supaya ini tetap
+   * keputusan, bukan kebetulan: orang yang bingung di langkah dua wajar mengetik
+   * `/help` lalu ingin melanjutkan, dan kalau suatu saat itu yang dipilih,
+   * perubahannya harus terlihat sebagai uji yang gagal -- bukan sebagai sesi yang
+   * diam-diam bertahan lalu menelan pesan berikutnya.
+   */
+  it('/bantuan di tengah wizard menutup wizardnya, seperti perintah lain', () => {
+    expect(mulai('/bantuan', ctxKosong, true).aksi).toBe('selesai');
+  });
+
+  it('nama aturan berbentuk variabel selamat dari perenderan', () => {
+    const teks = bantuan(ctxDengan([aturan({ id: 1, label: '{nama_rs}', keywords: ['halo'] })]));
+    expect(renderTemplate(teks, varsBalasanApaAdanya(teks))).toContain('{nama_rs}');
   });
 });

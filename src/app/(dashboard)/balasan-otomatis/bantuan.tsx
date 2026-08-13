@@ -68,8 +68,15 @@ export function BantuanBalasanOtomatis() {
             akan membalas berikut teks jadinya. Tidak mengirim apa pun ke siapa pun.
           </li>
           <li>
-            <Kode>/batal</Kode> — berhenti di tengah jalan. <Kode>/bantuan</Kode> — daftar perintah
-            ini.
+            <Kode>/batal</Kode> — berhenti di tengah jalan.
+          </li>
+          <li>
+            <Kode>/bantuan</Kode> (juga <Kode>/help</Kode>) — bukan sekadar daftar perintah:
+            menyebut apakah balasan otomatis sedang menyala, berapa aturan yang tersimpan berikut
+            kata kunci dan status masing-masing, apakah aturan baru dari chat langsung aktif, dan
+            apa lagi yang boleh ditanyakan dari alamat itu. Dua fakta pertama tidak terlihat dari
+            mana pun lewat WhatsApp, dan tanpanya aturan yang benar terlihat persis seperti aturan
+            yang gagal.
           </li>
         </ul>
         <p className="mt-2">

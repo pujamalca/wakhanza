@@ -151,12 +151,50 @@ export interface RingkasanAturan extends MatchableRule {
   isActive: boolean;
 }
 
+/**
+ * Apa yang bisa dilakukan ALAMAT INI -- bukan apa yang bisa dilakukan sistem.
+ *
+ * Diserahkan pemanggil, dan bentuknya per-alamat karena nomor RS menjawab
+ * beberapa hal lewat daftar putih yang BERBEDA-BEDA: `wa_command_admin` untuk
+ * perintah di berkas ini, `farmasi_target.boleh_tanya` untuk stok dan rekap
+ * gudang. Pemisahan itu disengaja (migrations/045) -- "boleh menanyakan stok"
+ * dan "boleh mengubah apa yang dikatakan RS kepada pasien" dua wewenang yang
+ * beratnya sama sekali berbeda.
+ *
+ * Akibatnya bantuan TIDAK BOLEH menyebutkan kemampuan secara umum. Menyuruh
+ * seseorang mengetik "stok paracetamol" saat alamatnya tidak ada di daftar
+ * satunya menghasilkan persis kelas kegagalan termahal di proyek ini: orang
+ * mengetik apa yang disuruh, tidak terjadi apa-apa, dan tidak ada satu pun galat
+ * yang menyebut sebabnya -- karena memang tidak ada yang salah, alamatnya saja
+ * yang tidak berhak.
+ */
+export interface KemampuanAlamat {
+  /**
+   * `autoreply.enabled`. Selama MATI, tidak satu pun aturan menjawab pasien --
+   * termasuk yang berstatus aktif. Itu keadaan yang mustahil dilihat dari
+   * WhatsApp, dan orang yang baru saja menulis aturan lalu mengujinya wajar
+   * menyimpulkan aturannyalah yang salah.
+   */
+  balasanOtomatisAktif: boolean;
+  /** Alamat ini boleh menanyakan stok/harga obat. */
+  bolehTanyaStok: boolean;
+  /** Jawaban stoknya memuat sisa, satuan, dan harga -- bukan tersedia/kosong saja. */
+  stokRinci: boolean;
+  /** Alamat ini boleh meminta rekap barang di bawah stok minimal. */
+  bolehTanyaDarurat: boolean;
+  /** Kata kunci yang menjaring pertanyaan stok, apa adanya dari pengaturan. */
+  kataKunciStok: readonly string[];
+  /** Frasa yang menjaring permintaan rekap gudang. */
+  frasaDarurat: readonly string[];
+}
+
 export interface KonteksPerintah {
   aturan: readonly RingkasanAturan[];
   /** `autoreply.wa_tambah_aktif_langsung` -- menentukan `is_active` aturan baru. */
   aktifLangsung: boolean;
   /** `AUTOREPLY_TEMPLATE_VARIABLES`; diserahkan supaya modul ini tidak memilih kebijakan. */
   variabelDikenal: readonly string[];
+  kemampuan: KemampuanAlamat;
 }
 
 export type EfekPerintah =
@@ -201,6 +239,15 @@ const MIN_PANJANG_KATA_KUNCI = 2;
 /** Daftar aturan di WhatsApp dipotong di sini; `auto_reply_rule` memang tabel konfigurasi kecil. */
 const MAKS_DAFTAR = 50;
 
+/**
+ * Aturan yang disebut di `/bantuan`, jauh lebih sedikit daripada `/daftar`.
+ * Tugas bantuan adalah orientasi, bukan pencacahan -- dan pesan yang dibuka
+ * dengan tiga puluh baris aturan menenggelamkan daftar perintah yang justru
+ * dicari orang yang mengetik `/bantuan`. Kelebihannya disebut jumlahnya berikut
+ * perintah yang menampilkan semuanya.
+ */
+const MAKS_BANTUAN = 10;
+
 // ---------------------------------------------------------------------------
 // Penolong
 // ---------------------------------------------------------------------------
@@ -220,13 +267,21 @@ export function uraikanKataKunci(mentah: string): string[] {
   return [...terlihat];
 }
 
+/**
+ * Satu aturan sebagaimana ditulis ke layar. SATU penurunan, dipakai daftar
+ * bernomor `/hapus`-`/ubah`-`/daftar` maupun ringkasan `/bantuan` -- yang
+ * berbeda cuma awalannya. Dua penurunan berarti dua bentuk keterangan untuk satu
+ * aturan yang sama, dan yang menyimpang biasanya yang paling jarang dilihat.
+ */
+function barisAturan(r: RingkasanAturan, awalan: string): string {
+  const status = r.isActive ? 'aktif' : 'NONAKTIF';
+  const kunci = r.keywords.length > 0 ? r.keywords.join(', ') : '(tanpa kata kunci)';
+  return `${awalan}*${r.label}* (${status})\n   kunci: ${kunci}`;
+}
+
 function daftarBernomor(aturan: readonly RingkasanAturan[]): { teks: string; ids: number[] } {
   const tampil = aturan.slice(0, MAKS_DAFTAR);
-  const baris = tampil.map((r, i) => {
-    const status = r.isActive ? 'aktif' : 'NONAKTIF';
-    const kunci = r.keywords.length > 0 ? r.keywords.join(', ') : '(tanpa kata kunci)';
-    return `${i + 1}. *${r.label}* (${status})\n   kunci: ${kunci}`;
-  });
+  const baris = tampil.map((r, i) => barisAturan(r, `${i + 1}. `));
   const potongan =
     aturan.length > tampil.length ? `\n\n(menampilkan ${tampil.length} dari ${aturan.length})` : '';
   return { teks: baris.join('\n') + potongan, ids: tampil.map((r) => r.id) };
@@ -293,18 +348,108 @@ export function varsBalasanApaAdanya(balasan: string): Record<string, string> {
 /** Semua langkah berakhir dengan kalimat yang sama supaya jalan keluarnya selalu terlihat. */
 const JALAN_KELUAR = '\n\nKetik */batal* untuk berhenti.';
 
-export const TEKS_BANTUAN = [
-  '*Perintah balasan otomatis*',
-  '',
+/** Daftar perintah, satu-satunya bagian bantuan yang tidak bergantung keadaan. */
+const DAFTAR_PERINTAH = [
   '/tambah-jawaban-otomatis — buat aturan baru',
   '/daftar-jawaban-otomatis — lihat aturan yang ada',
-  '/ubah-jawaban-otomatis — ubah aturan',
+  '/ubah-jawaban-otomatis — ubah nama, kata kunci, isi, atau aktif/nonaktifnya',
   '/hapus-jawaban-otomatis — hapus aturan',
   '/uji-jawaban-otomatis — coba kalimat, lihat aturan mana yang menjawab',
   '/batal — batalkan yang sedang dikerjakan',
+  '/bantuan — pesan ini',
   '',
   'Boleh disingkat: /tambah /daftar /ubah /hapus /uji',
 ].join('\n');
+
+/**
+ * `/bantuan` (juga `/help`, `/perintah`) -- bukan sekadar daftar perintah.
+ *
+ * Yang sampai ke sini SELALU alamat berwenang: `cobaPerintahWa()` mendiamkan
+ * yang bukan, jauh sebelum perintahnya diuraikan. Jadi pesan ini boleh menyebut
+ * keadaan konfigurasi, dan justru itu gunanya -- tanpanya, seseorang yang
+ * mengatur balasan otomatis lewat WhatsApp tidak punya SATU PUN cara mengetahui
+ * dua hal yang menentukan apakah pekerjaannya berbuah:
+ *
+ *   1. apakah `autoreply.enabled` menyala (kalau mati, tidak satu pun aturannya
+ *      pernah menjawab pasien, dan tidak ada galat yang mengatakannya);
+ *   2. apakah aturan yang baru ia buat langsung aktif atau menunggu ditinjau.
+ *
+ * Bagian kemampuan di bawah dibaca dari `ctx.kemampuan`, yang per-ALAMAT --
+ * lihat `KemampuanAlamat`.
+ */
+export function susunBantuan(ctx: KonteksPerintah): string {
+  const { kemampuan } = ctx;
+  const bagian: string[] = [];
+
+  bagian.push(
+    '*Bantuan — perintah lewat WhatsApp*\n\nAlamat ini terdaftar *berwenang*, jadi balasan otomatis rumah sakit bisa diatur langsung dari sini.',
+  );
+
+  // --- Keadaan sekarang ----------------------------------------------------
+  const jumlahAktif = ctx.aturan.filter((r) => r.isActive).length;
+  bagian.push(
+    [
+      '*Keadaan sekarang*',
+      // Disebut paling dulu karena ia membatalkan seluruh sisa pesan ini.
+      kemampuan.balasanOtomatisAktif
+        ? '• Balasan otomatis: *menyala*'
+        : '• Balasan otomatis: *MATI*. Selama mati, tidak satu pun aturan di bawah menjawab pasien — termasuk yang bertanda aktif. Nyalakan di dashboard → Balasan otomatis.',
+      `• Aturan tersimpan: ${ctx.aturan.length} (${jumlahAktif} aktif)`,
+      ctx.aktifLangsung
+        ? '• Aturan baru dari sini: *langsung aktif*'
+        : '• Aturan baru dari sini: disimpan *nonaktif* dulu, perlu dicentang di dashboard',
+    ].join('\n'),
+  );
+
+  // --- Aturan yang sudah ada -----------------------------------------------
+  if (ctx.aturan.length === 0) {
+    bagian.push(
+      '*Aturan yang ada*\n\nBelum ada satu pun. Ketik */tambah-jawaban-otomatis* untuk membuat yang pertama.',
+    );
+  } else {
+    const tampil = ctx.aturan.slice(0, MAKS_BANTUAN);
+    const sisa = ctx.aturan.length - tampil.length;
+    const ekor = sisa > 0 ? `\n\n(dan ${sisa} lagi — ketik */daftar* untuk semuanya)` : '';
+    bagian.push(
+      `*Aturan yang ada* (${ctx.aturan.length})\n\n${tampil.map((r) => barisAturan(r, '• ')).join('\n')}${ekor}`,
+    );
+  }
+
+  // --- Perintah ------------------------------------------------------------
+  bagian.push(`*Yang bisa Anda lakukan*\n\n${DAFTAR_PERINTAH}`);
+
+  // --- Kemampuan lain, per-ALAMAT ------------------------------------------
+  const lain: string[] = [];
+  if (kemampuan.bolehTanyaStok) {
+    const kunci =
+      kemampuan.kataKunciStok.length > 0
+        ? `Ketik salah satu kata: ${kemampuan.kataKunciStok.join(', ')} — diikuti nama obatnya.`
+        : 'Kata kuncinya belum diisi di dashboard → Farmasi, jadi belum ada yang menjaringnya.';
+    const rinci = kemampuan.stokRinci
+      ? 'Alamat ini menerima sisa stok, satuan, dan harga.'
+      : 'Alamat ini menerima tersedia/kosong saja, tanpa angka sisa.';
+    lain.push(`• *Stok & harga obat.* ${kunci} ${rinci}`);
+  }
+  if (kemampuan.bolehTanyaDarurat) {
+    const frasa =
+      kemampuan.frasaDarurat.length > 0
+        ? `Ketik: ${kemampuan.frasaDarurat.join(', ')}`
+        : 'Frasanya belum diisi di dashboard → Farmasi, jadi belum ada yang menjaringnya.';
+    lain.push(`• *Rekap barang di bawah stok minimal.* ${frasa}`);
+  }
+  bagian.push(
+    lain.length > 0
+      ? `*Yang juga bisa ditanyakan dari alamat ini*\n\n${lain.join('\n')}`
+      : // Dikatakan apa adanya BERIKUT sebabnya. Diam di sini membuat orang
+        // mencoba menanyakan stok, tidak dijawab, lalu menyimpulkan nomornya
+        // rusak -- padahal wewenangnya memang daftar yang lain.
+        '*Yang belum bisa dari alamat ini*\n\nMenanyakan stok obat dan rekap gudang punya daftar wewenangnya sendiri. Kalau perlu, tambahkan alamat ini di dashboard → Farmasi → Tujuan, lalu centang "Boleh tanya".',
+  );
+
+  bagian.push('_Urutan prioritas dan mode pencocokan hanya bisa diatur di dashboard._');
+
+  return bagian.join('\n\n');
+}
 
 // ---------------------------------------------------------------------------
 // Titik masuk
@@ -329,7 +474,7 @@ export function mulaiPerintah(
 function langkahAwal(jenis: JenisPerintah, ctx: KonteksPerintah, adaSesi: boolean): HasilPerintah {
   switch (jenis) {
     case 'bantuan':
-      return { aksi: 'selesai', balasan: TEKS_BANTUAN };
+      return { aksi: 'selesai', balasan: susunBantuan(ctx) };
 
     case 'batal':
       return {
