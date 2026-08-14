@@ -422,6 +422,26 @@ export const PEMESANAN_TEMPLATE_VARIABLES = [
  * `{subtotal}` DIJUMLAHKAN dari rinciannya, bukan dibaca -- `penjualan` tidak
  * menyimpan totalnya sama sekali, hanya `ppn` dan `ongkir`. Lihat
  * `hitungTotalNota()` di core/penjualan.ts.
+ *
+ * `{keterangan}` ADA di sini dan sengaja TIDAK ada di template bawaan, dan
+ * pembedaan itu diukur bukan dikira. Kolomnya terisi pada 7.256 dari 16.859
+ * nota, tapi 7.172 di antaranya cuma penanda '-' milik Khanza yang dibuang
+ * `isianSurat()` -- jadi baris "Keterangan : {keterangan}" di template bawaan
+ * akan menggantung tanpa isi pada sekitar 99,5% nota. Itu persis kegagalan yang
+ * sudah dibayar dua kali (label total hibah tanpa angka di migrations/031, label
+ * nilai obat di 043): label menggantung terbaca sebagai sistem rusak, dan sejak
+ * itu baris yang benar pun tidak dipercaya.
+ *
+ * Bentuknya tetap NILAI BIASA, bukan variabel yang membawa labelnya sendiri.
+ * Variabel yang diam-diam mencetak "Keterangan : " akan menghasilkan
+ * "Keterangan : Keterangan : obat rutin" bagi siapa pun yang menulis labelnya
+ * sendiri -- dan menulis labelnya sendiri adalah hal yang setiap variabel lain
+ * di daftar ini mengajarkan.
+ *
+ * `{keterangan}` sengaja TIDAK ada di REKAP_PENJUALAN_TEMPLATE_VARIABLES: di
+ * sana tidak ada satu nota pun untuk diambil keterangannya, dan menggabungkan
+ * ratusan keterangan sehari adalah cara paling cepat memindahkan seluruh teks
+ * bebas kasir ke dalam satu pesan.
  */
 export const PENJUALAN_TEMPLATE_VARIABLES = [
   'no_nota',
@@ -430,6 +450,7 @@ export const PENJUALAN_TEMPLATE_VARIABLES = [
   'status_bayar',
   'nama_gudang',
   'nama_petugas',
+  'keterangan',
   'daftar_barang',
   'jumlah_item',
   'subtotal',

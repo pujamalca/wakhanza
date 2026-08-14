@@ -4,7 +4,7 @@ import {
   pollPenjualanJendela,
   notaPenjualanYangAda,
   ambilRingkasPenjualan,
-  ambilAngkaPenjualan,
+  ambilPenjualanTerpilih,
   ambilDetailPenjualan,
   JENDELA_PENJUALAN_PENUH,
 } from '@/khanza/penjualan';
@@ -12,6 +12,7 @@ import {
   pecahDaftarBarangJual,
   kelompokkanDetailJual,
   hitungTotalNota,
+  keteranganNota,
   type BarisPenjualan,
   type BarisDetailPenjualan,
 } from '@/core/penjualan';
@@ -131,7 +132,13 @@ function kunciPenjualanHapus(nota: string, chatId: string, generasi: number): st
 export function susunVarsPenjualan(
   header: BarisPenjualan,
   detail: BarisDetailPenjualan[],
-  angka: { jmlItem: number | null; subtotal: number | null; ppn: number | null; ongkir: number | null },
+  nota: {
+    jmlItem: number | null;
+    subtotal: number | null;
+    ppn: number | null;
+    ongkir: number | null;
+    keterangan?: string | null;
+  },
   sekarang: Date,
 ): Array<Partial<Record<TemplateVariable, string>>> {
   const dasar: Partial<Record<TemplateVariable, string>> = {
@@ -141,11 +148,17 @@ export function susunVarsPenjualan(
     status_bayar: header.status ?? '',
     nama_gudang: header.nm_bangsal ?? '',
     nama_petugas: header.nama_petugas ?? '',
-    jumlah_item: String(angka.jmlItem ?? detail.length),
-    subtotal: formatRupiah(angka.subtotal),
-    ongkir: formatRupiah(angka.ongkir),
-    ppn: formatRupiah(angka.ppn),
-    total: formatRupiah(hitungTotalNota(angka.subtotal, angka.ppn, angka.ongkir)),
+    /**
+     * Teks bebas yang diketik kasir. Turunannya di `core/penjualan.ts` supaya
+     * bisa diuji tanpa MariaDB, berikut alasan lengkap kenapa penanda Khanza
+     * wajib dibuang dan kenapa sanitasinya diserahkan ke `renderTemplate`.
+     */
+    keterangan: keteranganNota(nota.keterangan),
+    jumlah_item: String(nota.jmlItem ?? detail.length),
+    subtotal: formatRupiah(nota.subtotal),
+    ongkir: formatRupiah(nota.ongkir),
+    ppn: formatRupiah(nota.ppn),
+    total: formatRupiah(hitungTotalNota(nota.subtotal, nota.ppn, nota.ongkir)),
     tanggal: formatTanggalPesan(sekarang),
     jam: formatJamPesan(sekarang),
   };
@@ -322,7 +335,7 @@ export async function runPenjualanCycle(): Promise<void> {
     let header: BarisPenjualan[];
     let detail: BarisDetailPenjualan[];
     let ringkas: Awaited<ReturnType<typeof ambilRingkasPenjualan>>;
-    let angka: Awaited<ReturnType<typeof ambilAngkaPenjualan>>;
+    let terpilih: Awaited<ReturnType<typeof ambilPenjualanTerpilih>>;
     try {
       /**
        * Header dibaca untuk SELURUH jendela, bukan cuma untuk nota yang dikirim.
@@ -337,10 +350,10 @@ export async function runPenjualanCycle(): Promise<void> {
        * pembatalan) memakai `notaPenjualanYangAda`, yang cuma mengambil satu
        * kolom dan terukur `Using index`.
        */
-      [header, ringkas, angka, detail] = await Promise.all([
+      [header, ringkas, terpilih, detail] = await Promise.all([
         pollPenjualanJendela(jendela.dari, jendela.sampai),
         ambilRingkasPenjualan(nomor),
-        ambilAngkaPenjualan(nomor),
+        ambilPenjualanTerpilih(nomor),
         ambilDetailPenjualan(nomor, sertakanHarga),
       ]);
     } catch (err) {
@@ -350,7 +363,7 @@ export async function runPenjualanCycle(): Promise<void> {
 
     const headerPer = new Map(header.map((h) => [h.nota_jual, h]));
     const ringkasPer = new Map(ringkas.map((r) => [r.nota_jual, r]));
-    const angkaPer = new Map(angka.map((a) => [a.nota_jual, a]));
+    const terpilihPer = new Map(terpilih.map((t) => [t.nota_jual, t]));
     const detailPer = kelompokkanDetailJual(detail);
 
     const body = (await getSetting('farmasi.template_penjualan', '')) ?? '';
@@ -377,15 +390,16 @@ export async function runPenjualanCycle(): Promise<void> {
         continue;
       }
       const r = ringkasPer.get(b.notaJual);
-      const a = angkaPer.get(b.notaJual);
+      const t = terpilihPer.get(b.notaJual);
       const bagian = susunVarsPenjualan(
         h,
         detailPer.get(b.notaJual) ?? [],
         {
           jmlItem: r?.jml_item ?? null,
           subtotal: r?.subtotal ?? null,
-          ppn: a?.ppn ?? null,
-          ongkir: a?.ongkir ?? null,
+          ppn: t?.ppn ?? null,
+          ongkir: t?.ongkir ?? null,
+          keterangan: t?.keterangan ?? null,
         },
         sekarang,
       );

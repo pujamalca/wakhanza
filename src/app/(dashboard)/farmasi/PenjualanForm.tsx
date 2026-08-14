@@ -55,7 +55,26 @@ export function PenjualanForm({ nilai, adaTujuan }: { nilai: NilaiPenjualan; ada
 
       <form action={simpanAction} className="space-y-4">
         <div>
-          <label className="mb-1 block text-xs font-medium">Isi pesan &mdash; nota disimpan</label>
+          {/* Petunjuk BERSAUDARA dengan label, tidak pernah di dalamnya: apa pun
+              yang diklik di dalam <label> ikut memindahkan fokus ke kontrolnya. */}
+          <div className="mb-1 flex items-center gap-1">
+            <label className="block text-xs font-medium">Isi pesan &mdash; nota disimpan</label>
+            <Petunjuk untuk="Variabel keterangan">
+              <p>
+                <span className="font-mono">{'{keterangan}'}</span> mengambil kolom Keterangan yang
+                diketik kasir di layar penjualan Khanza. Ia sengaja <strong>tidak ada</strong> di isi
+                pesan bawaan, dan itu diukur: kolomnya terisi pada 7.256 dari 16.859 nota, tapi
+                98,8% di antaranya cuma berisi penanda &ldquo;-&rdquo; yang otomatis dibuang. Jadi
+                baris <span className="font-mono">Keterangan : {'{keterangan}'}</span> akan
+                menggantung tanpa isi pada hampir setiap nota.
+              </p>
+              <p className="mt-2">
+                Pakai bila apotek memang membiasakan mengisinya. Perlu diketahui juga: isinya teks
+                bebas, jadi apa pun yang diketik kasir ikut terkirim ke grup tujuan &mdash; termasuk
+                nama orang, bila itu yang diketiknya.
+              </p>
+            </Petunjuk>
+          </div>
           <MessageEditor
             name="template_penjualan"
             defaultValue={nilai.template}

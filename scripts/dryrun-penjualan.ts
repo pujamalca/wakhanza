@@ -34,7 +34,7 @@ async function main() {
     pollPenjualanJendela,
     notaPenjualanYangAda,
     ambilRingkasPenjualan,
-    ambilAngkaPenjualan,
+    ambilPenjualanTerpilih,
     ambilDetailPenjualan,
     JENDELA_PENJUALAN_PENUH,
   } = await import('../src/khanza/penjualan');
@@ -120,19 +120,19 @@ async function main() {
      */
     const contoh = (sempit.length > 0 ? sempit : luas).slice(-2);
     const nomor = contoh.map((h) => h.nota_jual);
-    const [ringkas, angka, detail] = await Promise.all([
+    const [ringkas, terpilih, detail] = await Promise.all([
       ambilRingkasPenjualan(nomor),
-      ambilAngkaPenjualan(nomor),
+      ambilPenjualanTerpilih(nomor),
       ambilDetailPenjualan(nomor, sertakanHarga),
     ]);
     const perNomor = kelompokkanDetailJual(detail);
     const ringkasPer = new Map(ringkas.map((r) => [r.nota_jual, r]));
-    const angkaPer = new Map(angka.map((a) => [a.nota_jual, a]));
+    const terpilihPer = new Map(terpilih.map((t) => [t.nota_jual, t]));
 
     for (const h of contoh) {
       const rincian = perNomor.get(h.nota_jual) ?? [];
       const r = ringkasPer.get(h.nota_jual);
-      const a = angkaPer.get(h.nota_jual);
+      const t = terpilihPer.get(h.nota_jual);
       console.log(`\n  --- ${h.nota_jual} | ${h.tgl_jual} | ${h.jns_jual} | ${h.status} | ${rincian.length} barang ---`);
       const bagian = susunVarsPenjualan(
         h,
@@ -140,8 +140,9 @@ async function main() {
         {
           jmlItem: r?.jml_item ?? null,
           subtotal: r?.subtotal ?? null,
-          ppn: a?.ppn ?? null,
-          ongkir: a?.ongkir ?? null,
+          ppn: t?.ppn ?? null,
+          ongkir: t?.ongkir ?? null,
+          keterangan: t?.keterangan ?? null,
         },
         new Date(),
       );
@@ -181,16 +182,45 @@ async function main() {
      */
     const kolomHeader = Object.keys(luas[0] ?? {});
     const kolomDetail = Object.keys(detail[0] ?? {});
+    const kolomTerpilih = Object.keys(terpilih[0] ?? {});
     console.log(`\n  kolom header yang benar-benar terbaca : ${kolomHeader.join(', ')}`);
     console.log(`  kolom rincian yang benar-benar terbaca: ${kolomDetail.join(', ')}`);
+    console.log(`  kolom nota terpilih yang terbaca      : ${kolomTerpilih.join(', ')}`);
 
-    const terlarang = ['no_rkm_medis', 'nm_pasien', 'keterangan', 'nama_bayar', 'aturan_pakai'];
-    const bocor = [...kolomHeader, ...kolomDetail].filter((k) => terlarang.includes(k));
+    /**
+     * Identitas pembeli dan dosis dilarang di KETIGA pembacaan, tanpa kecuali.
+     */
+    const terlarang = ['no_rkm_medis', 'nm_pasien', 'nama_bayar', 'aturan_pakai'];
+    const bocor = [...kolomHeader, ...kolomDetail, ...kolomTerpilih].filter((k) => terlarang.includes(k));
+
+    /**
+     * `keterangan` punya pagarnya SENDIRI, dan bentuknya dua arah.
+     *
+     * Ia boleh -- dan harus -- ada di pembacaan nota terpilih; itu yang membuat
+     * `{keterangan}` terisi. Tapi ia TIDAK BOLEH ada di jendela pindai, karena di
+     * sanalah teks bebas kasir akan menyeberang untuk ratusan nota tiap siklus
+     * padahal yang dipakai paling banyak sekuota.
+     *
+     * Ketiadaannya di tempat yang benar juga diperiksa, bukan cuma keberadaannya
+     * di tempat yang salah: kolom yang diam-diam hilang dari daftar SELECT
+     * menghasilkan `{keterangan}` yang kosong SELAMANYA tanpa satu pun galat --
+     * dan itu tidak bisa dibedakan dari nota yang keterangannya memang kosong.
+     */
+    const ketDiJendela = [...kolomHeader, ...kolomDetail].includes('keterangan');
+    const ketDiTerpilih = kolomTerpilih.includes('keterangan');
     console.log(
       bocor.length === 0
         ? '  PAGAR PRIVASI OK -- tidak satu pun kolom identitas pembeli terbaca'
         : `  *** PAGAR PRIVASI BOCOR: ${bocor.join(', ')} -- lihat komentar pembuka khanza/penjualan.ts ***`,
     );
+    console.log(
+      ketDiJendela
+        ? '  *** keterangan BOCOR ke jendela pindai -- ia hanya boleh dibaca lewat ambilPenjualanTerpilih ***'
+        : ketDiTerpilih || terpilih.length === 0
+          ? '  keterangan OK -- hanya terbaca untuk nota yang benar-benar dikirim'
+          : '  *** keterangan HILANG dari pembacaan nota terpilih -- {keterangan} akan kosong selamanya ***',
+    );
+    if (bocor.length > 0 || ketDiJendela || (terpilih.length > 0 && !ketDiTerpilih)) process.exitCode = 1;
 
     /**
      * Ketepatan pemangkasnya, dicetak sebagai angka supaya tidak perlu dipercaya
@@ -277,6 +307,12 @@ async function main() {
      * melonggarkan daftar SELECT-nya paling besar di sini. Yang menjaga tetap
      * kolom yang tidak pernah diambil (§5.2), jadi pemeriksaannya sama ketat
      * dengan yang dijalankan atas nota per transaksi di atas.
+     *
+     * `keterangan` TETAP terlarang di sini, dan itu bukan kelalaian menyalin
+     * daftar lama: ia boleh dibaca per NOTA karena di sana ia keterangan satu
+     * transaksi yang dilihat gudang. Pada agregat sehari tidak ada satu nota pun
+     * untuk diambil keterangannya, dan menggabungkan ratusan keterangan adalah
+     * cara paling cepat memindahkan seluruh teks bebas kasir ke satu pesan.
      */
     const TERLARANG = ['no_rkm_medis', 'nm_pasien', 'keterangan', 'nama_bayar', 'aturan_pakai'];
     const kolomRekap = [

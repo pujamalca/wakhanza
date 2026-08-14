@@ -1,6 +1,11 @@
 import { sikSelect } from '@/db/sik';
 import { registerPlanCheck } from './planChecks';
-import type { BarisPenjualan, BarisDetailPenjualan, RingkasPenjualan } from '@/core/penjualan';
+import type {
+  BarisPenjualan,
+  BarisDetailPenjualan,
+  RingkasPenjualan,
+  PenjualanTerpilih,
+} from '@/core/penjualan';
 import type { BarisRekapHeader, BarisRekapItem } from '@/core/penjualanRekap';
 
 /**
@@ -37,11 +42,10 @@ import type { BarisRekapHeader, BarisRekapItem } from '@/core/penjualanRekap';
  * jaminan apa pun terhadap baris berikutnya, dan yang menentukan bukan
  * seberapa sering melainkan apa yang terjadi ketika terisi.
  *
- * Karena itu KEDUA kolom itu -- berikut `keterangan` (teks bebas yang diketik
- * kasir) dan `nama_bayar` -- tidak pernah muncul di satu pun SELECT di berkas
- * ini. Merender identitas pembeli bukan terlarang melainkan MUSTAHIL
- * (ARCHITECTURE §5.2), pola yang sama dengan `status_prb` pada surat kontrol
- * BPJS dan keenam kolom klinis pada `skdp_bpjs`.
+ * Karena itu KEDUA kolom itu -- berikut `nama_bayar` -- tidak pernah muncul di
+ * satu pun SELECT di berkas ini. Merender identitas pembeli bukan terlarang
+ * melainkan MUSTAHIL (ARCHITECTURE §5.2), pola yang sama dengan `status_prb`
+ * pada surat kontrol BPJS dan keenam kolom klinis pada `skdp_bpjs`.
  *
  * `aturan_pakai` di `detailjual` tunduk aturan yang sama dan sekaligus lebih
  * jelas lagi: ia dosis, yaitu keterangan medis. Terukur kosong pada seluruh
@@ -51,6 +55,42 @@ import type { BarisRekapHeader, BarisRekapItem } from '@/core/penjualanRekap';
  * menggabungkan modul ini dengan `resep_obat`, `detail_pemberian_obat`, atau
  * `reg_periksa`. Penggabungan itulah yang mengubah nota penjualan menjadi data
  * pasien.
+ *
+ * ==========================================================================
+ * `keterangan` DIBACA, dan itu keputusan pemilik sistem -- bukan kelalaian
+ * ==========================================================================
+ *
+ * Kolom ini dulu ada di daftar terlarang di atas, dengan alasan "teks bebas yang
+ * diketik kasir". Alasan itu tidak gugur; yang berubah adalah siapa yang
+ * menanggungnya -- pemilik sistem memintanya, dan isinya memang keterangan kerja
+ * yang berguna bagi gudang ("obat rutin", "obat luar", "suntik").
+ *
+ * Yang perlu diketahui siapa pun yang menyentuhnya, dan ini DIUKUR atas seluruh
+ * 16.859 baris di database ini:
+ *
+ *   kosong                                    9.603 baris
+ *   terisi                                    7.256 baris
+ *     - di antaranya penanda '-' milik Khanza 7.172 baris (98,8% dari yang terisi)
+ *   nilai berbeda yang benar-benar terisi         38
+ *   panjang terpanjang                            40 karakter
+ *   mengandung baris baru                          0 baris
+ *
+ * Jadi dalam pemakaian sungguhan ia kosakata pendek, bukan karangan bebas. Tapi
+ * dari 84 baris yang bukan penanda, sebagian BERISI NAMA ORANG dan sebagian lagi
+ * catatan klinis -- persis dua hal yang seluruh berkas ini ada untuk menahan.
+ * Tidak ada satu pun cara kode membedakannya dari "obat rutin", jadi yang
+ * menahan bukan penyaring melainkan tiga pagar:
+ *
+ *   1. Dibaca HANYA lewat `ambilPenjualanTerpilih` -- yaitu untuk nota yang sudah
+ *      lolos dedup dan kuota, paling banyak sekuota per siklus. Jendela pindai
+ *      (~460 baris tiap siklus) tidak pernah menyentuhnya.
+ *   2. Penanda Khanza dibuang lewat `isianSurat()` di `susunVarsPenjualan`, jadi
+ *      98,8% yang terisi tetap dirender kosong.
+ *   3. `{keterangan}` BUKAN anggota MULTILINE_VARIABLES, jadi ia lewat
+ *      `sanitizeValue()` seperti nilai luar mana pun.
+ *
+ * Ia sengaja TIDAK ada di template bawaan -- lihat `PENJUALAN_TEMPLATE_VARIABLES`
+ * di `core/template.ts` untuk sebabnya.
  *
  * ==========================================================================
  * Kelas PINDAI, sekali lagi karena tabelnya tidak punya stempel waktu
@@ -210,26 +250,35 @@ export async function ambilRingkasPenjualan(nota: string[]): Promise<RingkasPenj
 }
 
 /**
- * Angka rupiah tingkat nota yang memang tersimpan di headernya.
+ * Kolom header yang hanya dipakai oleh nota yang BENAR-BENAR DIKIRIM.
  *
- * Dibaca terpisah dari `pollPenjualanJendela` supaya jendela penuh tidak
- * menyeret kolom yang cuma dipakai oleh sekuota nota. Terukur: `ppn` tidak
- * pernah terisi pada satu baris pun (0 dari 16.787), `ongkir` terisi pada
- * 3.945 -- jadi yang kedua benar-benar dipakai dan tidak boleh dihilangkan.
+ * Dibaca terpisah dari `pollPenjualanJendela` supaya jendela penuh (~460 baris
+ * tiap siklus) tidak menyeret kolom yang cuma dipakai oleh sekuota nota.
+ * Terukur: `ppn` tidak pernah terisi pada satu baris pun (0 dari 16.787),
+ * `ongkir` terisi pada 3.945 -- jadi yang kedua benar-benar dipakai dan tidak
+ * boleh dihilangkan.
+ *
+ * Namanya BUKAN lagi "angka", dan itu bukan kerapian: sejak `keterangan` ikut,
+ * nama yang menyebut angka akan berbohong tentang isinya, dan nama yang
+ * berbohong adalah yang membuat kolom teks bebas menyelinap ke tempat yang
+ * pembacanya kira cuma berisi rupiah.
+ *
+ * Di sinilah `keterangan` dibaca, dan HANYA di sini -- pagar pertama dari tiga
+ * yang dijelaskan di kepala berkas ini. Menaikkannya ke `buildHeaderSql` akan
+ * membuat teks bebas yang bisa memuat nama orang menyeberang untuk ratusan nota
+ * tiap siklus, padahal yang dipakai paling banyak sekuota.
  */
-function buildAngkaSql(): string {
+function buildTerpilihSql(): string {
   return `
-    SELECT p.nota_jual, p.ppn, p.ongkir
+    SELECT p.nota_jual, p.ppn, p.ongkir, COALESCE(p.keterangan, '') AS keterangan
     FROM penjualan p
     WHERE p.nota_jual IN (:notas)
   `;
 }
 
-export async function ambilAngkaPenjualan(
-  nota: string[],
-): Promise<Array<{ nota_jual: string; ppn: number | null; ongkir: number | null }>> {
+export async function ambilPenjualanTerpilih(nota: string[]): Promise<PenjualanTerpilih[]> {
   if (nota.length === 0) return [];
-  return sikSelect(buildAngkaSql(), { notas: nota });
+  return sikSelect<PenjualanTerpilih>(buildTerpilihSql(), { notas: nota });
 }
 
 /**
@@ -306,8 +355,8 @@ registerPlanCheck({
 });
 
 registerPlanCheck({
-  name: 'FARMASI_PENJUALAN_ANGKA',
-  sql: buildAngkaSql(),
+  name: 'FARMASI_PENJUALAN_TERPILIH',
+  sql: buildTerpilihSql(),
   replacements: { notas: ['PJ20260811020'] },
   maxRows: 5000,
 });

@@ -24,9 +24,12 @@
  *
  * Kalau suatu saat ada yang menambahkan kolomnya ke query, ia juga harus
  * menambahkan field di sini DAN variabel di `PENJUALAN_TEMPLATE_VARIABLES` --
- * tiga langkah sadar, bukan satu yang tak sengaja.
+ * tiga langkah sadar, bukan satu yang tak sengaja. Itulah persis yang ditempuh
+ * `keterangan`: ia sekarang dibaca, atas permintaan pemilik sistem, lewat ketiga
+ * langkah itu berikut tiga pagar yang diuraikan di `khanza/penjualan.ts`.
  */
 import { sanitizeValue } from './template';
+import { isianSurat } from './suratDoc';
 import { formatJumlah, formatRupiah, pecahBarisBarang, kelompokkanPerNomor } from './notaBarang';
 
 export interface BarisPenjualan {
@@ -43,6 +46,21 @@ export interface RingkasPenjualan {
   nota_jual: string;
   jml_item: number | null;
   subtotal: number | null;
+}
+
+/**
+ * Kolom header yang dibaca HANYA untuk nota yang benar-benar dikirim.
+ *
+ * `keterangan` ada di sini dan bukan di `BarisPenjualan`, dan pemisahan itu
+ * bagian dari pagarnya: `BarisPenjualan` adalah bentuk baris jendela pindai, yang
+ * dibaca ratusan kali tiap siklus. Selama teks bebas kasir tidak punya tempat di
+ * bentuk itu, ia tidak bisa tak sengaja ikut terbaca di sana.
+ */
+export interface PenjualanTerpilih {
+  nota_jual: string;
+  ppn: number | null;
+  ongkir: number | null;
+  keterangan: string | null;
 }
 
 export interface BarisDetailPenjualan {
@@ -107,6 +125,32 @@ export function formatDaftarBarangJual(rows: BarisDetailPenjualan[]): string {
 /** Rincian dikelompokkan per nomor nota. */
 export function kelompokkanDetailJual(rows: BarisDetailPenjualan[]): Map<string, BarisDetailPenjualan[]> {
   return kelompokkanPerNomor(rows, (r) => r.nota_jual);
+}
+
+/**
+ * Isi `{keterangan}` -- kolom Keterangan yang diketik kasir di layar Khanza.
+ *
+ * Fungsi murni di core, bukan satu baris di dalam `susunVarsPenjualan`, dengan
+ * alasan yang sama yang menempatkan `hitungTotalNota()` di sini: yang bisa salah
+ * adalah TURUNANNYA, sementara runner mengimpor `@/models` sehingga tidak bisa
+ * diuji tanpa MariaDB hidup. Seam ini yang membuat perilakunya dipatok uji unit.
+ *
+ * `isianSurat()` DIPAKAI BERSAMA, tidak disalin. Terukur atas seluruh 16.859
+ * baris di database ini: 7.256 nota keterangannya terisi, tapi 7.172 di
+ * antaranya (98,8%) cuma penanda '-' milik Khanza. Diteruskan apa adanya, hampir
+ * setiap nota berbunyi "Keterangan : -" -- bentuk kegagalan yang sama persis
+ * dengan alamat "KOTO ALAM, KELURAHAN, KECAMATAN" pada surat (026) dan
+ * `nama_pemberi` berpenanda pada hibah (031). Daftar penandanya tumbuh dari
+ * pengamatan atas data Khanza sungguhan, dan salinan yang tidak ikut diperbarui
+ * adalah salinan yang diam-diam salah.
+ *
+ * TIDAK memanggil `sanitizeValue()` sendiri, dan itu disengaja: `{keterangan}`
+ * bukan anggota MULTILINE_VARIABLES, jadi `renderTemplate` sudah
+ * menyanitasinya seperti nilai luar mana pun. Menyanitasi dua kali di sini akan
+ * membuat pemanggil berikutnya mengira variabel ini boleh masuk daftar itu.
+ */
+export function keteranganNota(nilai: string | null | undefined): string {
+  return isianSurat(nilai);
 }
 
 /**

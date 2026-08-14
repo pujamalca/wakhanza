@@ -15,7 +15,7 @@ import { susunRekapHarian } from '@/worker/penjualanRekapRunner';
 import {
   pollPenjualanJendela,
   ambilRingkasPenjualan,
-  ambilAngkaPenjualan,
+  ambilPenjualanTerpilih,
   ambilDetailPenjualan,
 } from '@/khanza/penjualan';
 import { susunVarsPenjualan, susunVarsPenjualanHapus } from '@/worker/penjualanRunner';
@@ -236,9 +236,9 @@ export async function pratinjauPenjualanAction(
     if (!terakhir) return { kosong: true };
 
     const nomor = [terakhir.nota_jual];
-    const [ringkas, angka, detail] = await Promise.all([
+    const [ringkas, terpilih, detail] = await Promise.all([
       ambilRingkasPenjualan(nomor),
-      ambilAngkaPenjualan(nomor),
+      ambilPenjualanTerpilih(nomor),
       ambilDetailPenjualan(nomor, harga),
     ]);
 
@@ -249,8 +249,9 @@ export async function pratinjauPenjualanAction(
       {
         jmlItem: ringkas[0]?.jml_item ?? null,
         subtotal: ringkas[0]?.subtotal ?? null,
-        ppn: angka[0]?.ppn ?? null,
-        ongkir: angka[0]?.ongkir ?? null,
+        ppn: terpilih[0]?.ppn ?? null,
+        ongkir: terpilih[0]?.ongkir ?? null,
+        keterangan: terpilih[0]?.keterangan ?? null,
       },
       sekarang,
     );

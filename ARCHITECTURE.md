@@ -585,6 +585,8 @@ Di luar kedua fitur itu, larangan §5.2 berlaku utuh — dan pada beberapa pemic
 
 **Cara membuktikannya bukan dengan membaca SQL, melainkan memeriksa `Object.keys()` baris hasilnya.** Skrip `dryrun:penjualan`, `dryrun:resep`, dan `dryrun:penilaian` melakukan itu dan **keluar dengan kode 1** bila ada kolom terlarang yang menyelinap masuk. Keduanya dibuktikan MENGGIGIT dengan menambahkan kolom pasien ke daftar SELECT dengan sengaja, bukan diasumsikan.
 
+**Satu kolom teks bebas dibuka, dan bentuk pagarnya layak dicatat karena ia BUKAN penyaring.** `penjualan.keterangan` — kotak Keterangan yang diketik kasir — dibaca sejak pemilik sistem memintanya sebagai `{keterangan}`. Terukur, isinya kosakata pendek pada hampir seluruh baris (98,8% dari yang terisi cuma penanda `-` milik Khanza), tapi di antara 84 baris yang benar-benar terisi ada nama orang dan catatan klinis. Tidak ada satu pun cara kode membedakan keduanya, jadi yang menahan adalah **tempat ia dibaca**, bukan isinya: hanya lewat query yang jalan untuk nota yang sudah lolos dedup dan kuota (bukan jendela pindai yang membaca ratusan baris tiap siklus), tidak pernah pada agregat rekap harian, dan tetap lewat `sanitizeValue()` karena `{keterangan}` sengaja bukan anggota `MULTILINE_VARIABLES`. `dryrun:penjualan` memeriksanya **dua arah** — ada di tempat yang benar, tidak ada di kedua tempat yang salah — karena kolom yang diam-diam hilang dari daftar SELECT menghasilkan variabel kosong selamanya tanpa satu pun galat.
+
 ### 5.3 Template (`core/template.ts`)
 
 Penggantian variabel sederhana `{nama_variabel}`. Tanpa logika percabangan, tanpa perulangan, tanpa evaluasi ekspresi.

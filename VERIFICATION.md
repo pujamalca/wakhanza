@@ -1031,6 +1031,8 @@ npm run verify:plans
 verify:plans lolos.
 ```
 
+> Keluaran di atas dari 040 dan sengaja **tidak ditulis ulang**. `FARMASI_PENJUALAN_ANGKA` sejak itu bernama `FARMASI_PENJUALAN_TERPILIH` -- lihat "`{keterangan}`" di akhir seksi ini; rencananya tidak berubah (`p const PRIMARY rows~1`).
+
 ### Deteksi pembatalan dibuktikan terhadap jendela SUNGGUHAN
 
 Uji dijalankan terhadap `penjualan` produksi (sakelar fiturnya tetap MATI sepanjang uji; yang disuntik cuma baris buku pantau milik kita sendiri, lalu dihapus lagi):
@@ -1201,6 +1203,62 @@ Baris terakhir layak disebut tersendiri -- nol di sana bukan kegagalan melainkan
 **Belum ada satu pun pesan penjualan yang benar-benar terkirim ke WhatsApp.** `farmasi.penjualan_enabled` MATI dan `terima_penjualan` belum dicentang pada satu tujuan pun -- menyalakannya berarti mengirim puluhan pesan sehari ke grup sungguhan, dan itu keputusan RS (lihat "Yang masih perlu keputusan rumah sakit"). Yang bisa gagal diam sudah dipagari dari sisi lain: seluruh keputusan pembatalannya ada di fungsi murni yang diuji berikut bukti menggigitnya, query-nya terbukti atas 16.787 baris produksi, dan jalur enqueue-nya `enqueueMessage()` yang sama dipakai empat belas kelas pemicu lain.
 
 **Pembatalan SUNGGUHAN (nota dihapus lewat layar Khanza) belum pernah terjadi selama fitur ini hidup.** Yang diuji adalah perbandingannya terhadap jendela sungguhan dengan baris pantau yang disuntik -- itu membuktikan logikanya, bukan bahwa staf yang menghapus nota di Khanza benar-benar menghasilkan baris yang hilang. Yang menopang keyakinan itu terukur: 17 dari 22 nota ber-`status='Hapus'` di `riwayat_barang_medis` memang sudah tidak ada di `penjualan`.
+
+### `{keterangan}` -- kolom yang dulu terlarang, dibuka atas permintaan pemilik sistem
+
+**Bentuk datanya, diukur atas SELURUH tabel di `alca` sebelum satu baris kode pun diubah:**
+
+```
+penjualan  COUNT(*)                                  16.859
+  keterangan kosong                                   9.603
+  keterangan terisi                                   7.256
+    - di antaranya penanda '-' milik Khanza           7.172   (98,8% dari yang terisi)
+  nilai berbeda yang benar-benar terisi                  38
+  panjang terpanjang                                     40 karakter
+  baris yang mengandung baris baru                        0
+```
+
+Ke-38 nilai itu diperiksa satu per satu. Sebagian besar keterangan kerja gudang ("obat rutin", "obat luar", "obat mlm", "suntik"); **sebagian berisi NAMA ORANG dan sebagian lagi catatan klinis** -- dua hal yang seluruh modul ini ada untuk menahan. Nilainya tidak disalin ke berkas mana pun di repo ini, sesuai aturan yang sama yang melarang identitas pasien sungguhan masuk berkas uji. Kesimpulannya: tidak ada satu pun cara kode membedakan keduanya dari "obat rutin", jadi yang menahan bukan penyaring melainkan tempat ia dibaca.
+
+**Ketiga pagar, diperiksa pada `Object.keys()` baris hasilnya lewat `npm run dryrun:penjualan` terhadap produksi:**
+
+```
+kolom header yang benar-benar terbaca : nota_jual, tgl_jual, jns_jual, status, nama_petugas, nm_bangsal
+kolom rincian yang benar-benar terbaca: nota_jual, kode_brng, nama_brng, satuan, jumlah, h_jual, total
+kolom nota terpilih yang terbaca      : nota_jual, ppn, ongkir, keterangan
+PAGAR PRIVASI OK -- tidak satu pun kolom identitas pembeli terbaca
+keterangan OK -- hanya terbaca untuk nota yang benar-benar dikirim
+...
+=== REKAP HARIAN ===
+kolom terbaca: jns_jual, jml_nota, ppn, penyesuaian, jml_baris, jml_barang, subtotal
+[ok] tidak ada kolom pasien/keterangan/dosis yang terbaca
+```
+
+Pemeriksaannya **dua arah**, dan arah kedua yang gampang terlupakan: `keterangan` wajib ADA di pembacaan nota terpilih. Kolom yang diam-diam hilang dari daftar SELECT menghasilkan `{keterangan}` kosong SELAMANYA tanpa satu pun galat, dan itu tidak bisa dibedakan dari nota yang keterangannya memang kosong. Ketiga keadaan salah menyetel `process.exitCode = 1`.
+
+**Terender pada nota produksi sungguhan** (template uji, bukan template tersimpan -- template bawaan sengaja tidak memuatnya):
+
+```
+mentah="obat luar"  -> variabel="obat luar"    | Keterangan : obat luar
+mentah="obat rutin" -> variabel="obat rutin"   | Keterangan : obat rutin
+mentah="suntik"     -> variabel="suntik"       | Keterangan : suntik
+mentah="-"          -> variabel=""             | Keterangan :
+```
+
+Baris terakhir adalah buktinya sekaligus alasannya: itulah bentuk yang akan muncul pada ~99,5% nota bila `{keterangan}` dipasang di template bawaan.
+
+**Bukti MENGGIGIT, dua-duanya dengan merusak kodenya sengaja lalu memulihkan:**
+
+| Yang dirusak | Akibat |
+|---|---|
+| `keteranganNota()` tidak lagi memakai `isianSurat()` | **8 uji gagal** (`membuang penanda "belum diisi" milik Khanza: "-"`, `"--"`, `"---"`, `"0"`, `"null"`, `"undefined"`, `"n/a"`, `"  -  "`) |
+| `'keterangan'` dihapus dari `PENJUALAN_TEMPLATE_VARIABLES` | **1 uji gagal** (`diterima saat template nota penjualan disimpan`) |
+
+Keduanya dipulihkan; 19 uji `penjualan.test.ts` lolos sesudahnya.
+
+**Kenapa ujinya di `core/penjualan.test.ts` dan bukan atas `susunVarsPenjualan` langsung**: fungsi itu tinggal di worker bersama keenam `susunVars*` lain, dan worker mengimpor `@/models` sehingga memuatnya menuntut MariaDB hidup -- percobaan pertama benar-benar gagal dengan `Variabel lingkungan WA_DB_HOST wajib diisi`. Memindahkan fungsinya ke core akan memutus simetri ketujuh runner; yang dipindah karena itu cuma TURUNANNYA (`keteranganNota()`), mengikuti `hitungTotalNota()` yang sudah lebih dulu ada di sana persis dengan alasan yang sama.
+
+**Gerbang sesudah perubahan**: `tsc --noEmit` 0, `eslint` 0, **926 uji unit** (dari 907), `next build`, `verify:db` (27 tabel, tulis ke `sik` ditolak), `verify:plans` lolos berikut `FARMASI_PENJUALAN_TERPILIH p const PRIMARY rows~1` -- rencana yang sama dengan `FARMASI_PENJUALAN_ANGKA` yang digantikannya, jadi kolom tambahannya terbukti tidak mengubah apa pun.
 
 ## Rekap harian penjualan (`migrations/041`) -- dipicu WAKTU, dan sakelarnya sengaja tidak bertingkat
 
