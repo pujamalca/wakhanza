@@ -53,3 +53,48 @@ export function namaPenjamin(pngJawab: string | null | undefined): string {
   if (!teks) return '';
   return BUKAN_NAMA.has(teks.toLowerCase()) ? '' : teks;
 }
+
+/**
+ * Apakah sebuah kunjungan lolos penyaring cara bayar (migrations/048).
+ *
+ * Dipakai memutuskan apakah LAMPIRAN hasil/tagihan jadi dikirim -- bukan apakah
+ * pesannya dikirim. Pasien yang tersaring tetap menerima pemberitahuannya, cuma
+ * tanpa berkas.
+ *
+ * Berkunci pada KODE (`kd_pj`), bukan nama. Nama penjamin adalah teks yang bisa
+ * disunting staf di Khanza, dan penyaring yang berkunci padanya berhenti cocok
+ * DIAM-DIAM pada hari seseorang mengganti "BPJS Kesehatan" jadi "BPJS" -- yang
+ * muncul bukan galat melainkan pasien yang berhenti menerima lampirannya.
+ *
+ * TIGA keputusan yang menempel, dan ketiganya bisa salah ke arah yang berbeda:
+ *
+ * 1. **Daftar KOSONG = semua lolos.** Itu yang membuat migrasinya nol-perubahan:
+ *    rumah sakit yang tidak menyentuh setelan ini mendapat perilaku yang sama
+ *    persis seperti sebelum fitur ini ada. Menafsirkannya sebagai "tidak ada yang
+ *    lolos" akan mematikan lampiran yang sedang berjalan pada detik migrasinya
+ *    diterapkan.
+ *
+ * 2. **Kode yang tidak diketahui = TIDAK lolos.** Ini penyaring berbentuk
+ *    DAFTAR-IZIN, dan daftar-izin yang gagal ke arah "izinkan" bukan daftar-izin.
+ *    Kunjungan yang barisnya tidak ditemukan (`null`) masuk golongan ini; toh
+ *    jalur lampirannya akan gagal juga beberapa langkah kemudian, karena
+ *    `ambilIdentitasKunjungan()` mengembalikan null untuk kunjungan yang sama.
+ *
+ * 3. **Penanda `'-'` diperlakukan sebagai kode biasa**, bukan dikosongkan seperti
+ *    di `namaPenjamin()`. Bedanya karena pertanyaannya berbeda: di sana yang
+ *    dicari teks yang layak DIBACA pasien, di sini yang dicari kunci yang bisa
+ *    DICOCOKKAN. Akibatnya kunjungan ber-`kd_pj = '-'` tidak akan pernah lolos
+ *    begitu penyaringnya dipasang, karena `'-'` memang tidak bisa dipilih dari
+ *    daftar penjamin (`fetchPaymentOptions()` membuangnya). Terukur 2 dari 1.900
+ *    nota dalam 90 hari; keadaannya jarang, tapi ia harus disebut alih-alih
+ *    ditemukan belakangan.
+ */
+export function lolosSaringPenjamin(
+  kdPj: string | null | undefined,
+  daftarKode: readonly string[],
+): boolean {
+  if (daftarKode.length === 0) return true;
+  const kode = (kdPj ?? '').trim();
+  if (!kode) return false;
+  return daftarKode.some((k) => k.trim() === kode);
+}

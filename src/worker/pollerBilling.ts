@@ -1,7 +1,14 @@
 import { pollBillingReady, type BillingReadyRow } from '@/khanza/billing';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { getSettingNumber } from '@/models';
-import { dokumenAktif, bacaPesanDokumen, KUOTA_BAWAAN, SETTING_KUOTA } from '@/lib/dokumen';
+import {
+  dokumenAktif,
+  bacaPesanDokumen,
+  bacaCaraBayarDokumen,
+  lolosCaraBayarDokumen,
+  KUOTA_BAWAAN,
+  SETTING_KUOTA,
+} from '@/lib/dokumen';
 import { runSisipCycle } from './sisipCycle';
 import { siapkanLampiranDokumen } from './dokumenLampiran';
 import { varsBillingReady } from './triggerVars';
@@ -28,13 +35,25 @@ function kunciBilling(row: BillingReadyRow): string {
 async function opsiLampiran() {
   if (!(await dokumenAktif('nota'))) return undefined;
 
-  const [pesan, kuota] = await Promise.all([
+  const [pesan, kuota, caraBayar] = await Promise.all([
     bacaPesanDokumen('nota'),
     getSettingNumber(SETTING_KUOTA, KUOTA_BAWAAN),
+    /**
+     * Dibaca SEKALI per siklus, bukan sekali per baris. Kosong = seluruh
+     * penjamin, dan pada keadaan itu `lolosCaraBayarDokumen()` tidak menyentuh
+     * `sik` sama sekali.
+     *
+     * Nota tagihan adalah jenis yang paling mungkin dipakaikan penyaring ini:
+     * terukur 574 dari 1.900 nota dalam 90 hari milik pasien BPJS, yang
+     * tagihannya memang ditanggung penjamin -- rincian tagihan tidak menjawab
+     * pertanyaan apa pun bagi mereka.
+     */
+    bacaCaraBayarDokumen('nota'),
   ]);
 
   return {
     kuota,
+    lolosSaring: (row: BillingReadyRow) => lolosCaraBayarDokumen(row.no_rawat, caraBayar),
     buat: (row: BillingReadyRow) =>
       siapkanLampiranDokumen(
         {

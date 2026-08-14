@@ -105,6 +105,46 @@ export async function ambilIdentitasKunjungan(noRawat: string): Promise<BarisIde
   return rows[0] ?? null;
 }
 
+/**
+ * KODE penjamin satu kunjungan -- dipakai HANYA untuk memutuskan apakah
+ * lampirannya jadi dikirim (migrations/048).
+ *
+ * ==========================================================================
+ * Kenapa query TERSENDIRI, dan bukan kolom tambahan di baris pemicunya
+ * ==========================================================================
+ *
+ * `{cara_bayar}` sudah ada di ketujuh pemicu pasien sejak lama, dan query
+ * pemicunya sengaja mengambil `pj.png_jawab` SAJA -- `r.kd_pj` cuma jadi kondisi
+ * join dan tidak pernah ikut keluar dari SQL. Alasannya penegakan: sekali kodenya
+ * tidak ada di tipe barisnya, merender "A02" ke pasien bukan terlarang melainkan
+ * MUSTAHIL.
+ *
+ * Penyaring ini butuh KODE, bukan nama -- nama penjamin adalah teks yang bisa
+ * disunting staf di Khanza, dan penyaring yang berkunci padanya berhenti cocok
+ * diam-diam pada hari seseorang mengganti "BPJS Kesehatan" jadi "BPJS". Yang
+ * muncul bukan galat melainkan pasien yang berhenti menerima lampirannya.
+ *
+ * Menambahkan `kd_pj` ke baris pemicu akan menjawab kebutuhan itu sekaligus
+ * MEMBATALKAN jaminan di atas. Query kecil tersendiri menjawab keduanya: kodenya
+ * dibaca di jalur lampiran, tidak pernah menyentuh `TriggerVars`, dan tidak
+ * pernah punya jalan menuju `renderTemplate`.
+ *
+ * Dijalankan HANYA saat daftar penyaringnya terisi (lihat
+ * `lolosCaraBayarDokumen()`), jadi pada setelan bawaan ia nol query tambahan.
+ * `eq_ref PRIMARY` -- `no_rawat` adalah PRIMARY KEY `reg_periksa`.
+ */
+const SQL_KD_PJ = `
+  SELECT r.kd_pj
+  FROM reg_periksa r
+  WHERE r.no_rawat = :noRawat
+  LIMIT 1
+`;
+
+export async function ambilKdPjKunjungan(noRawat: string): Promise<string | null> {
+  const rows = await sikSelect<{ kd_pj: string | null }>(SQL_KD_PJ, { noRawat });
+  return rows[0]?.kd_pj ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // HASIL LABORATORIUM
 // ---------------------------------------------------------------------------
@@ -422,6 +462,7 @@ export async function ambilContohKejadian(jenis: 'lab' | 'radiologi' | 'nota'): 
 const CONTOH = { noRawat: '2026/01/01/000001', tglPeriksa: '2026-01-01' };
 
 registerPlanCheck({ name: 'DOKUMEN_IDENTITAS', sql: SQL_IDENTITAS, replacements: CONTOH });
+registerPlanCheck({ name: 'DOKUMEN_KD_PJ', sql: SQL_KD_PJ, replacements: CONTOH });
 registerPlanCheck({ name: 'DOKUMEN_HASIL_LAB', sql: SQL_HASIL_LAB, replacements: CONTOH });
 registerPlanCheck({ name: 'DOKUMEN_HASIL_RADIOLOGI', sql: SQL_HASIL_RADIOLOGI, replacements: CONTOH });
 registerPlanCheck({ name: 'DOKUMEN_PERIKSA_RADIOLOGI', sql: SQL_PEMERIKSAAN_RADIOLOGI, replacements: CONTOH });

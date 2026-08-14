@@ -26,6 +26,8 @@ import {
   SETTING_AUTO_LOOKBACK,
   SETTING_AUTO_KUOTA,
 } from '@/lib/surat';
+import { SETTING_CARA_BAYAR } from '@/lib/dokumen';
+import { fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { htmlKePdf } from '@/lib/pdf';
 import { renderTemplate, findUnknownVariables } from '@/core/template';
 import type { JenisDokumen } from '@/core/dokumenDoc';
@@ -478,4 +480,57 @@ export async function simpanTeksDokumenAction(_prev: HasilForm, form: FormData):
   );
   segarkan();
   return { sukses: 'Teks dokumen disimpan.' };
+}
+
+/**
+ * Menyimpan penyaring CARA BAYAR untuk satu jenis lampiran (migrations/048).
+ *
+ * Daftar KOSONG = seluruh penjamin, dan itu keadaan bawaannya. Karena itu
+ * mengosongkan pilihan adalah tindakan yang SAH dan bukan galat -- ia berarti
+ * "kembalikan ke semua", bukan "jangan kirim ke siapa pun".
+ *
+ * Kode yang tidak ada di katalog `penjab` DITOLAK alih-alih disaring diam-diam.
+ * Daftar-izin yang memuat kode yang tidak pernah cocok adalah daftar yang
+ * kelihatan terisi sementara pasiennya tidak pernah menerima apa pun -- kegagalan
+ * senyap yang persis sama jenisnya dengan menyaring lewat NAMA penjamin.
+ */
+export async function simpanCaraBayarDokumenAction(
+  _prev: HasilForm,
+  form: FormData,
+): Promise<HasilForm> {
+  const { session, response } = await requireRole('admin');
+  if (response) return { error: 'Tidak berwenang.' };
+
+  const jenis = String(form.get('jenis') ?? '') as JenisDokumen;
+  if (!(jenis in SETTING_CARA_BAYAR)) return { error: 'Jenis dokumen tidak dikenal.' };
+
+  const dipilih = form.getAll('cara_bayar').map((v) => String(v).trim()).filter(Boolean);
+
+  const katalog = await fetchPaymentOptions();
+  const sah = new Set(katalog.map((o) => o.kode));
+  const asing = dipilih.filter((k) => !sah.has(k));
+  if (asing.length > 0) {
+    return { error: `Kode penjamin tidak dikenal: ${asing.join(', ')}. Muat ulang halaman lalu pilih dari daftar.` };
+  }
+
+  // Diurutkan supaya nilai tersimpannya tidak berubah hanya karena urutan
+  // centang berbeda -- riwayat `audit_log` yang berubah tanpa perubahan arti
+  // membuat penelusuran berikutnya lebih sulit, bukan lebih mudah.
+  const unik = [...new Set(dipilih)].sort();
+  await setSetting(SETTING_CARA_BAYAR[jenis], JSON.stringify(unik));
+  await logAudit(
+    session!.user.username,
+    'dokumen_cara_bayar',
+    SETTING_CARA_BAYAR[jenis],
+    unik.length === 0 ? 'seluruh penjamin' : unik.join(', '),
+  );
+  segarkan();
+
+  const nama = (kode: string) => katalog.find((o) => o.kode === kode)?.nama ?? kode;
+  return {
+    sukses:
+      unik.length === 0
+        ? 'Penyaring dikosongkan — lampiran dikirim untuk SELURUH cara bayar.'
+        : `Lampiran hanya dikirim untuk: ${unik.map(nama).join(', ')}.`,
+  };
 }

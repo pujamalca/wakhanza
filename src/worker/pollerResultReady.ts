@@ -1,7 +1,14 @@
 import { pollResultReady, type ResultReadyRow, type PenunjangJenis } from '@/khanza/penunjang';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { getSettingNumber } from '@/models';
-import { dokumenAktif, bacaPesanDokumen, KUOTA_BAWAAN, SETTING_KUOTA } from '@/lib/dokumen';
+import {
+  dokumenAktif,
+  bacaPesanDokumen,
+  bacaCaraBayarDokumen,
+  lolosCaraBayarDokumen,
+  KUOTA_BAWAAN,
+  SETTING_KUOTA,
+} from '@/lib/dokumen';
 import { runSisipCycle } from './sisipCycle';
 import { siapkanLampiranDokumen } from './dokumenLampiran';
 import { varsResultReady } from './triggerVars';
@@ -38,13 +45,25 @@ async function opsiLampiran(jenis: PenunjangJenis) {
   const jenisDokumen = jenis === 'lab' ? 'lab' : 'radiologi';
   if (!(await dokumenAktif(jenisDokumen))) return undefined;
 
-  const [pesan, kuota] = await Promise.all([
+  const [pesan, kuota, caraBayar] = await Promise.all([
     bacaPesanDokumen(jenisDokumen),
     getSettingNumber(SETTING_KUOTA, KUOTA_BAWAAN),
+    /**
+     * Penyaring cara bayar (migrations/048), kosong = seluruh penjamin.
+     *
+     * Disediakan untuk hasil penunjang dengan alasan KESERAGAMAN, bukan karena
+     * kebutuhannya terukur seperti pada nota: hasil laboratorium sama pentingnya
+     * bagi pasien mana pun, sementara rincian tagihan tidak berarti apa-apa bagi
+     * pasien yang tagihannya ditanggung penjamin. Ketiga sakelar di tab yang sama
+     * sudah per jenis, jadi penyaring yang cuma ada di salah satunya justru yang
+     * akan membingungkan.
+     */
+    bacaCaraBayarDokumen(jenisDokumen),
   ]);
 
   return {
     kuota,
+    lolosSaring: (row: ResultReadyRow) => lolosCaraBayarDokumen(row.no_rawat, caraBayar),
     buat: (row: ResultReadyRow) =>
       siapkanLampiranDokumen(
         { jenis: jenisDokumen, noRawat: row.no_rawat, tglPeriksa: row.tgl_periksa },

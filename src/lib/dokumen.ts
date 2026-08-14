@@ -1,4 +1,5 @@
-import { getSetting, getSettingBool } from '@/models';
+import { getSetting, getSettingBool, getSettingJson } from '@/models';
+import { lolosSaringPenjamin } from '@/core/penjamin';
 import { bacaKopSurat, rakitCatatanKaki, buatQrAsalUsul } from '@/lib/cetak';
 import {
   type IsiDokumen,
@@ -17,6 +18,7 @@ import {
   ambilHasilRadiologi,
   ambilNota,
   ambilContohKejadian,
+  ambilKdPjKunjungan,
 } from '@/khanza/dokumenHasil';
 
 /**
@@ -45,6 +47,27 @@ export const SETTING_PESAN: Record<JenisDokumen, string> = {
   lab: 'dokumen.pesan_lab',
   radiologi: 'dokumen.pesan_rad',
   nota: 'dokumen.pesan_nota',
+};
+
+/**
+ * Daftar KODE penjamin yang boleh menerima lampiran, PER JENIS dokumen
+ * (migrations/048). JSON array `kd_pj`; KOSONG = seluruh penjamin.
+ *
+ * Per jenis dan bukan satu untuk seluruh tab, dan itu bukan kerapian melainkan
+ * mengikuti pertanyaan yang berbeda-beda. Terukur 90 hari di instalasi ini:
+ * nota tagihan 1.324 UMUM berbanding 574 BPJS, sementara hasil lab 11 baris yang
+ * SELURUHNYA BPJS. Sebuah nota tagihan tidak berarti apa-apa bagi pasien yang
+ * tagihannya ditanggung penjamin; hasil laboratorium sama pentingnya bagi
+ * siapa pun. Satu penyaring untuk ketiganya memaksa kedua pertanyaan itu dijawab
+ * dengan satu jawaban.
+ *
+ * Ketiga sakelar `dokumen.*_enabled` di tab yang sama sudah per jenis, jadi
+ * penyaring tunggal akan jadi satu-satunya setelan di sana yang tidak.
+ */
+export const SETTING_CARA_BAYAR: Record<JenisDokumen, string> = {
+  lab: 'dokumen.lab_cara_bayar',
+  radiologi: 'dokumen.rad_cara_bayar',
+  nota: 'dokumen.nota_cara_bayar',
 };
 
 export const SETTING_RINCIAN_OBAT = 'dokumen.nota_rincian_obat';
@@ -81,6 +104,35 @@ export async function dokumenAktif(jenis: JenisDokumen): Promise<boolean> {
 
 export async function bacaPesanDokumen(jenis: JenisDokumen): Promise<string> {
   return (await getSetting(SETTING_PESAN[jenis]))?.trim() || PESAN_BAWAAN_DOKUMEN[jenis];
+}
+
+/**
+ * Daftar kode penjamin yang boleh menerima lampiran jenis ini. Kosong = semua.
+ *
+ * Dibaca SEKALI per siklus oleh pollernya, bukan sekali per baris -- bentuk yang
+ * sama dengan `bacaPesanDokumen()` dan kuotanya.
+ */
+export async function bacaCaraBayarDokumen(jenis: JenisDokumen): Promise<string[]> {
+  const daftar = await getSettingJson<string[]>(SETTING_CARA_BAYAR[jenis], []);
+  return Array.isArray(daftar) ? daftar.filter((k) => typeof k === 'string' && k.trim() !== '') : [];
+}
+
+/**
+ * Apakah lampiran untuk satu kunjungan lolos penyaring cara bayar.
+ *
+ * `sik` disentuh HANYA bila daftarnya terisi -- jadi pada setelan bawaan
+ * (kosong) ia nol query tambahan, dan migrasinya benar-benar nol-perubahan.
+ * Urutan itu mengikat: memeriksa daftar SESUDAH membaca database berarti setiap
+ * rumah sakit yang tidak memakai fitur ini tetap membayar satu query per
+ * kejadian, selamanya.
+ *
+ * Keputusannya sendiri ada di `core/penjamin.ts` sebagai fungsi MURNI, berikut
+ * ketiga kasus pinggirnya (daftar kosong, kode tak dikenal, penanda `'-'`) --
+ * di sanalah ia bisa dipatok uji tanpa MariaDB hidup.
+ */
+export async function lolosCaraBayarDokumen(noRawat: string, daftarKode: readonly string[]): Promise<boolean> {
+  if (daftarKode.length === 0) return true;
+  return lolosSaringPenjamin(await ambilKdPjKunjungan(noRawat), daftarKode);
 }
 
 /**

@@ -67,6 +67,25 @@ export interface SisipCycleParams<TRow> {
      */
     kuota: number;
     buat: (row: TRow) => Promise<LampiranDokumen | null>;
+    /**
+     * Penyaring cara bayar (migrations/048). `false` = barisnya SENGAJA tidak
+     * dilampiri; absen = tidak ada penyaring sama sekali.
+     *
+     * TERPISAH dari `buat()` yang juga bisa mengembalikan null, dan pemisahan itu
+     * bukan kerapian: keduanya menghasilkan pesan tanpa lampiran, tapi yang satu
+     * KEPUTUSAN rumah sakit dan yang satu KEGAGALAN. Dilebur, satu-satunya angka
+     * yang terlihat di log adalah "lampirannya tidak jadi" untuk dua sebab yang
+     * menuntut tindakan berlawanan -- yang pertama tidak perlu ditindaklanjuti
+     * siapa pun, yang kedua berarti ada yang rusak.
+     *
+     * Diperiksa SEBELUM kuota, dan urutan itu mengikat. Baris yang tersaring
+     * tidak pernah meluncurkan Chromium, jadi ia tidak boleh memakan jatah yang
+     * ada justru untuk membatasi peluncuran itu -- terbalik, satu jam sibuk penuh
+     * pasien BPJS cukup untuk menahan lampiran pasien umum di belakangnya tanpa
+     * sebab yang terlihat. Pelajaran yang sama sudah dibayar di
+     * `core/suratOtomatis.ts`, tempat kuota sengaja diperiksa paling akhir.
+     */
+    lolosSaring?: (row: TRow) => Promise<boolean>;
   };
 }
 
@@ -117,6 +136,7 @@ export async function runSisipCycle<TRow>(params: SisipCycleParams<TRow>): Promi
 
   let dilampirkan = 0;
   let kuotaHabis = 0;
+  let disaring = 0;
 
   for (const row of rows) {
     const eventAt = params.getEventAt(row);
@@ -126,7 +146,12 @@ export async function runSisipCycle<TRow>(params: SisipCycleParams<TRow>): Promi
 
     let lampiranPasien: LampiranDokumen | null = null;
     if (params.lampiran && kunciBaru?.has(idempotencyKey)) {
-      if (dilampirkan < params.lampiran.kuota) {
+      // Penyaring lebih dulu, kuota sesudahnya -- lihat alasannya di
+      // `lolosSaring`. Baris yang tersaring tidak meluncurkan Chromium, jadi ia
+      // tidak boleh memakan jatah yang ada untuk membatasi peluncuran itu.
+      if (params.lampiran.lolosSaring && !(await params.lampiran.lolosSaring(row))) {
+        disaring++;
+      } else if (dilampirkan < params.lampiran.kuota) {
         lampiranPasien = await params.lampiran.buat(row);
         if (lampiranPasien) dilampirkan++;
       } else {
@@ -155,7 +180,16 @@ export async function runSisipCycle<TRow>(params: SisipCycleParams<TRow>): Promi
       triggerCode: params.triggerCode,
       cursorKey,
       rowsSeen: rows.length,
-      ...(params.lampiran ? { dilampirkan, ...(kuotaHabis ? { lampiranKuotaHabis: kuotaHabis } : {}) } : {}),
+      ...(params.lampiran
+        ? {
+            dilampirkan,
+            ...(kuotaHabis ? { lampiranKuotaHabis: kuotaHabis } : {}),
+            // Disebut supaya "kenapa pasien ini tidak dapat berkasnya" punya
+            // jawaban di log. Penyaring yang bekerja diam-diam tidak bisa
+            // dibedakan dari penyaring yang salah setel.
+            ...(disaring ? { lampiranDisaringCaraBayar: disaring } : {}),
+          }
+        : {}),
     },
     'siklus polling selesai',
   );

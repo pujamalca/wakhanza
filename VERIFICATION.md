@@ -6049,3 +6049,185 @@ pernah dijalankan.
 
 Jangan membalik klaim ini: nol baris di sini BUKAN bukti bahwa jalur terjadwalnya
 tidak bekerja.
+
+---
+
+### Penyaring cara bayar untuk lampiran hasil & tagihan (`migrations/048`)
+
+Judulnya sama persis dengan seksi di `CLAUDE.md`; ini buktinya.
+
+#### Angka yang melahirkan fiturnya
+
+Terukur atas 90 hari di database produksi:
+
+```
+NOTA (nota_jalan)          UMUM 1.324 · BPJS Kesehatan 574 · tanpa penjamin 2
+LAB  (periksa_lab)         BPJS Kesehatan 11 · UMUM 0
+RAD  (periksa_radiologi)   tabelnya memang kosong
+```
+
+Itu yang membuat penyaringnya **per jenis** dan bukan satu untuk seluruh tab:
+rincian tagihan tidak menjawab apa pun bagi pasien yang tagihannya ditanggung
+penjamin (30% dari seluruh nota), sementara hasil laboratorium sama pentingnya
+bagi siapa pun. Satu penyaring untuk ketiganya memaksa dua pertanyaan berbeda
+dijawab dengan satu jawaban.
+
+Katalog `penjab`:
+
+```
+25 baris, 2 aktif
+  A01 UMUM             status 1
+  A02 BPJS Kesehatan   status 1
+  A04..B00             status 0   -- belasan baris "Asuransi ..."
+  -   -                status 0   -- penanda "tidak diisi" milik Khanza
+```
+
+Daftar pilihannya menampilkan SELURUHNYA kecuali `'-'` (`fetchPaymentOptions()`
+sudah membuangnya sejak dulu). Menyaring ke yang aktif saja akan menyembunyikan
+belasan baris asuransi, dan penyaring ini dicocokkan terhadap kunjungan yang
+SUDAH terjadi -- asuransi yang dinonaktifkan bulan lalu tetap penjamin kunjungan
+bulan lalu.
+
+#### Bentuknya: penyaring LAMPIRAN, bukan penyaring pemicu
+
+Yang tersaring tetap menerima pemberitahuannya, cuma tanpa berkas. Karena itu ia
+duduk di `lolosSaring` pada `runSisipCycle`, bukan di query poller -- menyaring di
+SQL akan membuat pasiennya berhenti diberi tahu sama sekali.
+
+`lolosSaring` sengaja TERPISAH dari `buat()` yang juga bisa mengembalikan null,
+dan log siklusnya menyebut `lampiranDisaringCaraBayar` tersendiri: keduanya
+menghasilkan pesan tanpa lampiran, tapi yang satu KEPUTUSAN rumah sakit dan yang
+satu KEGAGALAN.
+
+Urutannya **penyaring dulu, kuota sesudahnya**. Baris yang tersaring tidak
+meluncurkan Chromium, jadi ia tidak boleh memakan jatah yang ada justru untuk
+membatasi peluncuran itu -- terbalik, satu jam sibuk penuh pasien BPJS cukup untuk
+menahan lampiran pasien umum di belakangnya tanpa sebab yang terlihat.
+
+#### `kd_pj` TETAP tidak masuk baris pemicu
+
+Penyaringnya berkunci pada KODE, bukan nama: `penjab.png_jawab` bisa disunting
+staf, dan penyaring yang berkunci padanya berhenti cocok DIAM-DIAM pada hari
+seseorang mengganti "BPJS Kesehatan" jadi "BPJS".
+
+Tapi menambahkan `kd_pj` ke baris pemicu akan membatalkan jaminan yang berlaku
+sejak `{cara_bayar}` ada. Jalan keluarnya query kecil tersendiri di jalur
+lampiran, dan rencananya terukur lebih baik daripada yang ditargetkan:
+
+```
+[ok] DOKUMEN_KD_PJ        r const PRIMARY  rows~1
+```
+
+`const`, bukan sekadar `eq_ref`. Dan ia **hanya dijalankan bila daftarnya
+terisi** -- pada setelan bawaan (`[]`) nol query tambahan, sehingga migrasinya
+benar-benar nol-perubahan.
+
+#### Keputusan murninya, dan ketiga kasus pinggirnya
+
+`lolosSaringPenjamin()` tinggal di `core/penjamin.ts` -- modul yang memang sudah
+memegang penurunan penjamin, bukan modul baru. Tujuh uji ditambahkan (total suite
+1.002 -> 1.009), dan yang dijaga bukan pencocokannya melainkan ketiga kasus
+pinggirnya, yang bisa salah ke arah yang BERBEDA:
+
+```
+daftar kosong      salah -> lampiran yang sedang berjalan mati serentak
+kode tak dikenal   salah -> daftar-izin yang meloloskan yang tidak diizinkan
+penanda '-'        salah -> perilakunya berbeda dari namaPenjamin() tanpa sebab
+```
+
+Keduanya dibuktikan MENGGIGIT:
+
+```
+=== (1) daftar kosong dibalik jadi 'tidak ada yang lolos' ===
+× daftar KOSONG meloloskan semuanya -- itu yang membuat migrasinya nol-perubahan
+× penanda '-' tidak pernah lolos saat penyaringnya dipasang
+Tests: 2 failed, 13 passed, 15 total
+
+=== (2) kode tak dikenal dibalik jadi 'lolos' ===
+× kode yang TIDAK diketahui ditolak, bukan diloloskan
+Tests: 1 failed, 14 passed, 15 total
+
+=== dikembalikan ===
+Tests: 15 passed, 15 total
+```
+
+Satu uji khusus menjaga pencocokannya PERSIS dan bukan sebagian: kode di katalog
+ini berbagi awalan (`A01`, `A02`, `A04`, ... `A58`), jadi pencocokan sebagian akan
+meloloskan penjamin yang sama sekali lain.
+
+#### Jalur lengkapnya, diuji terhadap data produksi
+
+Query + keputusan dijalankan atas kunjungan sungguhan Juli 2026 (`no_rawat`
+disamarkan; tidak menulis dan tidak mengirim apa pun):
+
+```
+setelan tersimpan sekarang:
+  lab        -> [] (semua penjamin)
+  radiologi  -> [] (semua penjamin)
+  nota       -> [] (semua penjamin)
+
+kunjungan contoh + keputusan penyaring:
+  2026/07/…001  kd_pj=A01  terbaca=A01   []=true  [A01]=true   [A01,A02]=true
+  2026/07/…008  kd_pj=A02  terbaca=A02   []=true  [A01]=false  [A01,A02]=true
+
+  kunjungan yang TIDAK ADA -> [A01]=false  (daftar-izin gagal TERTUTUP)
+  kunjungan yang TIDAK ADA -> []=true      (nol query, nol perubahan)
+```
+
+Baris terakhir yang paling penting: daftar-izin yang gagal ke arah "izinkan"
+bukan daftar-izin. Kunjungan yang barisnya tidak ditemukan ditolak -- dan itu
+konsisten dengan jalur lampirannya, yang beberapa langkah kemudian juga gagal
+karena `ambilIdentitasKunjungan()` mengembalikan null untuk kunjungan yang sama.
+
+#### Aksi simpan menolak kode asing, bukan menyaringnya diam-diam
+
+Daftar-izin yang memuat kode yang tidak pernah cocok adalah daftar yang kelihatan
+terisi sementara pasiennya tidak pernah menerima apa pun -- kegagalan senyap yang
+persis sama jenisnya dengan menyaring lewat NAMA penjamin. Kodenya divalidasi
+terhadap katalog `penjab` yang sungguhan, lalu diurutkan sebelum disimpan supaya
+nilai tersimpannya tidak berubah hanya karena urutan centang berbeda.
+
+Mengosongkan pilihan adalah tindakan yang SAH dan bukan galat: ia berarti
+"kembalikan ke semua penjamin", bukan "jangan kirim ke siapa pun".
+
+#### Kelima gerbang
+
+```
+tsc --noEmit            0 galat
+eslint .                0 galat
+jest                    56 suite, 1009 uji lolos (dari 1002)
+verify:db               sik tulis DITOLAK; audit_log DELETE/UPDATE DITOLAK
+verify:plans            lolos; DOKUMEN_KD_PJ const PRIMARY rows~1
+next build              lolos (Compiled successfully in 7,4s)
+```
+
+#### Pemasangan
+
+`npm run migrate` menerapkan `048_dokumen_cara_bayar.sql` (1 migrasi); ketiga
+kunci tersimpan `[]`. `pm2 restart wakhanza-web` dijalankan dan sehat;
+`GET /administrasi?tab=hasil` menjawab **307** ke `/login` (gerbang admin bekerja;
+halaman yang rusak akan menjawab 500). Penanda fiturnya ada di build:
+
+```
+grep -rlE "Penyaring cara bayar" .next/server/chunks
+  .next/server/chunks/ssr/src_app_(dashboard)_administrasi_*.js
+```
+
+**`wakhanza-worker` SENGAJA belum dimulai ulang.** Ketiga sakelar
+`dokumen.*_enabled` terukur masih `0` dan ketiga penyaringnya `[]`, jadi perilaku
+kode lama dan baru identik -- tidak ada yang perlu dikejar hari ini. Ditambah,
+restart terakhirnya baru ~40 menit sebelumnya (untuk migrations/047), dan dua
+restart berdekatan adalah persis yang pernah menjatuhkan worker ke crash loop 29
+kali.
+
+**Tapi sebelum sakelar dokumen pertama dinyalakan, worker HARUS dimulai ulang** --
+kalau tidak, penyaringnya tersimpan di dasbor sementara worker tidak pernah
+membacanya, dan lampiran tetap berangkat ke seluruh penjamin. Gagal DIAM, tanpa
+satu pun galat. Pelajaran yang sama sudah ditulis untuk migrations/038.
+
+**Yang BELUM terbukti**: penyaringnya belum pernah benar-benar menahan sebuah
+lampiran di produksi, karena ketiga sakelar dokumennya masih mati. Yang sudah
+terbukti adalah seluruh rantai di bawahnya: query `kd_pj`, keputusan murninya
+berikut ketiga kasus pinggirnya, jalur `lolosCaraBayarDokumen()` terhadap
+kunjungan sungguhan, dan rencana query-nya.
+

@@ -7,6 +7,7 @@ import {
   hitungSuratSakit,
   hitungKunjunganSehat,
 } from '@/khanza/suratPasien';
+import { fetchPaymentOptions } from '@/khanza/pasienSegment';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN, type Paginasi } from '@/core/pagination';
 import { normalizePhone, type PhoneRejectReason } from '@/core/phone';
 import { formatTanggalSurat, isianSurat } from '@/core/suratDoc';
@@ -29,6 +30,7 @@ import {
   dokumenAktif,
   rincianObatAktif,
   contohPermintaanDokumen,
+  bacaCaraBayarDokumen,
   SETTING_PESAN as SETTING_PESAN_DOKUMEN,
   SETTING_CATATAN_KAKI as SETTING_CATATAN_KAKI_DOKUMEN,
   PESAN_BAWAAN as PESAN_BAWAAN_DOKUMEN,
@@ -215,7 +217,8 @@ export default async function AdministrasiPage({
     tab === 'hasil'
       ? await (async () => {
           const jenis = ['lab', 'radiologi', 'nota'] as const;
-          const [aktifPerJenis, contohPerJenis, rincianObat, pemicu, teks] = await Promise.all([
+          const [aktifPerJenis, contohPerJenis, rincianObat, pemicu, teks, opsiCaraBayar, caraBayarPerJenis] =
+            await Promise.all([
             Promise.all(jenis.map((j) => dokumenAktif(j))),
             Promise.all(jenis.map((j) => contohPermintaanDokumen(j))),
             rincianObatAktif(),
@@ -226,6 +229,22 @@ export default async function AdministrasiPage({
               getSetting(SETTING_PESAN_DOKUMEN.nota),
               getSetting(SETTING_CATATAN_KAKI_DOKUMEN),
             ]),
+            /**
+             * Daftar penjamin untuk pemilihnya -- SELURUHNYA, termasuk yang
+             * `penjab.status = 0`.
+             *
+             * Menyaringnya ke yang aktif saja terlihat lebih rapi dan salah:
+             * penyaring ini dicocokkan terhadap kunjungan yang SUDAH terjadi,
+             * jadi asuransi yang dinonaktifkan bulan lalu tetap penjamin
+             * kunjungan bulan lalu. Menghilangkannya dari pilihan berarti
+             * pasiennya tidak akan pernah bisa dimasukkan ke daftar. Alasan yang
+             * sama sudah ditulis di `core/penjamin.ts`.
+             *
+             * Terukur di sini: 25 baris, hanya DUA yang aktif -- jadi menyaring
+             * per status akan menyembunyikan belasan baris "Asuransi ...".
+             */
+            fetchPaymentOptions(),
+            Promise.all(jenis.map((j) => bacaCaraBayarDokumen(j))),
           ]);
           const pemicuAktif = new Set(pemicu.filter((t) => t.isActive).map((t) => t.triggerCode));
           return {
@@ -239,6 +258,11 @@ export default async function AdministrasiPage({
             >,
             rincianObat,
             pemicuAktif,
+            opsiCaraBayar,
+            caraBayar: Object.fromEntries(jenis.map((j, i) => [j, caraBayarPerJenis[i]!])) as Record<
+              (typeof jenis)[number],
+              string[]
+            >,
             pesanLab: teks[0] ?? PESAN_BAWAAN_DOKUMEN.lab,
             pesanRad: teks[1] ?? PESAN_BAWAAN_DOKUMEN.radiologi,
             pesanNota: teks[2] ?? PESAN_BAWAAN_DOKUMEN.nota,
@@ -506,18 +530,24 @@ export default async function AdministrasiPage({
             aktif={dok.aktif.lab}
             pemicuAktif={dok.pemicuAktif.has(PEMICU_DOKUMEN.lab)}
             adaContoh={dok.adaContoh.lab}
+            opsiCaraBayar={dok.opsiCaraBayar}
+            caraBayarTerpilih={dok.caraBayar.lab}
           />
           <DokumenSwitch
             jenis="radiologi"
             aktif={dok.aktif.radiologi}
             pemicuAktif={dok.pemicuAktif.has(PEMICU_DOKUMEN.radiologi)}
             adaContoh={dok.adaContoh.radiologi}
+            opsiCaraBayar={dok.opsiCaraBayar}
+            caraBayarTerpilih={dok.caraBayar.radiologi}
           />
           <DokumenSwitch
             jenis="nota"
             aktif={dok.aktif.nota}
             pemicuAktif={dok.pemicuAktif.has(PEMICU_DOKUMEN.nota)}
             adaContoh={dok.adaContoh.nota}
+            opsiCaraBayar={dok.opsiCaraBayar}
+            caraBayarTerpilih={dok.caraBayar.nota}
           />
           <RincianObatSwitch aktif={dok.rincianObat} notaAktif={dok.aktif.nota} />
 

@@ -1,9 +1,25 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
-import { Button, Card, cardClassName, Callout, Modal, MessageEditor, Petunjuk, Textarea } from '@/components/ui';
+import {
+  Button,
+  Card,
+  cardClassName,
+  Callout,
+  CheckboxList,
+  Modal,
+  MessageEditor,
+  Petunjuk,
+  Textarea,
+} from '@/components/ui';
 import type { JenisDokumen } from '@/core/dokumenDoc';
-import { toggleDokumenAction, toggleRincianObatAction, simpanTeksDokumenAction, type HasilForm } from './actions';
+import {
+  toggleDokumenAction,
+  toggleRincianObatAction,
+  simpanTeksDokumenAction,
+  simpanCaraBayarDokumenAction,
+  type HasilForm,
+} from './actions';
 
 const VARIABEL = ['nama_pasien', 'no_rm', 'nama_rs', 'alamat_rs', 'kontak_rs'] as const;
 
@@ -112,17 +128,103 @@ function TombolPratinjau({ jenis, adaContoh }: { jenis: JenisDokumen; adaContoh:
   );
 }
 
+/**
+ * Penyaring CARA BAYAR untuk satu jenis lampiran (migrations/048).
+ *
+ * Dilipat lewat `<details>` asli dan TERTUTUP secara bawaan, berbeda dari
+ * peringatan di atasnya yang sengaja terbentang. Bedanya mengikuti aturan empat
+ * tingkat prosa: peringatan itu PAGAR -- harus dibaca sebelum sakelarnya
+ * dinyalakan; yang ini penyetelan lanjutan yang keadaan bawaannya sudah benar
+ * untuk sebagian besar rumah sakit.
+ *
+ * Judulnya karena itu WAJIB memuat keadaan yang sedang berlaku, bukan cuma nama
+ * setelannya: `<summary>` adalah satu-satunya bagian yang selalu terlihat, dan
+ * penyaring aktif yang tersembunyi di balik kata "Penyaring cara bayar" adalah
+ * persis bentuk yang membuat "kenapa pasien ini tidak dapat berkasnya" tidak
+ * terjawab dari layar.
+ */
+function PenyaringCaraBayar({
+  jenis,
+  opsi,
+  terpilih,
+}: {
+  jenis: JenisDokumen;
+  opsi: { kode: string; nama: string }[];
+  terpilih: string[];
+}) {
+  const [hasil, aksi, pending] = useActionState(simpanCaraBayarDokumenAction, {} as HasilForm);
+  const aktifkanPenyaring = terpilih.length > 0;
+
+  return (
+    <details className="mt-3 rounded-md border border-border/60 p-3" open={aktifkanPenyaring}>
+      <summary className="cursor-pointer list-item text-sm font-medium">
+        Cara bayar{' '}
+        <span className="font-normal text-muted-foreground">
+          {aktifkanPenyaring
+            ? `— dibatasi ${terpilih.length} penjamin`
+            : '— semua penjamin (tidak dibatasi)'}
+        </span>
+      </summary>
+
+      <form action={aksi} className="mt-3">
+        <input type="hidden" name="jenis" value={jenis} />
+
+        <p className="mb-2 flex items-start gap-1 text-xs text-muted-foreground">
+          <span>
+            Kosongkan semua = lampiran dikirim untuk <span className="font-medium text-foreground">seluruh</span> cara
+            bayar. Yang tersaring <span className="font-medium text-foreground">tetap menerima pesannya</span>, cuma
+            tanpa berkas.
+          </span>
+          <Petunjuk untuk={`Penyaring cara bayar ${JUDUL[jenis]}`}>
+            Ini penyaring <span className="font-medium text-foreground">LAMPIRAN</span>, bukan penyaring
+            pemberitahuan. Pasien yang penjaminnya di luar daftar tetap menerima kabar bahwa hasil/tagihannya sudah
+            terbit — kalimat yang memang sudah berdiri sendiri sejak sebelum fitur lampiran ada.
+            <br />
+            <br />
+            Daftar di bawah memuat <span className="font-medium text-foreground">seluruh</span> penjamin di Khanza,
+            termasuk yang sudah dinonaktifkan. Itu disengaja: penyaringnya dicocokkan terhadap kunjungan yang SUDAH
+            terjadi, jadi asuransi yang dinonaktifkan bulan lalu tetap penjamin kunjungan bulan lalu.
+            <br />
+            <br />
+            Kunjungan yang penjaminnya <span className="font-medium text-foreground">belum diisi</span> petugas tidak
+            akan pernah lolos begitu penyaring ini dipasang — penanda kosong Khanza tidak ada di daftar pilihan.
+            Terukur 2 dari 1.900 nota dalam 90 hari.
+          </Petunjuk>
+        </p>
+
+        <CheckboxList
+          name="cara_bayar"
+          options={opsi}
+          defaultSelected={terpilih}
+          searchPlaceholder="Cari penjamin..."
+        />
+
+        {hasil.sukses && <p className="mt-2 text-xs text-success">{hasil.sukses}</p>}
+        {hasil.error && <p className="mt-2 text-xs text-destructive">{hasil.error}</p>}
+
+        <Button type="submit" variant="secondary" size="sm" className="mt-3" disabled={pending}>
+          {pending ? 'Menyimpan...' : 'Simpan penyaring'}
+        </Button>
+      </form>
+    </details>
+  );
+}
+
 export function DokumenSwitch({
   jenis,
   aktif,
   pemicuAktif,
   adaContoh,
+  opsiCaraBayar,
+  caraBayarTerpilih,
 }: {
   jenis: JenisDokumen;
   aktif: boolean;
   /** `template.is_active` pemicunya -- yang sebenarnya menahan seluruhnya. */
   pemicuAktif: boolean;
   adaContoh: boolean;
+  opsiCaraBayar: { kode: string; nama: string }[];
+  caraBayarTerpilih: string[];
 }) {
   const [pending, startTransition] = useTransition();
   const [pesan, setPesan] = useState<HasilForm | null>(null);
@@ -166,6 +268,11 @@ export function DokumenSwitch({
       )}
 
       <TombolPratinjau jenis={jenis} adaContoh={adaContoh} />
+
+      {/* Ditaruh DI DALAM Card yang sama, bukan sebagai kartu tersendiri:
+          penyaring ini melayani satu jenis dokumen, dan menaruhnya terpisah
+          membuat pasangannya harus diingat alih-alih terlihat. */}
+      <PenyaringCaraBayar jenis={jenis} opsi={opsiCaraBayar} terpilih={caraBayarTerpilih} />
     </Card>
   );
 }
