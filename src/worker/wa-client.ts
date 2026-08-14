@@ -310,9 +310,21 @@ export async function initWaClient(): Promise<Client> {
       // ke WhatsApp Web, dan itu tumbuh seiring besarnya sesi tersimpan
       // (direktori sesi di sini 37 MB).
       //
-      // Menaikkannya TIDAK menyembunyikan sesi yang menggantung: `sessionWatchdog()`
-      // di index.ts tetap menyalakan ulang worker bila sesi berada di luar
-      // `ready` lebih dari 15 menit, jadi batas atas pemulihannya tidak berubah.
+      // KOREKSI: baris ini dulu berbunyi "menaikkannya TIDAK menyembunyikan sesi
+      // yang menggantung, karena `sessionWatchdog()` tetap menyalakan ulang
+      // worker bila sesi di luar `ready` lebih dari 15 menit". Itu KELIRU, dan
+      // kekeliruannya berumur sampai gangguan 14 Agustus 2026: watchdognya dulu
+      // dipasang SESUDAH `initWaClient()`, jadi ia tidak ada sama sekali selama
+      // penautan -- persis fase yang batas waktu ini jaga. Yang menyudahi init
+      // yang menggantung cuma batas ini, dan ia melempar ke `main().catch()` ->
+      // `process.exit(1)` TANPA `shutdown()`: Chromium mati mendadak di tengah
+      // menulis state sesi, sehingga start berikutnya mewarisi kerusakannya.
+      //
+      // Sejak watchdog naik ke atas `initWaClient()`, penautan yang menggantung
+      // dihabisi lebih dulu pada 180 detik (BATAS_INIT_MS di index.ts) lewat
+      // `shutdown()` yang menutup Chromium dengan rapi. Batas ini jadi jaring
+      // pengaman lapis kedua, bukan lapis pertama -- dan jarak dua menitnya
+      // disengaja supaya keduanya tidak pernah berlomba.
       protocolTimeout: 300_000,
     },
   });
@@ -896,6 +908,45 @@ export async function isRegisteredOnWhatsApp(phoneE164: string): Promise<boolean
   return id !== null;
 }
 
+/**
+ * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan
+ * gerbang itu membuat `heartbeat_at` menjawab pertanyaan yang salah.
+ *
+ * Umur denyut adalah SATU-SATUNYA hal yang bisa menjawab "apakah ada proses
+ * worker yang hidup sekarang" -- `status` tidak bisa, karena baris itu ditulis
+ * proses yang mungkin sudah mati dan tidak ada yang membatalkannya. Digerbangi
+ * kesiapan sesi, denyutnya ikut membeku saat sesi terputus PADAHAL prosesnya
+ * sehat, sehingga dua keadaan yang butuh tindakan berbeda menjadi tidak bisa
+ * dibedakan dari luar:
+ *
+ *   worker mati            -> PM2/layanannya yang harus diperiksa
+ *   worker hidup, sesi mati -> watchdog memulihkannya sendiri dalam <=15 menit
+ *
+ * Sesudah gerbangnya dicabut, denyut basi berarti PROSESNYA yang tidak ada --
+ * tidak ada tafsir kedua. Sejak loopnya dipasang SEBELUM `initWaClient()`
+ * (`index.ts`), pernyataan itu berlaku juga selama penautan: proses yang
+ * menggantung di dalam init tetap berdenyut, dan itu satu-satunya cara
+ * membedakannya dari proses yang sudah tertaut lalu tersangkut.
+ *
+ * Konsekuensi yang disengaja: `heartbeatStale()` di dashboard berhenti berarti
+ * "sesi bermasalah" dan mulai berarti "worker tidak hidup". SystemStatus ikut
+ * diperbarui supaya kalimatnya tidak menjanjikan diagnosis yang salah.
+ *
+ * ==========================================================================
+ * CARA MEMERIKSANYA LEWAT `mysql` -- dan jebakan yang menelan satu diagnosis
+ * ==========================================================================
+ *
+ * `heartbeat_at` ditulis Sequelize yang memakai `timezone: '+00:00'`, jadi
+ * isinya UTC; `NOW()` di MariaDB mengembalikan waktu WIB. `TIMESTAMPDIFF(...,
+ * heartbeat_at, NOW())` karena itu SELALU melebih-lebihkan umurnya tepat 25.200
+ * detik (7 jam), dan hasilnya terbaca persis seperti worker yang mati semalaman
+ * padahal denyutnya baru beberapa detik. Sudah benar-benar menyesatkan sekali.
+ *
+ *   SELECT TIMESTAMPDIFF(SECOND, CONVERT_TZ(heartbeat_at,'+00:00','+07:00'), NOW())
+ *
+ * Lewat Sequelize (dan karena itu lewat dashboard) tidak ada masalah sama
+ * sekali -- tulis dan baca memakai konversi yang sepasang.
+ */
 export async function updateHeartbeat(): Promise<void> {
   await WaSession.update({ heartbeatAt: new Date() }, { where: { id: 1 } });
 }

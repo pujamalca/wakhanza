@@ -31,6 +31,18 @@ import { jelaskanKegagalanWebhook, jelaskanKegagalanJaringan } from '@/core/aler
 
 export type AlertKind =
   | 'session_stuck'
+  /**
+   * TERPISAH dari `session_stuck`, dan pemisahannya menentukan TINDAKAN.
+   *
+   * `session_stuck` berarti sesi sudah tertaut lalu tersangkut; restart hampir
+   * selalu memulihkannya sendiri, jadi peringatannya bersifat "kalau berulang".
+   * Yang ini berarti penautannya sendiri tidak pernah selesai -- terukur pada
+   * gangguan 14 Agustus 2026, keadaan itu TIDAK pulih lewat restart berapa kali
+   * pun, dan baru berhenti sesudah direktori sesi dikosongkan lalu QR dipindai
+   * ulang. Itu menuntut akses fisik ke ponsel nomor RS, jadi orangnya harus
+   * diberi tahu pada kejadian pertama, bukan sesudah pola terlihat.
+   */
+  | 'session_init_stuck'
   | 'health_check_failed'
   | 'startup_failed'
   /** Dua worker hidup sekaligus -- satu di antaranya lepas dari kendali PM2. */

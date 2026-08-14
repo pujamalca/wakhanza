@@ -5348,3 +5348,93 @@ identik dan urutan hubung-singkatnya dipertahankan (`mode === 'mati'` lebih dulu
 `daruratTanyaAktif()` sebelum `count`); yang berpindah cuma penyusunan `asal`
 yang murni. Fitur stok sedang MENYALA di mesin ini (`stok_mode` = `semua`,
 `darurat_enabled` = 1), jadi ini bukan refaktor atas kode yang menganggur.
+
+## Celah `initWaClient()`: denyut dan watchdog naik ke atas penautan
+
+Perbaikan 14 Agustus 2026, langsung sesudah gangguan yang memperlihatkannya.
+
+### Celahnya, terukur dari log produksi sebelum perbaikan
+
+`await initWaClient()` ada di `worker/index.ts:346`; `loop('heartbeat', ...)` dan
+`loop('session-watchdog', ...)` di baris 602 dan 604. Akibatnya proses yang
+menggantung DI DALAM penautan tidak berdenyut dan tidak diawasi:
+
+```
+708231  pid 14228  wakhanza-worker memulai...
+708231  pid 14228  koneksi database terverifikasi
+        (325,8 detik tanpa satu baris pun; denyut tidak maju sama sekali)
+708557  pid 14228  Runtime.callFunctionOn timed out ... -- worker gagal memulai
+708563  pid 9340   wakhanza-worker memulai...          <- PM2 mengulang
+```
+
+Terulang persis pada pid 17180: 708895 -> 709220, **325,8 detik lagi**. Durasi
+yang identik dua kali itulah yang membedakannya dari gangguan jaringan.
+
+Yang paling mahal bukan matinya melainkan CARA matinya: galat itu jatuh ke
+`main().catch()` lalu `process.exit(1)` TANPA lewat `shutdown()`, jadi Chromium
+mati mendadak di tengah menulis state sesi dan start berikutnya mewarisi
+kerusakannya.
+
+### Bukti bahwa dua keadaan itu memang tak terbedakan tanpa denyut
+
+Diukur berdampingan pada malam yang sama:
+
+| Instance | `wa_session.status` | umur denyut | sebenarnya |
+|---|---|---|---|
+| pid 11980 | `authenticating` | 9 dtk (segar) | sudah lolos init, sesi tak kunjung `ready` -> watchdog menolong di menit ke-15 |
+| pid 14228 | `authenticating` | 618 dtk dan tumbuh | masih DI DALAM init -> **tidak ada yang menolong** |
+
+Kolom kedua identik. Hanya kolom ketiga yang membedakannya, dan justru itu yang
+tidak tersedia sebelum perbaikan ini.
+
+### Perbaikannya
+
+`core/watchdog.ts` (fungsi murni) + urutan di `worker/index.ts`:
+
+- `heartbeat` dan `session-watchdog` dipasang SEBELUM `await initWaClient()`.
+- Fase `menautkan` jadi cabang tersendiri, batas `BATAS_INIT_MS` = 180 detik --
+  lebih pendek daripada `protocolTimeout` 300 detik supaya keduanya tidak
+  berlomba, dan jauh di atas penautan sehat (terukur 5-13 detik).
+- Keluarnya lewat `shutdown()`, bukan dibiarkan sampai `protocolTimeout`.
+- Status TIDAK dibaca selama penautan (baris `wa_session` masih milik proses
+  sebelumnya).
+- Peringatan `session_init_stuck`, terpisah dari `session_stuck`.
+- `session-command` sengaja TIDAK ikut naik: ia mengosongkan kolom perintah
+  sebelum bertindak, jadi menaikkannya menelan perintah dashboard diam-diam.
+
+### Terbukti di produksi pada restart pemasangannya
+
+```
++0 ms     wakhanza-worker memulai...
++66 ms    [warn] fase:"menautkan" status:null  "sesi WhatsApp masih menautkan"
++13,3 dtk memulai siklus poller
++15,6 dtk WhatsApp terautentikasi, menunggu ready
++15,8 dtk WhatsApp siap
+```
+
+Baris kedua adalah buktinya: watchdog berbunyi 66 ms sesudah proses mulai, di
+dalam fase yang sebelumnya tidak diawasi sama sekali. `status:null` membuktikan
+ia menolak membaca status basi dari database. Sesudahnya `wa_session` `ready`
+dengan denyut 5 detik, PM2 `restarts 1`, tanpa kaskade.
+
+### Bukti MENGGIGIT
+
+Cabang `menautkan` dihapus dari `putusanWatchdog()` (mengembalikan perilaku
+sebelum perbaikan):
+
+```
+× diam selama penautan masih di dalam batas
+× keluar begitu penautan melewati batas
+× TIDAK memeriksa kesehatan walau status basi berbunyi ready
+× menyetel ulang jam kesiapan sepanjang penautan
+Tests: 4 failed, 8 passed, 12 total
+```
+
+Asersi ketiga yang paling penting: tanpa cabang init, `status` basi berbunyi
+`ready` mengirim watchdog memeriksa kesehatan klien yang belum jadi. Dipulihkan;
+12 uji lolos.
+
+### Gerbang
+
+`tsc --noEmit` 0, `eslint` 0, **938 uji unit** (dari 926), `next build`,
+`verify:db` (27 tabel, tulis ke `sik` ditolak), `verify:plans` lolos.

@@ -29,6 +29,7 @@ import { initWaClient, getWaSessionStatus, updateHeartbeat, getClient, checkHeal
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
 import { sendAlert } from './alert';
+import { putusanWatchdog } from '@/core/watchdog';
 import { acquireWorkerLock, releaseWorkerLock, KODE_KELUAR_DIGANTIKAN } from './singleInstance';
 import { randomDelayMs } from '@/core/retry';
 
@@ -230,19 +231,44 @@ const BATAS_TIDAK_SIAP_MS = 15 * 60 * 1000;
  */
 
 /**
- * `qr_pending` SENGAJA dikecualikan: itu bukan macet, melainkan sistem yang
- * benar sedang menunggu manusia memindai QR -- bisa berjam-jam saat pemasangan
- * pertama, dan keluar-lalu-restart di tengahnya justru menerbitkan QR baru
- * sehingga kode yang sedang dipindai petugas jadi kedaluwarsa.
+ * Batas waktu PENAUTAN, dan ia sengaja lebih pendek daripada `protocolTimeout`
+ * (300 detik di `wa-client.ts`).
+ *
+ * Yang dibeli bukan kecepatan matinya melainkan CARA matinya. Dibiarkan sampai
+ * `protocolTimeout`, init yang menggantung dilempar sebagai galat ke
+ * `main().catch()` lalu `process.exit(1)` -- TANPA lewat `shutdown()`, sehingga
+ * Chromium mati mendadak di tengah menulis state sesi dan start berikutnya
+ * mewarisi kerusakannya. Terukur pada gangguan 14 Agustus 2026: percobaan demi
+ * percobaan menggantung tepat 325,8 detik, dan baru berhenti setelah direktori
+ * sesi dikosongkan.
+ *
+ * 180 detik memberi jarak dua menit dari `protocolTimeout` -- cukup lebar supaya
+ * keduanya tidak pernah berlomba, dan jauh di atas penautan yang sehat: terukur
+ * 5 detik sampai QR terbit maupun sampai poller menyala.
  */
-const STATUS_MENUNGGU_MANUSIA = new Set<string>(['qr_pending']);
+const BATAS_INIT_MS = 180_000;
 
 let sesiSiapTerakhirAt = Date.now();
+let initMulaiAt = Date.now();
+let initSelesai = false;
 
 async function sessionWatchdog(): Promise<void> {
-  const status = await getWaSessionStatus();
+  /**
+   * Status TIDAK dibaca selama penautan, dan itu bukan penghematan query:
+   * `wa_session` masih memuat status milik proses SEBELUMNYA, jadi membacanya
+   * bukan menjawab pertanyaan melainkan menjawab pertanyaan yang salah.
+   */
+  const status = initSelesai ? await getWaSessionStatus() : null;
+  const putusan = putusanWatchdog({
+    initSelesai,
+    msSejakInitMulai: Date.now() - initMulaiAt,
+    batasInitMs: BATAS_INIT_MS,
+    status,
+    msSejakSiapTerakhir: Date.now() - sesiSiapTerakhirAt,
+    batasTidakSiapMs: BATAS_TIDAK_SIAP_MS,
+  });
 
-  if (status === 'ready') {
+  if (putusan.aksi === 'periksa-kesehatan') {
     sesiSiapTerakhirAt = Date.now();
     // ARCHITECTURE §10: Chromium yang menggantung adalah mode kegagalan nyata
     // yang tidak terlihat dari status 'ready' semata. outbox bersifat permanen
@@ -267,30 +293,54 @@ async function sessionWatchdog(): Promise<void> {
     return;
   }
 
-  if (status !== null && STATUS_MENUNGGU_MANUSIA.has(status)) {
-    sesiSiapTerakhirAt = Date.now();
+  if (putusan.aksi === 'diam') {
+    if (putusan.setelUlangJamSiap) sesiSiapTerakhirAt = Date.now();
+    // Penautan yang sehat selesai jauh sebelum tick pertama (60 detik), jadi
+    // baris ini hanya muncul saat ada yang tidak beres -- dan justru itulah
+    // kejadian yang selama ini berlangsung tanpa satu pun baris log.
+    if (putusan.fase !== 'menunggu-manusia') {
+      logger.warn(
+        { status, fase: putusan.fase, diamDetik: Math.round(putusan.diamMs / 1000) },
+        putusan.fase === 'menautkan' ? 'sesi WhatsApp masih menautkan' : 'sesi WhatsApp belum siap',
+      );
+    }
     return;
   }
 
-  const diamMs = Date.now() - sesiSiapTerakhirAt;
-  if (diamMs >= BATAS_TIDAK_SIAP_MS) {
+  const menit = Math.round(putusan.diamMs / 60_000);
+  if (putusan.fase === 'menautkan') {
     logger.fatal(
-      { status, diamMenit: Math.round(diamMs / 60_000) },
-      'sesi WhatsApp tidak mencapai `ready` melewati batas, keluar supaya proses disupervisi ulang',
+      { diamMenit: menit },
+      'penautan sesi WhatsApp tidak selesai melewati batas, keluar supaya proses disupervisi ulang',
     );
-    // Inilah kejadian yang dulu berlangsung 14 jam tanpa ada yang tahu.
-    // Watchdog memang memulihkannya sendiri, tapi kalau pemulihannya gagal
-    // berulang, peringatan inilah satu-satunya yang membedakan "pulih dalam 15
-    // menit" dari "mati semalaman".
+    // Peringatan TERSENDIRI dari `session_stuck`, dan pemisahannya menentukan
+    // tindakan: yang itu pulih sendiri lewat restart, yang ini biasanya TIDAK --
+    // ia berulang sampai direktori sesi dikosongkan dan QR dipindai ulang, dan
+    // itu menuntut akses fisik ke ponsel nomor RS.
     await sendAlert({
-      kind: 'session_stuck',
-      message: `Sesi WhatsApp tersangkut di status "${status ?? 'tidak diketahui'}" lebih dari ${Math.round(BATAS_TIDAK_SIAP_MS / 60_000)} menit -- worker dimulai ulang.`,
-      detail: 'Tidak ada pesan yang bisa dikirim maupun diterima selama ini. Buka /koneksi bila peringatan ini berulang.',
+      kind: 'session_init_stuck',
+      message: `Penautan sesi WhatsApp tidak selesai dalam ${menit} menit -- worker dimulai ulang.`,
+      detail:
+        'Bila peringatan ini berulang, state sesi kemungkinan rusak: hentikan worker, pindahkan folder .wwebjs_auth, jalankan lagi, lalu pindai QR di /koneksi.',
     });
-    await shutdown('sesi tidak mencapai ready', 1);
+    await shutdown('penautan sesi tidak selesai', 1);
     return;
   }
-  logger.warn({ status, diamDetik: Math.round(diamMs / 1000) }, 'sesi WhatsApp belum siap');
+
+  logger.fatal(
+    { status, diamMenit: menit },
+    'sesi WhatsApp tidak mencapai `ready` melewati batas, keluar supaya proses disupervisi ulang',
+  );
+  // Inilah kejadian yang dulu berlangsung 14 jam tanpa ada yang tahu.
+  // Watchdog memang memulihkannya sendiri, tapi kalau pemulihannya gagal
+  // berulang, peringatan inilah satu-satunya yang membedakan "pulih dalam 15
+  // menit" dari "mati semalaman".
+  await sendAlert({
+    kind: 'session_stuck',
+    message: `Sesi WhatsApp tersangkut di status "${status ?? 'tidak diketahui'}" lebih dari ${Math.round(BATAS_TIDAK_SIAP_MS / 60_000)} menit -- worker dimulai ulang.`,
+    detail: 'Tidak ada pesan yang bisa dikirim maupun diterima selama ini. Buka /koneksi bila peringatan ini berulang.',
+  });
+  await shutdown('sesi tidak mencapai ready', 1);
 }
 
 async function main(): Promise<void> {
@@ -343,7 +393,36 @@ async function main(): Promise<void> {
   // sebelumnya sudah beres sebelum ada baris `sending` baru yang sah.
   await recoverInterruptedSends();
 
+  /**
+   * DENYUT dan WATCHDOG dipasang SEBELUM penautan, dan urutan ini bagian dari
+   * perbaikan -- bukan kerapian.
+   *
+   * Keduanya dulu ada di bawah `await initWaClient()`, sehingga proses yang
+   * menggantung DI DALAM penautan tidak berdenyut dan tidak diawasi siapa pun.
+   * Akibatnya dua keadaan yang menuntut tindakan berlawanan terlihat sama persis
+   * dari luar -- keduanya `authenticating`, keduanya PM2 `online`, keduanya nol
+   * pesan keluar -- dan satu-satunya yang membedakannya (umur denyut) justru
+   * tidak tersedia. Terukur pada gangguan 14 Agustus 2026, dan mendiagnosisnya
+   * memakan setengah jam yang seharusnya cukup satu query.
+   *
+   * Aman dijalankan lebih dulu karena keduanya cuma menyentuh `wa_session` lewat
+   * Sequelize: `updateHeartbeat()` satu UPDATE, dan `sessionWatchdog()` bahkan
+   * TIDAK membaca statusnya selama penautan (lihat `core/watchdog.ts`).
+   *
+   * `session-command` SENGAJA tetap di bawah dan tidak ikut naik. Ia memanggil
+   * `getClient()` lalu `client.logout()`/`resetState()` -- yang menuntut halaman
+   * yang sudah jadi, sementara selama penautan halamannya justru itu yang belum
+   * ada. Yang lebih buruk: ia MENGOSONGKAN kolom perintah sebelum bertindak,
+   * jadi menaikkannya berarti perintah dari dashboard ditelan diam-diam tepat
+   * pada keadaan yang paling membutuhkannya. Perintah yang datang selama
+   * penautan tetap tersimpan dan dijalankan begitu sesi hidup.
+   */
+  void loop('heartbeat', updateHeartbeat, 30_000);
+  void loop('session-watchdog', sessionWatchdog, 60_000);
+
+  initMulaiAt = Date.now();
   await initWaClient();
+  initSelesai = true;
 
   const pollIntervalMs = await getSettingNumber('polling.interval_ms', 60_000);
   const scanIntervalMs = await getSettingNumber('polling.scan_interval_ms', 300_000);
@@ -564,44 +643,14 @@ async function main(): Promise<void> {
   void loop('erm-penilaian', runPenilaianRekapIfDue, scanIntervalMs);
   void dispatcherLoop();
   /**
-   * Denyut TANPA SYARAT -- sebelumnya digerbangi `if (await isWaReady())`, dan
-   * gerbang itu membuat `heartbeat_at` menjawab pertanyaan yang salah.
+   * Satu-satunya loop sesi yang tetap di BAWAH penautan; `heartbeat` dan
+   * `session-watchdog` sudah dipasang di atas `initWaClient()` -- lihat
+   * penjelasan urutannya di sana, berikut kenapa yang satu ini tidak ikut naik.
    *
-   * Umur denyut adalah SATU-SATUNYA hal yang bisa menjawab "apakah ada proses
-   * worker yang hidup sekarang" -- `status` tidak bisa, karena baris itu ditulis
-   * proses yang mungkin sudah mati dan tidak ada yang membatalkannya. Digerbangi
-   * kesiapan sesi, denyutnya ikut membeku saat sesi terputus PADAHAL prosesnya
-   * sehat, sehingga dua keadaan yang butuh tindakan berbeda menjadi tidak bisa
-   * dibedakan dari luar:
-   *
-   *   worker mati            -> PM2/layanannya yang harus diperiksa
-   *   worker hidup, sesi mati -> watchdog memulihkannya sendiri dalam <=15 menit
-   *
-   * Sesudah gerbangnya dicabut, denyut basi berarti PROSESNYA yang tidak ada --
-   * tidak ada tafsir kedua.
-   *
-   * Konsekuensi yang disengaja: `heartbeatStale()` di dashboard berhenti berarti
-   * "sesi bermasalah" dan mulai berarti "worker tidak hidup". SystemStatus ikut
-   * diperbarui supaya kalimatnya tidak menjanjikan diagnosis yang salah.
-   *
-   * ==========================================================================
-   * CARA MEMERIKSANYA LEWAT `mysql` -- dan jebakan yang menelan satu diagnosis
-   * ==========================================================================
-   *
-   * `heartbeat_at` ditulis Sequelize yang memakai `timezone: '+00:00'`, jadi
-   * isinya UTC; `NOW()` di MariaDB mengembalikan waktu WIB. `TIMESTAMPDIFF(...,
-   * heartbeat_at, NOW())` karena itu SELALU melebih-lebihkan umurnya tepat 25.200
-   * detik (7 jam), dan hasilnya terbaca persis seperti worker yang mati semalaman
-   * padahal denyutnya baru beberapa detik. Sudah benar-benar menyesatkan sekali.
-   *
-   *   SELECT TIMESTAMPDIFF(SECOND, CONVERT_TZ(heartbeat_at,'+00:00','+07:00'), NOW())
-   *
-   * Lewat Sequelize (dan karena itu lewat dashboard) tidak ada masalah sama
-   * sekali -- tulis dan baca memakai konversi yang sepasang.
+   * Arti umur denyut itu sendiri ada di `updateHeartbeat()` (`wa-client.ts`),
+   * berikut jebakan zona waktu saat memeriksanya lewat `mysql`.
    */
-  void loop('heartbeat', updateHeartbeat, 30_000);
   void loop('session-command', processSessionCommand, 5_000);
-  void loop('session-watchdog', sessionWatchdog, 60_000);
 
   await startScheduler();
   startCleanupSchedule();
