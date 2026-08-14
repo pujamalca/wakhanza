@@ -281,6 +281,55 @@ function BantuanPenjualan() {
   );
 }
 
+function BantuanBulanan() {
+  return (
+    <>
+      <HelpSection title="Satu pesan sebulan, merangkum SELURUH tab lain">
+        <p>
+          Kedelapan tab di depannya masing-masing mengurus satu jenis kejadian. Yang ini merangkum
+          semuanya sekaligus untuk bulan yang baru lewat: resep berikut angka mutunya, plus keempat
+          jalur barang — pengadaan, pemesanan, hibah, dan penjualan.
+        </p>
+        <p>
+          Periodenya <Tekan>selalu bulan sebelumnya</Tekan>, tidak bisa disetel. Bulan berjalan selalu
+          setengah jadi, dan menyediakan pilihan untuk merekapnya berarti menyediakan cara
+          menghasilkan angka yang salah tanpa satu pun galat.
+        </p>
+      </HelpSection>
+      <HelpSection title="Yang cuma terlihat dari rekap bulanan, dan tidak dari rekap harian">
+        <p>
+          <Tekan>Tren.</Tekan> Rekap harian menampilkan satu angka tanpa pembanding, sehingga kenaikan
+          yang pelan tidak pernah terbaca sebagai kenaikan. Terukur di sini: resep yang belum
+          diserahkan naik dari 9 (Februari) ke 175 (Juli) — dari 2% menjadi 25,5%. Yang belum ditelaah
+          dari 30 ke 145.
+        </p>
+        <p>
+          <Tekan>Pasien versus kunjungan.</Tekan> Keduanya disediakan terpisah karena angkanya jauh
+          berbeda: Juli 2026 punya 634 kunjungan dari 541 pasien. Memakai yang satu dengan label yang
+          satunya berarti laporan meleset 15% setiap bulan.
+        </p>
+      </HelpSection>
+      <HelpSection title="Telaah resep dibaca dari Khanza, bukan dari sistem ini">
+        <p>
+          Khanza punya menu telaah resep sendiri, dan isinya sudah dipakai — 10.463 baris tercatat.
+          Yang dihitung di sini cuma <Tekan>ada-tidaknya</Tekan> telaah untuk sebuah resep, tidak
+          pernah hasil telaahnya: penilaian klinis atas resep seorang pasien tidak pernah dibaca dari
+          Khanza sama sekali.
+        </p>
+      </HelpSection>
+      <HelpSection title="Kenapa tombol uji ada di sini, sementara tab lain tidak punya">
+        <p>
+          Rekap ini berbunyi <Tekan>sekali sebulan</Tekan>. Kalau bentuk pesannya ternyata keliru,
+          kesempatan berikutnya datang tiga puluh hari lagi. Pratinjau membuktikan isinya di layar;
+          kirim uji membuktikan ia benar-benar tiba, karena kiriman ke kode grup yang salah pun tetap
+          tercatat berhasil.
+        </p>
+      </HelpSection>
+      <BerlakuSemua />
+    </>
+  );
+}
+
 const ISI = {
   tujuan: BantuanTujuan,
   resep: BantuanResep,
@@ -290,6 +339,7 @@ const ISI = {
   pemesanan: BantuanPemesanan,
   hibah: BantuanHibah,
   penjualan: BantuanPenjualan,
+  bulanan: BantuanBulanan,
 } as const;
 
 export type TabBantuan = keyof typeof ISI;

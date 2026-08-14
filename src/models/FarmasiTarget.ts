@@ -100,6 +100,22 @@ export class FarmasiTarget extends Model<InferAttributes<FarmasiTarget>, InferCr
    * pengadaan per hari.
    */
   declare terimaPenjualan: CreationOptional<boolean>;
+  /**
+   * Menerima REKAP BULANAN farmasi (migrations/046).
+   *
+   * Kolom tersendiri, dan alasannya paling kuat di antara ketujuhnya: isinya
+   * yang PALING LUAS di seluruh halaman Farmasi -- omzet penjualan, belanja ke
+   * pemasok, dan angka mutu (berapa resep belum diserahkan, belum ditelaah)
+   * dalam satu pesan. Itu bacaan MANAJEMEN, bukan bacaan shift.
+   *
+   * Digabung dengan `isActive`, grup shift apotek yang perlu tahu tiap resep
+   * masuk akan otomatis ikut menerima laporan bulanan berisi angka belanja dan
+   * penilaian kinerja tempatnya sendiri bekerja -- dan tidak ada satu pun cara
+   * melepaskannya tanpa ikut mematikan notifikasi resepnya. Pilihan yang
+   * digabung adalah pilihan yang hilang; alasan yang sama sudah dibayar
+   * `boleh_tanya` (020) dan `terima_darurat_stok` (021).
+   */
+  declare terimaBulanan: CreationOptional<boolean>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -143,6 +159,12 @@ FarmasiTarget.init(
       allowNull: false,
       defaultValue: false,
       field: 'terima_penjualan',
+    },
+    terimaBulanan: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'terima_bulanan',
     },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },

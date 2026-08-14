@@ -140,6 +140,22 @@ const BYPASS_QUIET_HOURS = new Set([
    */
   'FARMASI_RESEP_REKAP',
   /**
+   * FARMASI_BULANAN (046): alasan yang sama dengan ketiga rekap di atasnya, dan
+   * di sini bahkan lebih tegas -- yang dipilih staf bukan cuma JAMNYA melainkan
+   * juga TANGGALNYA (`farmasi.bulanan_tanggal`, `farmasi.bulanan_jam`).
+   *
+   * Jam bawaannya 08:00 dan itu jauh di luar jam tenang, jadi baris ini tidak
+   * mengubah apa pun pada setelan bawaan. Yang dijaganya adalah setelan yang SAH
+   * menurut fiturnya sendiri: staf yang menyetelnya pukul 06:00 -- supaya rekap
+   * sudah ada di ponsel kepala instalasi sebelum apotek buka -- akan mendapati
+   * rekapnya tertahan sampai 07:00, tanpa satu pun galat.
+   *
+   * Bentuk kegagalan yang sama persis dengan ERM_PENILAIAN_UMUM di bawah, dan
+   * ditulis di muka justru karena kasus itu memperlihatkan bahwa "kebetulan di
+   * luar jam tenang" bukan alasan untuk menundanya.
+   */
+  'FARMASI_BULANAN',
+  /**
    * ERM_PENILAIAN_UMUM (044): alasan yang sama persis dengan kedua rekap di
    * atasnya -- kelas WAKTU, jam kirimnya dipilih staf sendiri
    * (`erm.penilaian_jam`), dan penerimanya grup/petugas KEPERAWATAN, bukan
@@ -164,6 +180,27 @@ const BYPASS_QUIET_HOURS = new Set([
   'ERM_PENILAIAN_UMUM',
   'BPJS_BATAL',
   'ADMINISTRASI',
+  /**
+   * ADMINISTRASI_BULANAN (047): alasan yang sama persis dengan FARMASI_BULANAN --
+   * kelas WAKTU berperiode bulan, dan yang dipilih staf bukan cuma jamnya
+   * melainkan juga tanggalnya (`administrasi.bulanan_tanggal`,
+   * `administrasi.bulanan_jam`).
+   *
+   * Ia TIDAK menumpang `ADMINISTRASI` tepat di atasnya walau namanya beririsan,
+   * dan pemisahan itu bukan kerapian: yang di atas dikecualikan karena ada MANUSIA
+   * yang menekan kirim untuk pasien yang sedang di loket, alasan yang sama sekali
+   * tidak berlaku di sini. Yang berlaku di sini alasan yang berbeda -- jadwalnya
+   * disetel staf sendiri -- dan menumpang kode yang sama berarti kedua keputusan
+   * itu terkunci menjadi satu, sehingga mencabut salah satunya nanti mencabut
+   * keduanya. Pembedaan yang sama sudah dibayar antara ADMINISTRASI dan
+   * SURAT_SAKIT (migrations/027), tempat kedua jalur mengirim BERKAS yang sama
+   * dengan kebijakan jam tenang yang berlawanan.
+   *
+   * Jam bawaannya 08:00 dan itu jauh di luar jam tenang, jadi baris ini tidak
+   * mengubah apa pun pada setelan bawaan. Yang dijaganya setelan SAH seperti
+   * 06:00 -- supaya rekap sudah ada di ponsel manajemen sebelum loket buka.
+   */
+  'ADMINISTRASI_BULANAN',
   /**
    * WA_PERINTAH (045): balasan atas percakapan yang orangnya MULAI SENDIRI
    * beberapa detik lalu -- alasan yang sama persis dengan AUTO_REPLY, dan

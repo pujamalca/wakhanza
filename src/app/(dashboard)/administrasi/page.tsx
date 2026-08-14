@@ -33,13 +33,24 @@ import {
   SETTING_CATATAN_KAKI as SETTING_CATATAN_KAKI_DOKUMEN,
   PESAN_BAWAAN as PESAN_BAWAAN_DOKUMEN,
 } from '@/lib/dokumen';
-import { Template } from '@/models';
-import { Callout, HelpPanel, PageHeader, Pagination, Tabs, type TabStatus } from '@/components/ui';
+import { Template, AdministrasiTarget, WaGroup, WaSession } from '@/models';
+import {
+  bacaTanggalKirim,
+  bulanJatuhTempo,
+  labelBulan,
+  TANGGAL_KIRIM_BAWAAN,
+  JAM_REKAP_BULANAN_BAWAAN,
+} from '@/core/rekapBulan';
+import { bacaJamRekap, tulisJamRekap } from '@/core/rekapJadwal';
+import { Callout, HelpPanel, PageHeader, Pagination, Section, Tabs, type TabStatus } from '@/components/ui';
 import { BantuanAdministrasi } from './bantuan';
 import { SuratTable, type BarisSurat } from './SuratTable';
 import { MasterSwitch, AutoSwitch, DiagnosaSwitch, TeksForm } from './PengaturanForm';
 import { DokumenSwitch, RincianObatSwitch, TeksDokumenForm } from './DokumenForm';
 import { RentangTanggal } from './RentangTanggal';
+import { BulananSwitch } from './BulananSwitch';
+import { BulananTargetTable } from './BulananTargetTable';
+import { BulananForm } from './BulananForm';
 
 /**
  * Halaman ADMINISTRASI -- mengirim DOKUMEN, bukan kabar.
@@ -60,7 +71,7 @@ import { RentangTanggal } from './RentangTanggal';
  * KUNJUNGAN, bukan pasien.
  */
 
-const TAB = ['sakit', 'sehat', 'hasil', 'pengaturan'] as const;
+const TAB = ['sakit', 'sehat', 'hasil', 'bulanan', 'pengaturan'] as const;
 type TabKey = (typeof TAB)[number];
 
 /**
@@ -111,10 +122,17 @@ export default async function AdministrasiPage({
   const { tab: tabParam, dari: dariParam, sampai: sampaiParam, page: pageParam } = await searchParams;
   const tab = bacaTab(tabParam);
 
-  const [aktif, diagnosaAktif, autoAktif, poliSensitif] = await Promise.all([
+  const [aktif, diagnosaAktif, autoAktif, bulananAktif, poliSensitif] = await Promise.all([
     getSettingBool(SETTING_AKTIF, false),
     getSettingBool(SETTING_DIAGNOSA, false),
     getSettingBool(SETTING_AUTO, false),
+    /**
+     * Dibaca di LUAR cabang tabnya, supaya titik status tab Rekap bulanan benar
+     * tanpa menuntut seseorang membukanya dulu. Satu baris `app_setting`, jadi
+     * biayanya nol -- dan keadaan "menyala tapi tanpa tujuan" adalah persis yang
+     * paling perlu terlihat dari luar.
+     */
+    getSettingBool('administrasi.bulanan_enabled', false),
     getSettingJson<string[]>('privacy.sensitive_poli_codes', []),
   ]);
   const sensitif = new Set(poliSensitif);
@@ -230,6 +248,71 @@ export default async function AdministrasiPage({
       : null;
 
   /**
+   * Tab REKAP BULANAN (migrations/047) -- dibaca HANYA saat tabnya dibuka,
+   * dengan alasan yang sama seperti tab Hasil di atas.
+   *
+   * Bedanya: tidak satu pun query di sini menyentuh `sik`. Yang dibaca cuma
+   * `app_setting`, `administrasi_target`, `wa_group`, dan `wa_session` -- semuanya
+   * di database `wakhanza`. Pembacaan `sik` baru terjadi saat staf menekan
+   * Pratinjau atau Kirim rekap uji, dan saat rekapnya benar-benar jatuh tempo.
+   *
+   * Sakelarnya TETAP dibaca di luar cabang ini (`bulananAktif` di atas), supaya
+   * titik status tabnya benar tanpa menuntut seseorang membuka tabnya dulu --
+   * pola yang sama dengan `jumlahDokumenAktif`.
+   */
+  const bln =
+    tab === 'bulanan'
+      ? await (async () => {
+          const [tanggalRaw, jamRaw, penanda, template, templateKosong, targets, grup, sesi] = await Promise.all([
+            getSetting('administrasi.bulanan_tanggal', String(TANGGAL_KIRIM_BAWAAN)),
+            getSetting('administrasi.bulanan_jam', '08:00'),
+            getSetting('administrasi.bulanan_last_run', ''),
+            getSetting('administrasi.template_bulanan', ''),
+            getSetting('administrasi.template_bulanan_kosong', ''),
+            AdministrasiTarget.findAll({ order: [['id', 'ASC']] }),
+            WaGroup.findAll({ order: [['nama', 'ASC']] }),
+            WaSession.findByPk(1),
+          ]);
+
+          const tanggal = bacaTanggalKirim(tanggalRaw) ?? TANGGAL_KIRIM_BAWAAN;
+          const jam = tulisJamRekap(bacaJamRekap(jamRaw) ?? JAM_REKAP_BULANAN_BAWAAN);
+
+          /**
+           * Bulan mana yang LANGSUNG berangkat begitu sakelarnya dinyalakan.
+           *
+           * Dihitung lewat `bulanJatuhTempo()` yang SAMA dipakai worker, bukan
+           * ditebak dari tanggal hari ini. Rekap terlewat memang sengaja dikejar,
+           * jadi menyalakan sakelar pada tanggal 14 membuat rekapnya berangkat
+           * pada siklus berikutnya -- perilaku yang benar dan tak terduga, dan
+           * kejutan tetap kejutan walau benar.
+           */
+          const jatuh = bulanJatuhTempo(new Date(), tanggal, bacaJamRekap(jam) ?? JAM_REKAP_BULANAN_BAWAAN, penanda);
+
+          return {
+            nilai: {
+              tanggal,
+              jam,
+              template: template ?? '',
+              templateKosong: templateKosong ?? '',
+            },
+            terakhir: penanda?.trim() ? labelBulan(penanda.trim()) : '',
+            langsungBerangkat: jatuh ? labelBulan(jatuh) : '',
+            targets: targets.map((t) => ({
+              id: t.id,
+              jenis: t.jenis,
+              chatId: t.chatId,
+              label: t.label,
+              isActive: t.isActive,
+              terimaBulanan: t.terimaBulanan,
+            })),
+            grup: grup.map((g) => ({ chatId: g.chatId, nama: g.nama })),
+            waSiap: sesi?.status === 'ready',
+            adaTujuan: targets.some((t) => t.isActive && t.terimaBulanan),
+          };
+        })()
+      : null;
+
+  /**
    * Titik status di tab: tiga keadaan, bukan dua. Yang ketiga -- menyala tapi
    * tidak satu pun baris bisa dikirimi -- bergejala sama persis dengan yang
    * benar (halaman tampak wajar, nol pesan keluar), dan itu yang paling mahal.
@@ -238,7 +321,7 @@ export default async function AdministrasiPage({
   const labelKirim = !aktif ? 'pengiriman dimatikan' : adaNomorTerpakai ? 'siap mengirim' : 'tidak ada nomor terpakai';
 
   const href = (t: TabKey) =>
-    t === 'pengaturan' || t === 'hasil'
+    t === 'pengaturan' || t === 'hasil' || t === 'bulanan'
       ? `/administrasi?tab=${t}`
       : `/administrasi?tab=${t}&dari=${dari}&sampai=${sampai}`;
 
@@ -304,6 +387,24 @@ export default async function AdministrasiPage({
                   : 'tidak ada lampiran',
           },
           {
+            key: 'bulanan',
+            href: href('bulanan'),
+            label: 'Rekap bulanan',
+            /**
+             * Keadaan KETIGA yang tidak dipunyai tab lain: menyala tapi belum ada
+             * tujuan yang mencentang. Halaman tampak wajar dan nol pesan keluar --
+             * gejala yang sama persis dengan yang benar, dan itu yang paling
+             * mahal. Dihitung tanpa membuka tabnya, sehingga keadaan itu tidak
+             * menuntut seseorang mengklik dulu untuk mengetahuinya.
+             */
+            status: !bulananAktif ? 'neutral' : bln && !bln.adaTujuan ? 'warning' : 'success',
+            statusLabel: !bulananAktif
+              ? 'rekap bulanan dimatikan'
+              : bln && !bln.adaTujuan
+                ? 'menyala tapi belum ada tujuan'
+                : 'rekap bulanan menyala',
+          },
+          {
             key: 'pengaturan',
             href: href('pengaturan'),
             label: 'Pengaturan',
@@ -321,7 +422,60 @@ export default async function AdministrasiPage({
         ]}
       />
 
-      {tab === 'hasil' && dok ? (
+      {/*
+        Cabangnya `tab === 'bulanan'` saja, bukan `&& bln`, supaya TypeScript
+        mempersempit `tab` untuk cabang-cabang di bawahnya. Bentuk `&& bln`
+        membiarkan 'bulanan' tetap mungkin di cabang terakhir, dan komponen di
+        sana (RentangTanggal, BantuanAdministrasi) memang tidak mengenalnya.
+      */}
+      {tab === 'bulanan' ? (
+        bln && (
+          <>
+          {/**
+           * Pagar yang WAJIB terbentang, bukan dilipat: ia menjawab pertanyaan
+           * yang paling mungkin menahan orang menyalakan fitur di halaman INI --
+           * "apakah ini ikut mengirim berkas pasien?" -- dan jawabannya tidak.
+           * Melipatnya menukar halaman yang lebih pendek dengan keputusan yang
+           * ditunda karena keberatan yang sebenarnya tidak berlaku.
+           */}
+          <Callout variant="privasi" className="mb-4" title="Rekap ini tidak mengirim satu pun data pasien">
+            <p>
+              Berbeda dari keempat tab lain di halaman ini, yang mengirim{' '}
+              <strong>berkas PDF berisi nama, umur, dan alamat pasien</strong> ke nomor pasiennya. Yang ini mengirim{' '}
+              <strong>satu pesan berisi angka</strong> ke grup staf: jumlah kunjungan, pecahan cara bayar, dan seberapa
+              lengkap berkasnya terisi.
+            </p>
+            <p className="mt-2">
+              Ditegakkan di tingkat query, bukan kebiasaan: nama pasien, nomor rekam medis, kode poli, diagnosa, dan
+              seluruh isi asesmen/SOAPIE/resume <strong>tidak pernah diambil dari Khanza</strong> sama sekali.
+              Kelengkapan berkas dibaca lewat ada-tidaknya barisnya &mdash; jadi sistem tahu SOAPIE sudah diisi tanpa
+              pernah tahu apa isinya.
+            </p>
+            <p className="mt-2">
+              Satu-satunya nama yang ikut adalah <strong>nama penjamin</strong> (UMUM, BPJS Kesehatan), dan selalu
+              sebagai label pada baris jumlah.
+            </p>
+          </Callout>
+
+          <BulananSwitch
+            enabled={bulananAktif}
+            adaTujuan={bln.adaTujuan}
+            tanggal={bln.nilai.tanggal}
+            jam={bln.nilai.jam}
+            terakhir={bln.terakhir}
+            langsungBerangkat={bln.langsungBerangkat}
+          />
+
+          <Section title="Tujuan pengiriman" jarak="normal">
+            <BulananTargetTable targets={bln.targets} grup={bln.grup} waSiap={bln.waSiap} />
+          </Section>
+
+            <Section title="Jadwal dan isi pesan" jarak="normal">
+              <BulananForm nilai={bln.nilai} adaTujuan={bln.adaTujuan} />
+            </Section>
+          </>
+        )
+      ) : tab === 'hasil' && dok ? (
         <>
           {/**
            * Peringatan pembuka SENGAJA tidak dilipat. Ia menjelaskan apa yang

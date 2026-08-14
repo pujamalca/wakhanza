@@ -19,6 +19,7 @@ export { WaCommandSession } from './WaCommandSession';
 export { FarmasiTarget } from './FarmasiTarget';
 export { BpjsTarget } from './BpjsTarget';
 export { ErmTarget } from './ErmTarget';
+export { AdministrasiTarget } from './AdministrasiTarget';
 export { TemplateTarget } from './TemplateTarget';
 export { WaGroup } from './WaGroup';
 export { StokAlertSchedule } from './StokAlertSchedule';

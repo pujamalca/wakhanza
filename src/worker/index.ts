@@ -20,6 +20,8 @@ import { runPengadaanCycle } from './pengadaanRunner';
 import { runPenjualanCycle } from './penjualanRunner';
 import { runPenjualanRekapIfDue } from './penjualanRekapRunner';
 import { runResepRekapIfDue } from './resepRekapRunner';
+import { runFarmasiBulananIfDue } from './farmasiBulananRunner';
+import { runAdministrasiBulananIfDue } from './administrasiBulananRunner';
 import { runPenilaianRekapIfDue } from './penilaianRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
@@ -621,6 +623,27 @@ async function main(): Promise<void> {
   void loop('resep-rekap', runResepRekapIfDue, scanIntervalMs);
 
   /**
+   * REKAP BULANAN FARMASI (`/farmasi?tab=bulanan`, migrations/046) -- kelas WAKTU
+   * seperti kedua rekap di atasnya, tapi periodenya BULAN.
+   *
+   * Siklus TERPISAH dari keduanya, dan bukan demi kerapian: `runResepRekapIfDue`
+   * membaca `resep_obat` sehari, yang ini membaca SEPULUH agregat atas rentang
+   * sebulan. Siklus gabungan yang gagal pada bagian pertamanya akan menghentikan
+   * bagian yang satunya -- fitur yang dimatikan RS bisa menjatuhkan fitur yang
+   * dinyalakannya. Pelajaran yang sama sudah dibayar saat siklus hibah dipisah
+   * dari pengadaan (031).
+   *
+   * Interval PINDAI, sama seperti tetangganya: yang dikerjakan tiap siklus cuma
+   * membaca tiga pengaturan dan membandingkan tanggal. Pembacaan `sik` yang
+   * sesungguhnya terjadi SEKALI SEBULAN, pada siklus yang benar-benar jatuh
+   * tempo.
+   *
+   * Ia menjaga sakelarnya sendiri (`farmasi.bulanan_enabled`, default MATI) dan
+   * memeriksa tujuan sebelum menyentuh `sik`, jadi aman dipanggil tanpa syarat.
+   */
+  void loop('farmasi-bulanan', runFarmasiBulananIfDue, scanIntervalMs);
+
+  /**
    * REKAP ASESMEN AWAL KEPERAWATAN (`/erm/penilaian-umum`, migrations/044) --
    * kelas WAKTU seperti kedua rekap farmasi di atas, tapi dengan satu perbedaan
    * yang tidak dipunyai satu pun siklus lain di berkas ini: ia bisa berbunyi
@@ -641,6 +664,23 @@ async function main(): Promise<void> {
    * menyentuh `sik`, jadi aman dipanggil tanpa syarat.
    */
   void loop('erm-penilaian', runPenilaianRekapIfDue, scanIntervalMs);
+
+  /**
+   * REKAP BULANAN ADMINISTRASI (`/administrasi?tab=bulanan`, migrations/047) --
+   * kembaran `farmasi-bulanan` di atas, dan seluruh matematika jadwalnya memang
+   * dipakai bersama lewat `core/rekapBulan.ts`.
+   *
+   * Siklusnya TERPISAH, bukan digabung dengan tetangganya, dan alasannya sama
+   * yang memisahkan `hibah` dari `pengadaan`: sakelarnya berdiri sendiri, jadi
+   * satu siklus gabungan yang gagal pada setengah pertamanya akan menghentikan
+   * setengah yang satunya -- fitur yang dimatikan RS bisa menjatuhkan fitur yang
+   * dinyalakannya.
+   *
+   * Ia menjaga sakelarnya sendiri (`administrasi.bulanan_enabled`, default MATI)
+   * dan memeriksa tujuan sebelum menyentuh `sik`, jadi aman dipanggil tanpa
+   * syarat.
+   */
+  void loop('administrasi-bulanan', runAdministrasiBulananIfDue, scanIntervalMs);
   void dispatcherLoop();
   /**
    * Satu-satunya loop sesi yang tetap di BAWAH penautan; `heartbeat` dan

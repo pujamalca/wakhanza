@@ -32,6 +32,7 @@ import { toggleTerimaPengadaanAction } from './pengadaanActions';
 import { toggleTerimaHibahAction } from './hibahActions';
 import { toggleTerimaPemesananAction } from './pemesananActions';
 import { toggleTerimaPenjualanAction } from './penjualanActions';
+import { toggleTerimaBulananAction } from './bulananActions';
 
 export interface TargetRow {
   id: number;
@@ -49,6 +50,8 @@ export interface TargetRow {
   /** Menerima nota SURAT PEMESANAN -- barang yang DIPESAN, belum datang (migrations/030). */
   terimaPemesanan: boolean;
   terimaPenjualan: boolean;
+  /** Menerima REKAP BULANAN -- omzet, belanja, dan angka mutu (migrations/046). */
+  terimaBulanan: boolean;
 }
 
 export interface GrupRow {
@@ -275,6 +278,23 @@ export function TargetTable({
                         Menerima nota penjualan apotek, dan kabar saat sebuah nota dibatalkan.{' '}
                         <strong>Jauh lebih ramai daripada nota barang lain — 16–46 pesan per hari</strong>, berbanding
                         sekitar 2 untuk pengadaan.
+                      </BarisCentang>
+                      <BarisCentang
+                        untuk="Rekap bulanan"
+                        label="Rekap bulanan"
+                        checked={t.terimaBulanan}
+                        disabled={pending}
+                        onChange={() => jalankan(() => toggleTerimaBulananAction(t.id, !t.terimaBulanan))}
+                      >
+                        Menerima <strong>satu pesan sebulan</strong> berisi seluruh kegiatan farmasi bulan lalu: jumlah
+                        resep dan pasien, berapa yang belum diserahkan dan belum ditelaah, plus omzet penjualan dan
+                        belanja ke pemasok. Isinya <strong>seluruhnya angka</strong> — tidak ada nama pasien maupun nama
+                        obat.
+                        <br />
+                        <br />
+                        Terpisah dari centang lain karena isinya paling luas di halaman ini:{' '}
+                        <strong>bacaan manajemen, bukan bacaan shift</strong>. Grup yang perlu tahu tiap resep masuk
+                        belum tentu perlu membaca angka belanja dan penilaian kinerja tempatnya sendiri bekerja.
                       </BarisCentang>
                     </div>
                   </td>

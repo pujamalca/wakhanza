@@ -29,6 +29,8 @@
     "dryrun:pemesanan": "tsx scripts/dryrun-pemesanan.ts",
     "dryrun:penjualan": "tsx scripts/dryrun-penjualan.ts",
     "dryrun:resep": "tsx scripts/dryrun-resep.ts",
+    "dryrun:bulanan": "tsx scripts/dryrun-bulanan.ts",
+    "dryrun:adm-bulanan": "tsx scripts/dryrun-adm-bulanan.ts",
     "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts",
     "dryrun:stok": "tsx scripts/dryrun-stok.ts",
     "dryrun:penilaian": "tsx scripts/dryrun-penilaian.ts"

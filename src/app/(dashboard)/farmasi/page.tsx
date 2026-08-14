@@ -23,6 +23,16 @@ import { PenjualanForm, type NilaiPenjualan } from './PenjualanForm';
 import { PenjualanSwitch } from './PenjualanSwitch';
 import { RekapForm, type NilaiRekap } from './RekapForm';
 import { RekapSwitch } from './RekapSwitch';
+import { BulananForm, type NilaiBulanan } from './BulananForm';
+import { BulananSwitch } from './BulananSwitch';
+import {
+  labelBulan,
+  bulanJatuhTempo,
+  bacaTanggalKirim,
+  TANGGAL_KIRIM_BAWAAN,
+  JAM_REKAP_BULANAN_BAWAAN,
+} from '@/core/rekapBulan';
+import { bacaJamRekap } from '@/core/rekapJadwal';
 
 /**
  * Halaman ini memuat EMPAT bagian yang berdiri sendiri: satu daftar tujuan yang
@@ -53,7 +63,22 @@ import { RekapSwitch } from './RekapSwitch';
 // barang MASUK, yang ini satu-satunya barang KELUAR. Menyelipkannya di
 // tengah membuat tiga tab yang bertetangga tidak lagi menjawab satu
 // pertanyaan yang sama.
-const TAB = ['tujuan', 'resep', 'stok', 'darurat', 'pengadaan', 'pemesanan', 'hibah', 'penjualan'] as const;
+// Bulanan ditaruh PALING AKHIR, dan itu bukan urutan pembuatan melainkan
+// cakupannya: kedelapan tab di depannya masing-masing mengurus SATU jenis
+// kejadian, sementara yang ini merangkum semuanya sekaligus (resep, pengadaan,
+// pemesanan, hibah, penjualan). Menyelipkannya di tengah membuat tab-tab yang
+// bertetangga tidak lagi menjawab satu pertanyaan yang setara.
+const TAB = [
+  'tujuan',
+  'resep',
+  'stok',
+  'darurat',
+  'pengadaan',
+  'pemesanan',
+  'hibah',
+  'penjualan',
+  'bulanan',
+] as const;
 type TabKey = (typeof TAB)[number];
 
 function bacaTab(param: string | undefined): TabKey {
@@ -95,6 +120,7 @@ export default async function FarmasiPage({
     jumlahTujuanHibah,
     jumlahTujuanPemesanan,
     jumlahTujuanPenjualan,
+    jumlahTujuanBulanan,
     jumlahJadwal,
   ] = await Promise.all([
     FarmasiTarget.count(),
@@ -105,6 +131,7 @@ export default async function FarmasiPage({
     FarmasiTarget.count({ where: { terimaHibah: true } }),
     FarmasiTarget.count({ where: { terimaPemesanan: true } }),
     FarmasiTarget.count({ where: { terimaPenjualan: true } }),
+    FarmasiTarget.count({ where: { terimaBulanan: true } }),
     StokAlertSchedule.count(),
   ]);
 
@@ -118,6 +145,7 @@ export default async function FarmasiPage({
     penjualanEnabled,
     rekapEnabled,
     rekapResepEnabled,
+    bulananEnabled,
   ] = await Promise.all([
       getSettingBool('farmasi.enabled', false),
       getSetting('farmasi.stok_mode', 'mati'),
@@ -128,6 +156,7 @@ export default async function FarmasiPage({
       getSettingBool('farmasi.penjualan_enabled', false),
       getSettingBool('farmasi.penjualan_rekap_enabled', false),
       getSettingBool('farmasi.resep_rekap_enabled', false),
+      getSettingBool('farmasi.bulanan_enabled', false),
     ]);
 
   // Dinormalkan SEKALI di sini, bukan sekali untuk titik status lalu sekali
@@ -252,6 +281,26 @@ export default async function FarmasiPage({
           ? 'Nota per transaksi menyala'
           : 'Rekap harian menyala';
 
+  /**
+   * Tab Bulanan cuma punya SATU sakelar, jadi titiknya bentuk sederhana --
+   * berbeda dari Resep dan Penjualan yang masing-masing punya dua.
+   *
+   * Yang perlu diperhatikan: tujuannya `terima_bulanan`, BUKAN `is_active` yang
+   * dipakai tab Resep. Memakai `jumlahTujuanAktif` di sini akan membuat titiknya
+   * hijau sementara rekapnya tidak pergi ke mana pun -- kegagalan senyap yang
+   * persis kebalikan dari guna titik ini.
+   */
+  const statusBulanan: TabStatus = !bulananEnabled
+    ? 'neutral'
+    : jumlahTujuanBulanan === 0
+      ? 'warning'
+      : 'success';
+  const labelBulanan = !bulananEnabled
+    ? 'Mati'
+    : jumlahTujuanBulanan === 0
+      ? 'Menyala, tapi belum ada tujuan yang mencentang “Terima rekap bulanan”'
+      : 'Menyala';
+
   return (
     <div>
       <PageHeader
@@ -313,6 +362,13 @@ export default async function FarmasiPage({
             status: statusPenjualan,
             statusLabel: labelPenjualan,
           },
+          {
+            key: 'bulanan',
+            href: '/farmasi?tab=bulanan',
+            label: 'Rekap bulanan',
+            status: statusBulanan,
+            statusLabel: labelBulanan,
+          },
         ]}
       />
 
@@ -333,6 +389,9 @@ export default async function FarmasiPage({
       )}
       {tab === 'penjualan' && (
         <TabPenjualan enabled={penjualanEnabled} adaTujuan={jumlahTujuanPenjualan > 0} />
+      )}
+      {tab === 'bulanan' && (
+        <TabBulanan enabled={bulananEnabled} adaTujuan={jumlahTujuanBulanan > 0} />
       )}
 
       {/* Keterangan yang dulu duduk di sini -- daftar tolak tidak berlaku, jam
@@ -373,6 +432,7 @@ async function TabTujuan({ pageParam, jumlahTujuan }: { pageParam: string | unde
     terimaHibah: t.terimaHibah,
     terimaPemesanan: t.terimaPemesanan,
     terimaPenjualan: t.terimaPenjualan,
+    terimaBulanan: t.terimaBulanan,
   }));
 
   const barisGrup: GrupRow[] = grup.map((g) => ({
@@ -872,6 +932,81 @@ async function TabPenjualan({ enabled, adaTujuan }: { enabled: boolean; adaTujua
       />
 
       <RekapForm nilai={nilaiRekap} adaTujuan={adaTujuan} />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tab: Rekap bulanan                                                        */
+/* ------------------------------------------------------------------------- */
+
+async function TabBulanan({ enabled, adaTujuan }: { enabled: boolean; adaTujuan: boolean }) {
+  const [tanggalRaw, jam, template, templateKosong, terakhir] = await Promise.all([
+    getSettingNumber('farmasi.bulanan_tanggal', TANGGAL_KIRIM_BAWAAN),
+    getSetting('farmasi.bulanan_jam', '08:00'),
+    getSetting('farmasi.template_bulanan', ''),
+    getSetting('farmasi.template_bulanan_kosong', ''),
+    getSetting('farmasi.bulanan_last_run', ''),
+  ]);
+
+  const nilai: NilaiBulanan = {
+    tanggal: tanggalRaw,
+    jam: jam ?? '08:00',
+    template: template ?? '',
+    templateKosong: templateKosong ?? '',
+  };
+
+  /**
+   * Bulan mana yang akan LANGSUNG berangkat begitu sakelarnya dinyalakan.
+   *
+   * Dihitung lewat `bulanJatuhTempo()` yang SAMA dipakai worker -- bukan
+   * penurunan kedua yang kebetulan sepakat hari ini. Dua tempat yang menghitung
+   * sendiri "apakah sudah jatuh tempo" adalah bentuk kegagalan yang sudah
+   * berkali-kali dibayar di proyek ini, dan yang menyimpang di sini akan
+   * menjanjikan kiriman yang tidak datang (atau mendiamkan kiriman yang datang).
+   */
+  const jamKirim = bacaJamRekap(jam ?? '08:00') ?? JAM_REKAP_BULANAN_BAWAAN;
+  const tglKirim = bacaTanggalKirim(tanggalRaw) ?? TANGGAL_KIRIM_BAWAAN;
+  const akanLangsung = bulanJatuhTempo(new Date(), tglKirim, jamKirim, terakhir ?? '');
+
+  return (
+    <section>
+      {/* TIDAK dilipat, dan bunyinya sengaja BERBEDA dari peringatan privasi di
+          tab Penjualan. Di sana kalimatnya "kolomnya ADA dan sengaja tidak
+          dibaca"; di sini yang perlu dikatakan justru kebalikannya -- rekap ini
+          satu-satunya di halaman Farmasi yang MENYENTUH `reg_periksa`, dan
+          pembacanya berhak tahu persis sejauh mana sentuhan itu. Menyamakannya
+          dengan tab lain akan menyembunyikan perbedaan yang paling perlu
+          diketahui. */}
+      <Callout
+        variant="privasi"
+        className="mb-4"
+        title="Rekap ini menyentuh tabel pendaftaran — untuk MENGHITUNG, bukan membaca"
+      >
+        <p>
+          Untuk menjawab <span className="font-medium">berapa PASIEN berbeda</span> yang menerima resep, satu query
+          menyentuh <span className="font-mono">reg_periksa</span> &mdash; satu-satunya di halaman Farmasi yang begitu.
+          Yang keluar dari query itu <span className="font-medium">satu bilangan</span>:{' '}
+          <span className="font-mono">COUNT(DISTINCT no_rkm_medis)</span>. Nomor rekam medisnya sendiri tidak pernah
+          menjadi kolom hasil, jadi merendernya ke dalam pesan bukan terlarang melainkan mustahil.
+        </p>
+        <p className="mt-2">
+          Tabel <span className="font-mono">pasien</span> tidak disebut sama sekali &mdash; nama, alamat, dan nomor
+          telepon tidak punya jalan menuju fitur ini. Begitu pula hasil telaah resep: yang dibaca cuma{' '}
+          <span className="font-medium">ada-tidaknya</span> barisnya, tidak pernah penilaian klinis di dalamnya.
+        </p>
+      </Callout>
+
+      <BulananSwitch
+        enabled={enabled}
+        adaTujuan={adaTujuan}
+        tanggal={nilai.tanggal}
+        jam={nilai.jam}
+        terakhir={terakhir ? labelBulan(terakhir) : ''}
+        langsungBerangkat={akanLangsung ? labelBulan(akanLangsung) : ''}
+      />
+
+      <BulananForm nilai={nilai} adaTujuan={adaTujuan} />
     </section>
   );
 }

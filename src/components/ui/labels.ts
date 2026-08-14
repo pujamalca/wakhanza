@@ -114,6 +114,12 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // membedakan ketiganya bukan isinya melainkan APAKAH ia satu kejadian atau
   // sehari penuh.
   FARMASI_RESEP_REKAP: 'Apotek: rekap resep harian',
+  // Rekap BULANAN (046). Kata "bulanan" wajib ada dan wajib berdampingan dengan
+  // "harian" di baris atasnya: keduanya sama-sama rekap apotek, dan satu-satunya
+  // yang membedakannya di tabel Antrean adalah periodenya. Label yang cuma
+  // berbunyi "rekap farmasi" akan membuat baris tanggal 3 tidak bisa dibedakan
+  // dari baris tiap malam.
+  FARMASI_BULANAN: 'Apotek: rekap bulanan',
   FARMASI_UJI: 'Apotek: pesan uji',
   FARMASI_STOK_DARURAT: 'Apotek: persediaan menipis',
   // Keempat NOTA BARANG, diurutkan seperti tabnya di /farmasi. Labelnya
@@ -167,6 +173,13 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // Tanpa itu, "kenapa pasien ini dapat suratnya dua kali" tidak bisa dijawab
   // dari layar: yang satu dikirim petugas, yang satu dikirim mesin.
   SURAT_SAKIT: 'Surat sakit (otomatis)',
+  // Satu-satunya baris /administrasi yang penerimanya BUKAN pasien, dan labelnya
+  // harus mengatakan itu sendiri. Kedua baris di atasnya mengirim berkas ke nomor
+  // seorang pasien; yang ini satu pesan berisi angka ke grup manajemen. Tanpa
+  // kata "rekap", baris di Antrean/Log terbaca sebagai surat yang gagal sampai ke
+  // pasien padahal memang tidak pernah ditujukan ke sana -- alasan yang sama
+  // persis dengan ketiga baris apotek dan ERM di atas.
+  ADMINISTRASI_BULANAN: 'Administrasi: rekap bulanan',
 };
 
 /** Kode yang belum dikenal dikembalikan apa adanya, bukan jadi string kosong. */

@@ -612,6 +612,169 @@ export const REKAP_PENILAIAN_TEMPLATE_VARIABLES = [
   'kontak_rs',
 ] as const;
 
+/**
+ * REKAP BULANAN FARMASI (`/farmasi?tab=bulanan`, migrations/046).
+ *
+ * Daftar TERSENDIRI dari `REKAP_RESEP_TEMPLATE_VARIABLES` walau sebagian nama
+ * variabelnya sama, dan pemisahannya bukan kerapian: rekap harian resep hanya
+ * berisi resep, sementara yang ini juga membawa keempat jalur barang. Digabung,
+ * staf bisa menyimpan template harian yang memuat `{jumlah_penjualan}` lalu
+ * menerimanya kosong setiap malam tanpa satu pun galat -- bentuk kegagalan yang
+ * sama persis yang membuat `REKAP_PENJUALAN_TEMPLATE_VARIABLES` dipisah dari
+ * `PENJUALAN_TEMPLATE_VARIABLES` (migrations/041).
+ *
+ * --------------------------------------------------------------------------
+ * `{jumlah_belum_validasi}` ADA di sini, sementara `{jumlah_divalidasi}` TETAP
+ * tidak ada di mana pun -- dan itu dua hal yang berbeda
+ * --------------------------------------------------------------------------
+ *
+ * Yang ditolak migrations/042 adalah jumlah yang SUDAH divalidasi: ia terukur
+ * sama dengan `{jumlah_resep}` pada praktis setiap periode, jadi ia kolom yang
+ * selamanya mengatakan hal yang sama. Yang ada di sini kebalikannya -- berapa
+ * yang BELUM -- dan terukur ia hampir selalu nol (12.465 dari 12.466 baris punya
+ * `tgl_perawatan` terisi). Nol itulah gunanya: ia kabar baik yang bermakna, dan
+ * hari ia berhenti nol adalah persis hari yang paling perlu terlihat. Aturan yang
+ * sama sudah dipakai rupiah per dokter di `formatRincianDokter()`.
+ *
+ * --------------------------------------------------------------------------
+ * `{jumlah_pasien}` dan `{jumlah_kunjungan}` KEDUANYA ada
+ * --------------------------------------------------------------------------
+ *
+ * Terukur keduanya jauh berbeda: Juli 2026 punya 634 kunjungan dari 541 pasien,
+ * selisih 15%. Menyediakan salah satunya saja berarti memilihkan tafsir untuk
+ * staf, dan tafsir yang salah tidak menghasilkan galat -- cuma angka yang meleset
+ * 15% setiap bulan. `{jumlah_pasien}` adalah SATU-SATUNYA alasan
+ * `khanza/farmasiBulanan.ts` menyebut `reg_periksa`; pagarnya ada di kepala
+ * berkas itu.
+ *
+ * --------------------------------------------------------------------------
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya
+ * --------------------------------------------------------------------------
+ *
+ * Seluruh HASIL telaah (`{resep_tepat_dosis}`, `{resep_interaksi_obat}`, dan
+ * kedelapan belas kolom enum lainnya di `telaah_farmasi`). Yang diminta adalah
+ * berapa resep yang belum ditelaah, bukan penilaian klinis atas resep seorang
+ * pasien -- dan query-nya memang tidak pernah men-SELECT satu pun, jadi
+ * merendernya bukan terlarang melainkan MUSTAHIL (§5.2).
+ *
+ * Juga tidak ada: nama pasien, no. RM, nama obat, nama pemasok, dan nama petugas.
+ * Rekap ini seluruhnya ANGKA.
+ *
+ * `{rincian_barang}` dan `{rincian_mutu}` masuk MULTILINE_VARIABLES di bawah --
+ * aman karena `core/farmasiBulanan.ts` merangkainya dari literal dan angka
+ * terformat saja, tanpa satu pun nilai dari `sik`. Dipatok unit test tersendiri
+ * di `farmasiBulanan.test.ts`.
+ */
+export const REKAP_BULANAN_TEMPLATE_VARIABLES = [
+  'bulan_rekap',
+  /* --- resep --- */
+  'jumlah_resep',
+  'jumlah_pasien',
+  'jumlah_kunjungan',
+  'jumlah_item',
+  'jumlah_obat',
+  'jumlah_racikan',
+  'jumlah_diserahkan',
+  'jumlah_belum_serah',
+  'jumlah_belum_validasi',
+  'jumlah_ditelaah',
+  'jumlah_tanpa_telaah',
+  'nilai_obat',
+  /* --- keempat jalur barang --- */
+  'jumlah_pengadaan',
+  'nilai_pengadaan',
+  'jumlah_pemesanan',
+  'nilai_pemesanan',
+  'jumlah_hibah',
+  'nilai_hibah',
+  'jumlah_penjualan',
+  'nilai_penjualan',
+  'rincian_barang',
+  'rincian_mutu',
+  /* --- identitas --- */
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
+
+/**
+ * REKAP BULANAN ADMINISTRASI (`/administrasi?tab=bulanan`, migrations/047).
+ *
+ * Daftar TERSENDIRI dari `REKAP_BULANAN_TEMPLATE_VARIABLES` walau keduanya
+ * berperiode bulan dan beberapa namanya sama (`{bulan_rekap}`, `{jumlah_pasien}`,
+ * `{jumlah_kunjungan}`). Pemisahannya bukan kerapian: yang farmasi menghitung
+ * pasien YANG DIRESEPKAN, yang ini menghitung SELURUH pasien yang datang.
+ * Digabung, staf bisa menyimpan template administrasi yang memuat
+ * `{nilai_obat}` lalu menerimanya kosong setiap bulan tanpa satu pun galat --
+ * bentuk kegagalan yang sama persis yang memisahkan
+ * `REKAP_PENJUALAN_TEMPLATE_VARIABLES` dari `PENJUALAN_TEMPLATE_VARIABLES`
+ * (migrations/041).
+ *
+ * --------------------------------------------------------------------------
+ * Kedua sisi disediakan, dan itu diminta
+ * --------------------------------------------------------------------------
+ *
+ * `{jumlah_ada_resep}` DAN `{jumlah_tanpa_resep}`, `{jumlah_baru_ada_asesmen}`
+ * DAN `{jumlah_baru_tanpa_asesmen}`. Keduanya diturunkan dari satu pembilang
+ * (`gabungAdmBulanan()`), jadi tidak ada risiko keduanya menyimpang -- dan
+ * menyediakan keduanya membuat RS bisa menyusun pesan yang menonjolkan pekerjaan
+ * (sisi "tanpa") atau capaian (sisi "ada") tanpa mengubah satu baris kode.
+ *
+ * --------------------------------------------------------------------------
+ * Yang TIDAK ada, dan ketiadaannya adalah pagarnya
+ * --------------------------------------------------------------------------
+ *
+ * Tidak ada `{nama_pasien}`, `{no_rm}`, `{nama_poli}`, `{nama_dokter}`,
+ * `{diagnosa}`, maupun satu pun isi asesmen/SOAPIE/resume. Rekap ini seluruhnya
+ * ANGKA, dan `khanza/administrasiBulanan.ts` membaca kelengkapan berkas lewat
+ * `EXISTS` -- bentuk yang menghasilkan boolean, sehingga isi rekam medisnya tidak
+ * punya tempat untuk ikut keluar dari SQL (§5.2).
+ *
+ * `{nama_poli}` layak disebut tersendiri karena ia yang paling menggoda
+ * ditambahkan: pecahan per poli terlihat berguna, dan pada bulan sepi satu baris
+ * "Poliklinik Kulit & Kelamin : 3" adalah keterangan tentang tiga orang tertentu.
+ *
+ * Ketiga `{rincian_*}` masuk MULTILINE_VARIABLES di bawah. `{rincian_cara_bayar}`
+ * SATU-SATUNYA di rekap ini yang membawa nilai dari `sik` (nama penjamin), dan
+ * `core/administrasiBulanan.ts` menyanitasinya di `gabungAdmBulanan()` -- bukan di
+ * perakit teksnya -- supaya tabel pratinjau dashboard ikut terjaga. Dipatok uji
+ * PERILAKU di `administrasiBulanan.test.ts`.
+ */
+export const REKAP_ADM_BULANAN_TEMPLATE_VARIABLES = [
+  'bulan_rekap',
+  /* --- kunjungan & pasien --- */
+  'jumlah_kunjungan',
+  'jumlah_pasien',
+  'jumlah_batal',
+  'jumlah_pasien_baru',
+  'jumlah_pasien_lama',
+  'jumlah_berulang',
+  'jumlah_kunjungan_berulang',
+  /* --- kelengkapan berkas, kedua sisinya --- */
+  'jumlah_ada_resep',
+  'jumlah_tanpa_resep',
+  'jumlah_ada_diagnosa',
+  'jumlah_ada_soapie',
+  'jumlah_ada_resume',
+  'jumlah_baru_ada_asesmen',
+  'jumlah_baru_tanpa_asesmen',
+  'jumlah_belum_bayar',
+  /* --- dokumen --- */
+  'jumlah_surat_sakit',
+  'jumlah_surat_kontrol',
+  /* --- daftar --- */
+  'rincian_cara_bayar',
+  'rincian_pasien',
+  'rincian_berkas',
+  /* --- identitas --- */
+  'tanggal',
+  'jam',
+  'nama_rs',
+  'alamat_rs',
+  'kontak_rs',
+] as const;
 
 /**
  * PEMBATALAN MOBILE JKN (`/bpjs`) -- penerimanya loket/pendaftaran, jadi
@@ -688,6 +851,8 @@ export const KNOWN_TEMPLATE_VARIABLES = [
     ...PENJUALAN_TEMPLATE_VARIABLES,
     ...REKAP_PENJUALAN_TEMPLATE_VARIABLES,
     ...REKAP_RESEP_TEMPLATE_VARIABLES,
+    ...REKAP_BULANAN_TEMPLATE_VARIABLES,
+    ...REKAP_ADM_BULANAN_TEMPLATE_VARIABLES,
     ...REKAP_PENILAIAN_TEMPLATE_VARIABLES,
     ...HIBAH_TEMPLATE_VARIABLES,
     ...PEMESANAN_TEMPLATE_VARIABLES,
@@ -707,6 +872,8 @@ export type TemplateVariable =
   | (typeof PENJUALAN_TEMPLATE_VARIABLES)[number]
   | (typeof REKAP_PENJUALAN_TEMPLATE_VARIABLES)[number]
   | (typeof REKAP_RESEP_TEMPLATE_VARIABLES)[number]
+  | (typeof REKAP_BULANAN_TEMPLATE_VARIABLES)[number]
+  | (typeof REKAP_ADM_BULANAN_TEMPLATE_VARIABLES)[number]
   | (typeof HIBAH_TEMPLATE_VARIABLES)[number]
   | (typeof PEMESANAN_TEMPLATE_VARIABLES)[number]
   | (typeof BPJS_BATAL_TEMPLATE_VARIABLES)[number]
@@ -790,6 +957,34 @@ const MULTILINE_VARIABLES = new Set<string>([
   // nama yang memuat baris baru bisa menyisipkan barisnya sendiri ke dalam
   // pesan. Patokannya di penilaianRekap.test.ts, sesuai kewajiban di atas.
   'daftar_pasien',
+  // Rekap bulanan farmasi (046). Dirakit `core/farmasiBulanan.ts`, dan keduanya
+  // adalah SATU-SATUNYA anggota himpunan ini yang tidak memanggil
+  // sanitizeValue() -- karena tidak ada satu pun nilai dari `sik` yang masuk ke
+  // dalamnya. Isinya seluruhnya literal yang ditulis di berkas itu sendiri plus
+  // angka yang sudah lewat formatJumlah/formatRupiah, yang keluarannya cuma
+  // digit dan pemisah.
+  //
+  // Itu membuatnya aman HARI INI dan rapuh terhadap perubahan: menambahkan nama
+  // pemasok, nama gudang, atau nama petugas ke salah satunya mengubahnya jadi
+  // perakit yang WAJIB menyanitasi, tanpa satu pun galat yang menandainya.
+  // Patokannya di farmasiBulanan.test.ts, berbentuk uji PERILAKU sesuai
+  // kewajiban di atas.
+  'rincian_barang',
+  'rincian_mutu',
+  // Rekap bulanan administrasi (047). Dirakit `core/administrasiBulanan.ts`.
+  //
+  // `rincian_pasien` dan `rincian_berkas` seluruhnya literal dan angka
+  // terformat, sekelas kedua variabel di atas. `rincian_cara_bayar` TIDAK --
+  // ia membawa `penjab.png_jawab`, input bebas petugas Khanza, dan itu membuat
+  // modul perakitnya WAJIB menyanitasi. Sanitasinya dikerjakan
+  // `gabungAdmBulanan()` alih-alih perakit teksnya, supaya nilainya sudah bersih
+  // juga di tabel pratinjau dashboard yang tidak melewati perakit itu sama
+  // sekali. Patokannya di administrasiBulanan.test.ts, berbentuk uji PERILAKU
+  // (nama penjamin berisi baris baru tidak boleh menambah baris) sesuai
+  // kewajiban di atas.
+  'rincian_cara_bayar',
+  'rincian_pasien',
+  'rincian_berkas',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

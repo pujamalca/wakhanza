@@ -64,10 +64,41 @@ function BantuanHasil() {
   );
 }
 
+function BantuanBulanan() {
+  return (
+    <HelpSection title="Satu-satunya bagian halaman ini yang tidak mengirim apa pun ke pasien">
+      <p>
+        Rekap ini membaca <Kode>reg_periksa</Kode> untuk satu bulan penuh &mdash; bulan sebelum bulan berjalan, selalu
+        &mdash; lalu mengirim <strong>satu pesan berisi angka</strong> ke grup staf pada tanggal dan jam yang disetel di
+        bawah. Periodenya tidak bisa diubah: bulan berjalan selalu setengah jadi, dan menyediakan pilihannya berarti
+        menyediakan cara menghasilkan angka yang salah tanpa satu pun galat.
+      </p>
+      <p>
+        Rekap yang <strong>terlewat akan dikejar</strong>, kebalikan dari rekap harian. Isinya bulan yang sudah tutup,
+        jadi angkanya sama persis apakah dikirim tanggal 3 atau tanggal 20 &mdash; worker yang mati sepekan lalu hidup
+        lagi tetap mengirim rekap yang utuh. Akibatnya, menyalakan sakelarnya sesudah tanggal kirim lewat membuat
+        rekapnya berangkat pada siklus berikutnya, bukan bulan depan.
+      </p>
+      <p>
+        Beberapa angka akan berbunyi <strong>0 atau nyaris 0</strong> di rumah sakit ini, dan itu terukur bukan dugaan:
+        diagnosa terisi pada 0,4% kunjungan, <Kode>resume_pasien</Kode> nol baris seluruhnya, surat kontrol satu baris,
+        dan surat sakit berhenti dicatat sejak Februari 2025. Semuanya tetap ditampilkan &mdash; nol di sini keadaan
+        yang bisa berubah, bukan sifat yang tetap, dan menyembunyikannya membuat &ldquo;belum diisi&rdquo; tidak bisa
+        dibedakan dari &ldquo;tidak dibaca&rdquo;.
+      </p>
+      <p>
+        Untuk memeriksa isinya sebelum menyalakan, jalankan <Kode>npm run dryrun:adm-bulanan</Kode> di server &mdash; ia
+        mencetak rekapnya berikut pemeriksaan pagar privasinya, tanpa mengirim apa pun.
+      </p>
+    </HelpSection>
+  );
+}
+
 const ISI = {
   sakit: BantuanSakit,
   sehat: BantuanSakit,
   hasil: BantuanHasil,
+  bulanan: BantuanBulanan,
   pengaturan: BantuanHasil,
 } as const;
 

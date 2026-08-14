@@ -5438,3 +5438,614 @@ Asersi ketiga yang paling penting: tanpa cabang init, `status` basi berbunyi
 
 `tsc --noEmit` 0, `eslint` 0, **938 uji unit** (dari 926), `next build`,
 `verify:db` (27 tabel, tulis ke `sik` ditolak), `verify:plans` lolos.
+
+### Rekap BULANAN farmasi (`migrations/046`)
+
+Seluruh bukti diambil 14 Agustus 2026 terhadap database produksi (`alca`) dan
+instance PM2 yang benar-benar dipakai. Nama rumah sakit dan nilai rupiah
+disamarkan seperlunya -- berkas ini tercatat di repositori publik.
+
+#### `telaah_farmasi` ADA -- dugaan awal terbantah data
+
+Permintaannya berbunyi "telaah ini yang belum ada sepertinya". Yang menjawabnya
+daftar tabelnya sendiri:
+
+```
+telaah_farmasi                                 10463 baris
+```
+
+Strukturnya: PK `no_resep` (VARCHAR(14)), dua puluh kolom `enum('Ya','Tidak')`
+hasil telaah, dan `nip` petugas. **Tidak ada satu pun kolom pasien** -- jadi
+menghitungnya tidak melebarkan pagar privasi apa pun.
+
+```
+telaah yatim (baris telaah tanpa resep_obat) : 0
+```
+
+Nol itu yang membuktikan arah join-nya (`resep_obat` LEFT JOIN `telaah_farmasi`)
+tidak menyembunyikan apa pun.
+
+#### Angka yang mengubah bentuk fiturnya
+
+```
+bulan    resep  kunjungan  blm-validasi  blm-serah  tanpa-telaah
+202602     467        441             0          9            30
+202603     599        568             0         24            19
+202604     629        593             0         35            13
+202605     541        507             0         24            48
+202606     629        589             0         99           100
+202607     685        634             0        175           145
+202608     349        328             0        103            53
+```
+
+Dua hal yang cuma terlihat dari periode BULAN:
+
+- **TREN.** Belum diserahkan 9 → 175 (2% → 25,5%); belum ditelaah 30 → 145.
+  Rekap harian menampilkan satu angka tanpa pembanding.
+- **PASIEN vs KUNJUNGAN**, terukur berbeda 15%:
+
+```
+202605  kunjungan   507  pasien-unik   449  selisih 58
+202606  kunjungan   589  pasien-unik   519  selisih 70
+202607  kunjungan   634  pasien-unik   541  selisih 93
+202608  kunjungan   328  pasien-unik   307  selisih 21
+```
+
+Keempat jalur barang, per bulan:
+
+```
+bulan   pengadaan          pemesanan   hibah   penjualan
+202604   34 Rp31,80 jt      0 Rp0       0 Rp0    765
+202605   31 Rp19,49 jt      0 Rp0       0 Rp0    732
+202606   42 Rp26,07 jt      0 Rp0       0 Rp0    681
+202607   26 Rp23,83 jt      0 Rp0       0 Rp0    716
+202608   20 Rp15,73 jt      0 Rp0       0 Rp0    307
+```
+
+Pemesanan dan hibah NOL pada setiap bulan -- keduanya tetap dibaca dan tetap
+ditampilkan sebagai 0, atas permintaan pemilik sistem.
+
+#### Prefiks `no_resep` EKSAK
+
+```
+total 12466, cocok 12397, tgl_peresepan kosong 69, MENYIMPANG 0
+```
+
+Nol menyimpang atas seluruh tabel. Sekelas `nota_jual` penjualan, bukan sekelas
+`no_faktur` pengadaan yang butuh margin -- tidak ada margin yang perlu
+ditambahkan.
+
+#### `belum_validasi` nol, dan itu bukan alasan membuangnya
+
+```
+tgl_perawatan: terisi 12465, nol 1, NULL 0
+```
+
+Satu baris bernilai nol. Jadi angkanya bukan konstanta struktural seperti
+`{status_resep}` (yang ditolak migrations/042 karena 'ralan' pada SELURUH baris),
+melainkan keadaan yang bisa berubah.
+
+#### Rencana query: kesepuluhnya lolos, nol `type: ALL`
+
+```
+[ok] FARMASI_BULANAN_RESEP ro range PRIMARY  rows~685
+[ok] FARMASI_BULANAN_RESEP tf eq_ref PRIMARY  rows~1  (Using index)
+[ok] FARMASI_BULANAN_ITEM rd range no_resep  rows~3046  (Using index)
+[ok] FARMASI_BULANAN_RACIKAN rr range PRIMARY  rows~24  (Using index)
+[ok] FARMASI_BULANAN_NILAI ro range PRIMARY  rows~685
+[ok] FARMASI_BULANAN_NILAI dpo ref PRIMARY  rows~2
+[ok] FARMASI_BULANAN_PASIEN ro range idx_resep_obat_noresep_rawat  rows~685  (Using index)
+[ok] FARMASI_BULANAN_PASIEN rp eq_ref PRIMARY  rows~1
+[ok] FARMASI_BULANAN_PENGADAAN pb range PRIMARY  rows~26
+[ok] FARMASI_BULANAN_PEMESANAN sp range PRIMARY  rows~1
+[ok] FARMASI_BULANAN_HIBAH hb range PRIMARY  rows~1
+[ok] FARMASI_BULANAN_PENJUALAN pj range PRIMARY  rows~716
+[ok] FARMASI_BULANAN_PENJUALAN_NILAI pj range PRIMARY  rows~716  (Using index)
+[ok] FARMASI_BULANAN_PENJUALAN_NILAI dj ref nota_jual  rows~1
+verify:plans lolos.
+```
+
+TANPA satu pun izin pindai penuh.
+
+#### Pagar privasi, diperiksa pada `Object.keys()` baris hasilnya
+
+`npm run dryrun:bulanan -- alca 202607`:
+
+```
+kolom yang benar-benar terbaca: jml_resep, jml_kunjungan, belum_validasi,
+  belum_serah, tanpa_telaah, jml_baris, jml_obat, jml_racikan, nilai_obat,
+  jml_pasien, jml, nilai
+[ok] PAGAR PRIVASI -- tidak satu pun kolom pasien, obat, dosis, atau hasil telaah terbaca
+[ok] diserahkan + belum diserahkan = jumlah resep
+[ok] ditelaah + belum ditelaah = jumlah resep
+```
+
+`no_rkm_medis` ada di daftar terlarang JUSTRU karena ia dipakai sebagai argumen
+`COUNT(DISTINCT ...)` -- kalau suatu saat ia ikut jadi kolom hasil, pemeriksaan
+inilah yang berbunyi.
+
+#### Pesan yang benar-benar dirender
+
+```
+*Rekap Farmasi Bulanan*
+<nama RS dari sik.setting>
+
+Periode : Juli 2026
+
+*Resep*
+Jumlah resep : 685
+Pasien berbeda : 541
+Kunjungan : 634
+Baris obat : 3.046
+Racikan : 24
+Sudah diserahkan : 510
+Nilai obat : Rp17.539.001
+
+*Perlu ditindaklanjuti*
+• Belum divalidasi : 0 (0%)
+• Belum diserahkan : 175 (25,5%)
+• Belum ditelaah : 145 (21,2%)
+
+*Barang*
+• Pengadaan : 26 faktur, Rp23.832.476
+• Pemesanan : 0 surat, Rp0
+• Hibah : 0 penerimaan, Rp0
+• Penjualan : 716 nota, Rp15.026.058
+
+Rekap otomatis, dikirim Jumat, 14 Agustus 2026.
+
+Kode Pengiriman : 2026-08-14 20:09:27 <kode>
+```
+
+`510 + 175 = 685` dan `540 + 145 = 685` -- keduanya berjumlah, karena diturunkan
+bukan di-query terpisah.
+
+#### Matematika bulanan: 22 uji, dan `setDate(1)` dibuktikan MENGGIGIT
+
+`bulanRekap()` menyetel tanggal ke 1 sebelum mengurangi bulan. Dirusak sengaja:
+
+```
+× BENAR pada tanggal 29-31, tempat setMonth meluber
+  Expected: "202602"
+  Received: "202603"
+Tests: 1 failed, 21 passed, 22 total
+```
+
+31 Maret dikurangi sebulan menghasilkan 3 Maret (Februari tidak punya tanggal
+31), bukan Februari. Dikembalikan, 22 lolos.
+
+#### Perilaku yang ditemukan saat VERIFIKASI, bukan saat merancang
+
+```
+sekarang            : 14/8/2026, 20.17.48
+bulan yang direkap  : 202607 (Juli 2026)
+jatuh tempo SEKARANG: 202607
+simulasi 3/9/2026 pukul 08:00 -> 202608
+```
+
+Tanggal kirim 3 sudah lewat dan penanda kosong, jadi begitu sakelarnya dinyalakan
+rekap Juli **langsung berangkat** -- bukan menunggu 3 September. Perilakunya benar
+(rekap terlewat memang sengaja dikejar) dan berguna, tapi tak terduga bagi orang
+yang menekan tombolnya. `BulananSwitch` sekarang membacakannya lebih dulu, lewat
+`bulanJatuhTempo()` yang SAMA dipakai worker.
+
+#### Sakelar mati = nol efek
+
+```
+outbox FARMASI_BULANAN: 0 -> 0
+[ok] tidak menulis apa pun saat sakelarnya mati
+```
+
+#### Siklus BENAR-BENAR terdaftar di worker yang sedang berjalan
+
+Dibuktikan dengan menyalakan sakelarnya SEMENTARA (nol tujuan mencentang
+`terima_bulanan`), menunggu satu siklus pindai penuh, lalu mengembalikannya.
+Aman karena bentuk kodenya: pemeriksaan tujuan ada SEBELUM `sik` disentuh.
+
+Log worker produksi:
+
+```json
+{"level":40,"pid":17876,"bulan":"202607",
+ "msg":"rekap bulanan farmasi jatuh tempo tapi belum ada tujuan yang mencentang \"terima rekap bulanan\""}
+```
+
+Satu baris itu membuktikan empat hal sekaligus: loop `farmasi-bulanan` terdaftar
+dan berputar; `bulanJatuhTempo()` mendeteksi 202607 jatuh tempo; pemeriksaan
+tujuan benar-benar di depan (`sik` tidak dibaca sama sekali); dan kegagalan
+setelan bersuara `warn` alih-alih diam.
+
+Keadaan sesudahnya:
+
+```
+sakelar dikembalikan ke "0"
+outbox  : 0 -> 0
+penanda : "" -> ""
+  [ok] nol pesan, dan penanda TIDAK maju -- persis cabang "belum ada tujuan"
+```
+
+Penanda yang TIDAK maju itu yang penting: cabang "belum ada tujuan" sengaja tidak
+memajukannya, karena ia keadaan salah setel yang bisa diperbaiki dalam hitungan
+detik -- dan memajukannya berarti rekap SEBULAN PENUH hilang begitu saja.
+
+#### Gerbang penuh
+
+```
+npm run typecheck    -> bersih
+npm run lint         -> bersih
+npm test             -> 55 suite, 979 uji, seluruhnya lolos
+npm run build        -> Compiled successfully (/farmasi terdaftar)
+npm run verify:plans -> lolos
+npm run verify:db    -> lolos (sik tulis DITOLAK, audit_log append-only tertegak)
+npm run migrate      -> 046_farmasi_bulanan.sql diterapkan
+pm2 restart wakhanza-web    -> online
+pm2 stop/start wakhanza-worker -> online, denyut 13 detik, status ready
+```
+
+Penanda fitur di build produksi:
+
+```
+HTTP /farmasi?tab=bulanan : 307 (redirect ke login -- rutenya ada, admin-only)
+  'Rekap bulanan'   : 14 berkas
+  'terima_bulanan'  : 3 berkas
+  'bulanan_tanggal' : 3 berkas
+  'rincian_mutu'    : 10 berkas
+  'Kirim rekap uji' : 2 berkas
+```
+
+#### Dua jebakan migrasi, keduanya dibayar di jalan
+
+1. **`app_setting` cuma `(k, v)`** -- tidak punya `updated_by`. INSERT gagal, dan
+   karena DDL MariaDB tidak transaksional `ALTER TABLE` sudah terlanjur masuk
+   sementara `schema_migrations` belum mencatat apa pun. Karena itu ALTER-nya
+   memakai `ADD COLUMN IF NOT EXISTS` -- satu-satunya di `migrations/`.
+2. **BOM.** `Set-Content -Encoding utf8` pada PowerShell 5.1 menulis BOM, dan
+   MariaDB menolaknya dengan galat sintaks yang menunjuk baris 1. Diperbaiki lewat
+   `[System.IO.File]::WriteAllText` dengan `UTF8Encoding($false)`.
+
+#### Yang BELUM terbukti, dan sengaja dikatakan
+
+Jalur TERJADWAL belum pernah menghasilkan satu baris `outbox` pun di produksi,
+karena `farmasi.bulanan_enabled` masih MATI dan nol tujuan mencentang
+`terima_bulanan` -- keduanya keputusan RS, bukan keputusan yang aman diambil
+sepihak. Yang sudah terbukti adalah seluruh rantai di bawahnya: kesepuluh query,
+penggabungan, perenderan, pagar privasi, dan matematika kejatuhtempoannya.
+
+Jangan membalik klaim ini: nol baris di sini BUKAN bukti bahwa jalur terjadwalnya
+tidak bekerja.
+
+---
+
+### Rekap BULANAN administrasi (`migrations/047`)
+
+Judulnya sama persis dengan seksi di `CLAUDE.md`; ini buktinya.
+
+#### Bentuk pemangkasnya
+
+Prefiks `no_rawat` EKSAK terhadap `tgl_registrasi` — pengukuran yang sama sudah
+dipakai migrations/044 dan tetap berlaku: 12.392 baris, cocok pada 12.392,
+menyimpang **0**.
+
+Rentang sebulan memakai bentuk prefiks pendek (`'2026/07/'` .. `'2026/08/'`),
+dan itu diperiksa menghasilkan jumlah yang sama dengan bentuk penuh:
+
+```
+SELECT COUNT(*) FROM reg_periksa WHERE no_rawat>='2026/07/' AND no_rawat<'2026/08/';
++--------------------+
+| dgn_prefiks_pendek |
+|                668 |
++--------------------+
+```
+
+#### Kolom yang dipilih, dan kolom yang DITOLAK — keduanya diukur
+
+`status_poli` versus `stts_daftar` (dipakai yang pertama):
+
+```
++-------------+-------------+------+
+| status_poli | stts_daftar |  n   |
++-------------+-------------+------+
+| Lama        | Lama        | 7490 |
+| Baru        | Baru        | 4817 |
+| Baru        | Lama        |   59 |
+| Lama        | Baru        |   26 |
++-------------+-------------+------+
+```
+
+85 baris dari 12.392 menyimpang. Yang dipakai `status_poli`, karena aturan
+"pasien baru wajib punya asesmen awal" ditegakkan migrations/044 terhadap kolom
+itu — memakai `stts_daftar` menghasilkan pembagi yang berbeda dari pembilangnya,
+sehingga rekap dan halaman `/erm/penilaian-umum` menyebut dua angka berbeda untuk
+satu pertanyaan pada hari yang sama.
+
+`status_bayar` versus ketiadaan `nota_jalan` (dipakai yang pertama):
+
+```
++-----------------------------+-----+
+| belum bayar TAPI ada nota   |   1 |
+| sudah bayar TAPI tanpa nota |   0 |
+| belum bayar DAN tanpa nota  | 102 |
+| total belum bayar           | 103 |
+| total tanpa nota            | 102 |
++-----------------------------+-----+
+```
+
+Satu baris menyimpang dari 12.392 (0,008%). `status_bayar` dipilih karena ia
+kolom pada tabel penggeraknya sendiri — nol join, terindeks, namanya menyebut
+isinya.
+
+#### Angka yang membenarkan fiturnya
+
+```
++---------+-----------+--------+-------+------+-----------+--------+----------+-------+
+| bln     | kunjungan | pasien | batal | baru | blm_bayar | soapie | diagnosa | resep |
++---------+-----------+--------+-------+------+-----------+--------+----------+-------+
+| 2026/01 |       596 |    507 |     3 |  160 |         3 |    295 |        5 |   564 |
+| 2026/02 |       471 |    393 |     8 |  116 |         8 |    268 |       25 |   441 |
+| 2026/03 |       597 |    504 |     3 |  183 |         3 |    349 |       30 |   568 |
+| 2026/04 |       631 |    549 |     4 |  170 |         4 |    269 |        3 |   593 |
+| 2026/05 |       541 |    463 |     2 |  132 |         7 |    230 |       15 |   507 |
+| 2026/06 |       644 |    539 |     6 |  188 |        15 |    232 |        7 |   589 |
+| 2026/07 |       668 |    563 |     2 |  191 |        10 |    486 |        3 |   634 |
++---------+-----------+--------+-------+------+-----------+--------+----------+-------+
+```
+
+SOAPIE bergerak 49% → 73%; diagnosa tidak pernah melewati 6% dan pada Juli 0,4%.
+
+Pasien berulang Juli 2026 — dihitung dari sebarannya, bukan diperkirakan:
+
+```
+kunjungan_per_pasien  jml_pasien
+                   1         482
+                   2          61
+                   3          17
+                   4           2
+                   5           1
+```
+
+482·1 + 61·2 + 17·3 + 2·4 + 1·5 = 668 kunjungan; 563 pasien; **81 berulang,
+menyumbang 186 kunjungan**.
+
+#### Dua angka yang akan selalu nol — COUNT(*), bukan TABLE_ROWS
+
+```
+resume_pasien  resume_ranap  pemeriksaan_ralan  diagnosa_pasien  nota_jalan  suratsakit  reg_periksa
+            0             0               5349             1344       12290          17        12392
+```
+
+Pelajaran migrations/030 dipatuhi: angkanya diambil dari `COUNT(*)`, bukan
+`information_schema.TABLE_ROWS` yang membulat ke nol pada tabel kecil.
+
+Surat kontrol di produksi: `skdp_bpjs` 1 baris, `bridging_surat_kontrol_bpjs` 0.
+Query keduanya DIBUKTIKAN terhadap arsip `sik` yang berisi:
+
+```
+skdp_bpjs (arsip sik)          253 baris, 2023-02-28 .. 2024-02-29
+bridging_surat_kontrol_bpjs  18843 baris, 2024-01-06 .. 2026-01-07
+
+SELECT COUNT(*) FROM skdp_bpjs
+  WHERE tanggal_rujukan >= '2024-01-01' AND tanggal_rujukan < '2024-02-01'   -> 176
+SELECT COUNT(*) FROM bridging_surat_kontrol_bpjs
+  WHERE tgl_surat >= '2025-10-01' AND tgl_surat < '2025-11-01'               -> 904
+real 0m0.046s   (keduanya sekaligus)
+```
+
+Jadi yang belum terbukti bukan query-nya melainkan bahwa RS ini mencatat surat
+kontrol. Jangan membalik klaim ini.
+
+Surat sakit: 17 baris seluruhnya, prefiks `SKS20240805` .. `SKS20250218`, lalu
+berhenti. Bulan prefiks nomor suratnya cocok dengan bulan kunjungannya pada
+ketujuh belas baris — tapi yang dipakai sebagai pemangkas tetap `no_rawat`, karena
+migrations/027 sudah mengukur bahwa tanggal di dalam `no_surat` berasal dari kotak
+**Tanggal Awal** (mulai istirahat), bukan dari hari suratnya disimpan.
+
+#### Rencana query — `npm run verify:plans`
+
+```
+[ok] ADM_BULANAN_KUNJUNGAN r range PRIMARY  rows~668
+[ok] ADM_BULANAN_KUNJUNGAN p eq_ref PRIMARY  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN rs eq_ref PRIMARY  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN pr ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN dp ref PRIMARY  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN ro ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_CARA_BAYAR r range idx_reg_periksa_rawat_rkm  rows~668  (Using index)
+[ok] ADM_BULANAN_CARA_BAYAR pj eq_ref PRIMARY  rows~1
+[ok] ADM_BULANAN_BERULANG <derived2> (hasil subquery, sudah tersaring)  rows~668
+[ok] ADM_BULANAN_BERULANG r range idx_reg_periksa_rawat_rkm  rows~668  (Using index)
+[ok] ADM_BULANAN_SURAT_SAKIT ss range no_rawat  rows~1  (Using index)
+[--] ADM_BULANAN_KONTROL_SKDP s ALL — pemindaian penuh yang disengaja  rows~1
+[--] ADM_BULANAN_KONTROL_BRIDGING b ALL — pemindaian penuh yang disengaja  rows~1
+
+verify:plans lolos.
+```
+
+Query gabungannya terukur **62 ms** atas rentang 668 kunjungan. Kelima subquery
+`EXISTS` masuk lewat indeks; tidak satu pun tabel dasar yang berangkat dari
+`reg_periksa` butuh izin pindai penuh.
+
+#### Pagar privasi — dibuktikan pada objek barisnya, dan MENGGIGIT
+
+`npm run dryrun:adm-bulanan` terhadap produksi:
+
+```
+  kolom yang benar-benar terbaca: jml_kunjungan, jml_pasien, jml_batal, jml_baru,
+  jml_belum_bayar, ada_resep, ada_diagnosa, ada_soapie, ada_resume,
+  baru_tanpa_asesmen, kd_pj, png_jawab, jml_pasien_berulang,
+  jml_kunjungan_berulang, jml
+  [ok] PAGAR PRIVASI -- tidak satu pun kolom identitas, poli, atau isi rekam medis terbaca
+```
+
+Dirusak sengaja (`MAX(r.no_rawat) AS no_rawat` disisipkan ke daftar SELECT):
+
+```
+  [BOCOR] kolom terlarang terbaca: no_rawat -- lihat komentar pembuka khanza/administrasiBulanan.ts
+EXIT SUNGGUHAN=1
+=== dikembalikan ===
+EXIT=0
+```
+
+Daftar terlarangnya sengaja mencakup keempat kolom klinis dari tabel yang
+disentuh lewat `EXISTS` (`keluhan`, `penilaian`, `kd_penyakit`, `diagnosa_utama`,
+dan seterusnya) — bukan karena kolomnya mungkin muncul hari ini, melainkan karena
+kehadirannya berarti seseorang mengubah `EXISTS` jadi JOIN.
+
+#### Invarian penjumlahan — janji yang dibaca orang dari pesannya
+
+```
+  [ok] baru + lama = kunjungan
+  [ok] ada resep + tanpa resep = kunjungan
+  [ok] asesmen terisi + belum = pasien baru
+  [ok] jumlah pecahan cara bayar = jumlah kunjungan
+```
+
+Keempatnya MENGGAGALKAN skripnya (exit 1) bila salah, bukan sekadar dicetak.
+Yang keempat menjaga `LEFT JOIN` pada `penjab`: dengan INNER, penjamin yang
+masternya terhapus hilang dari layar dan pecahannya berhenti berjumlah tanpa satu
+pun keterangan.
+
+#### Pagar sanitasi dan multiline — keduanya MENGGIGIT
+
+`rincian_cara_bayar` adalah satu-satunya variabel berbaris banyak di rekap ini
+yang membawa nilai dari `sik` (`penjab.png_jawab`), jadi kewajiban menyanitasi
+berlaku penuh — berbeda dari `rincian_barang`/`rincian_mutu` milik 046, yang aman
+tanpa sanitasi karena tidak satu pun nilai `sik` masuk ke dalamnya.
+
+Dilepas dari `MULTILINE_VARIABLES`:
+
+```
+× rincian_cara_bayar tetap DUA baris sesudah renderTemplate
+Tests: 1 failed, 22 passed, 23 total
+```
+
+`sanitizeValue()` dilepas dari `gabungAdmBulanan()`:
+
+```
+× memangkas nama yang kelewat panjang
+× nama penjamin berisi BARIS BARU tidak boleh menambah baris
+× nama penjamin sudah bersih SEBELUM perakit teksnya dipanggil
+Tests: 3 failed, 20 passed, 23 total
+```
+
+Keduanya kembali `23 passed` sesudah dipulihkan. Sanitasinya sengaja dikerjakan
+di `gabungAdmBulanan()` dan bukan di perakit teksnya, supaya nilainya sudah bersih
+juga di tabel pratinjau dashboard yang tidak melewati perakit itu sama sekali —
+itu yang dipatok uji ketiga.
+
+**Satu asersi saya sendiri yang keliru, dicatat karena pelajarannya berulang:**
+percobaan pertama menuntut teks sisipan HILANG (`not.toContain('999')`).
+`sanitizeValue()` melipat baris baru jadi SPASI, jadi teksnya memang tetap
+terbaca — di dalam baris yang sama, sebagai bagian dari nama yang jelas rusak.
+Yang dijaga adalah JUMLAH BARISNYA, bukan sensor isi; menuntut teksnya hilang
+berarti menuntut sesuatu yang bukan tugas `sanitizeValue` dan tidak pernah bisa
+lengkap. Asersinya diperbaiki jadi `not.toMatch(/\n\s*•/)`.
+
+#### Grant per-tabel — kesembilan kalinya terbukti tidak diwarisi
+
+```
+SEBELUM grant:
+  SELECT: 1                                  (lolos)
+  UPDATE: ERROR 1142 (42000) ... denied to user 'wakhanza_rw'@'localhost'
+                                  for table 'administrasi_target'
+  DELETE: ERROR 1142 (42000) ... denied to user 'wakhanza_rw'@'localhost'
+                                  for table 'administrasi_target'
+
+GRANT UPDATE, DELETE ON wakhanza.administrasi_target TO 'wakhanza_rw'@'localhost';
+
+SESUDAH grant:
+  label      -> UJI GRANT 2     (UPDATE berhasil)
+  sisa_baris -> 0               (DELETE berhasil, baris uji dibersihkan)
+```
+
+#### Kelima gerbang
+
+```
+tsc --noEmit            0 galat
+eslint .                0 galat
+jest                    56 suite, 1002 uji lolos
+verify:db               sik tulis DITOLAK; audit_log DELETE/UPDATE DITOLAK
+verify:plans            lolos (13 baris EXPLAIN untuk enam query baru)
+next build              lolos
+```
+
+#### Pemasangan
+
+`npm run migrate` menerapkan `047_administrasi_bulanan.sql` (1 migrasi).
+`pm2 restart wakhanza-web` dijalankan dan sehat (`✓ Ready in 171ms`);
+`GET /administrasi?tab=bulanan` menjawab **307** ke `/login` — gerbang admin
+bekerja, dan halaman yang rusak akan menjawab 500. Penanda fiturnya ada di build:
+
+```
+grep -rl "Rekap bulanan administrasi" .next/server
+  .next/server/chunks/ssr/src_app_(dashboard)_administrasi_*.js
+```
+
+`wakhanza-worker` dimulai ulang lewat prosedur tiga langkah yang terdokumentasi
+(stop -> pastikan Chromium pemegang sesi bersih -> start), dari PowerShell:
+
+```
+Chromium pemegang sesi tersisa: 0
+wakhanza-worker  fork  pid 3936  online  0 restart
+wa_session: status=ready, umur denyut 20 dtk
+```
+
+Restart ini dikerjakan SEKARANG dan bukan ditunda, dengan alasan yang sudah
+dibayar di migrations/038: selama sakelarnya mati perilaku kode lama dan baru
+identik, tapi begitu staf menyalakannya pada worker yang belum dimulai ulang,
+sakelarnya menyala di dasbor sementara worker tidak pernah mengerjakan apa pun --
+gagal DIAM, tanpa satu pun galat.
+
+**Siklus `administrasi-bulanan` sendiri belum menuliskan satu baris log pun, dan
+itu SESUAI RANCANGAN**: `runAdministrasiBulananIfDue()` membaca sakelarnya di
+baris pertama lalu kembali tanpa menyentuh apa pun selama ia mati. Jadi diamnya
+log bukan bukti bahwa siklusnya tidak terpasang -- yang membuktikan pemasangannya
+adalah `tsc`, `next build`, dan worker yang menyala bersih dengan pid baru
+memakai build yang memuatnya.
+
+**Pesan sungguhnya, dirender dari data produksi Juli 2026** (nama RS disamarkan
+di catatan ini; keluaran aslinya memuat identitas RS apa adanya):
+
+```
+*Rekap Administrasi Bulanan*
+<nama RS>
+
+Periode : Juli 2026
+
+*Kunjungan*
+Total kunjungan : 668
+Pasien berbeda : 563
+
+• Pasien baru : 191 kunjungan (28,6%)
+• Pasien lama : 477 kunjungan (71,4%)
+• Datang lebih dari sekali bulan ini : 81 pasien (14,4%), 186 kunjungan
+• Batal periksa : 2 (0,3%)
+
+*Cara bayar*
+• UMUM : 473 kunjungan (70,8%), 411 pasien
+• BPJS Kesehatan : 195 kunjungan (29,2%), 156 pasien
+
+*Kelengkapan berkas terisi*
+• Resep : 634 (94,9%)
+• SOAPIE : 486 (72,8%)
+• Diagnosa : 3 (0,4%)
+• Resume : 0 (0%)
+• Asesmen awal : 94 dari 191 pasien baru (49,2%)
+
+*Perlu ditindaklanjuti*
+Asesmen awal belum diisi : 97
+Kunjungan tanpa resep : 34
+Belum closing billing : 10
+
+*Surat*
+Surat sakit : 0
+Surat kontrol : 0
+```
+
+**Yang BELUM terbukti**: jalur terjadwalnya belum pernah benar-benar berbunyi ke
+sebuah grup, karena `administrasi.bulanan_enabled` masih MATI dan belum ada satu
+pun baris `administrasi_target`. Yang sudah terbukti adalah seluruh rantai di
+bawahnya: keenam query, penggabungan, perenderan, pagar privasi, keempat invarian
+penjumlahan, dan matematika kejatuhtempoannya — yang terakhir dipakai BERSAMA
+dengan rekap bulanan farmasi yang sudah berjalan, jadi ia bukan kode yang belum
+pernah dijalankan.
+
+Jangan membalik klaim ini: nol baris di sini BUKAN bukti bahwa jalur terjadwalnya
+tidak bekerja.
