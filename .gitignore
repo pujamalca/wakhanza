@@ -12,6 +12,9 @@
 # Sesi WhatsApp aktif. Berisi kredensial.
 # WAJIB dicadangkan bersama database, TAPI di luar git.
 .wwebjs_auth/
+# Cadangan sesi saat penautan ulang -- isinya kredensial WhatsApp, sama sekali
+# tidak boleh masuk repo. Pola di atas hanya cocok dengan namanya yang persis.
+.wwebjs_auth.bak-*/
 .wwebjs_cache/
 
 # Cadangan terenkripsi (scripts/backup.ps1) -- berisi seluruh dump database
