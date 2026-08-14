@@ -570,6 +570,13 @@ export const REKAP_RESEP_TEMPLATE_VARIABLES = [
    */
   'nilai_obat',
   'rincian_dokter',
+  /**
+   * Pecahan per CARA BAYAR (migrations/049). BPJS berupa PIUTANG, umum berupa
+   * KAS -- tanpa ini `{nilai_obat}` adalah satu angka yang mencampur uang yang
+   * sudah masuk dengan uang yang belum. Terukur Juli 2026: dari Rp17.539.001,
+   * Rp2.181.685 (12,4%) milik pasien BPJS.
+   */
+  'rincian_cara_bayar',
   'tanggal',
   'jam',
   'nama_rs',

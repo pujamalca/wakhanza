@@ -1,5 +1,6 @@
 import { sanitizeValue } from './template';
 import { formatJumlah, formatRupiah } from './notaBarang';
+import { isianSurat } from './suratDoc';
 import type { JamRekap } from './rekapJadwal';
 
 /**
@@ -77,6 +78,22 @@ export interface BarisRekapResepNilai {
   nilai_obat: number | string | null;
 }
 
+export interface BarisRekapResepCaraBayar {
+  kd_pj: string | null;
+  png_jawab: string | null;
+  jml_resep: number | string;
+  nilai_obat: number | string | null;
+}
+
+/** Satu penjamin dan porsinya hari itu. */
+export interface BarisCaraBayarResep {
+  kode: string;
+  /** Sudah dibersihkan dan disanitasi. Kosong bila masternya tidak menyebutkan apa pun. */
+  nama: string;
+  jmlResep: number;
+  nilaiObat: number;
+}
+
 export interface BarisDokter {
   kdDokter: string;
   namaDokter: string;
@@ -99,6 +116,11 @@ export interface RingkasRekapResep {
   jmlRacikan: number;
   nilaiObat: number;
   perDokter: BarisDokter[];
+  /**
+   * Pecahan per CARA BAYAR (migrations/049) -- BPJS berupa piutang, umum berupa
+   * kas, dan `nilaiObat` di atas mencampur keduanya jadi satu angka.
+   */
+  perCaraBayar: BarisCaraBayarResep[];
   /** Hari itu tidak ada satu resep pun. Menentukan template mana yang dipakai. */
   kosong: boolean;
 }
@@ -151,6 +173,7 @@ export function gabungRekapResep(
   item: BarisRekapResepItem[],
   racikan: BarisRekapResepRacikan[],
   nilai: BarisRekapResepNilai[],
+  caraBayar: BarisRekapResepCaraBayar[] = [],
 ): RingkasRekapResep {
   const per = new Map<string, BarisDokter>();
 
@@ -249,6 +272,22 @@ export function gabungRekapResep(
     nilaiObat: jumlah((b) => b.nilaiObat),
     perDokter,
     /**
+     * Dipetakan APA ADANYA dari barisnya, tidak diturunkan dari `perDokter` --
+     * keduanya memecah populasi yang sama menurut sumbu yang berbeda dan tidak
+     * saling menyimpulkan.
+     *
+     * `isianSurat()` lebih dulu, `sanitizeValue()` sesudahnya, dan urutan itu
+     * mengikat: `penjab.png_jawab` bisa berisi penanda `'-'` milik Khanza, dan
+     * `sanitizeValue('-')` akan meloloskannya apa adanya sehingga barisnya
+     * berbunyi "- : 49 resep". Pola yang sama dengan `gabungAdmBulanan()`.
+     */
+    perCaraBayar: caraBayar.map((b) => ({
+      kode: String(b.kd_pj ?? '').trim(),
+      nama: sanitizeValue(isianSurat(b.png_jawab)),
+      jmlResep: angka(b.jml_resep),
+      nilaiObat: angka(b.nilai_obat),
+    })),
+    /**
      * Ditentukan JUMLAH RESEP, bukan jumlah baris obatnya.
      *
      * Hari yang resepnya ada tapi tidak satu pun punya baris obat (terukur:
@@ -302,6 +341,41 @@ export function formatRincianDokter(rows: BarisDokter[]): string {
       if (b.jmlRacikan > 0) bagian.push(`${formatJumlah(b.jmlRacikan)} racikan`);
       bagian.push(formatRupiah(b.nilaiObat));
       return `• ${nama} : ${bagian.join(', ')}`;
+    })
+    .join('\n');
+}
+
+/**
+ * `{rincian_cara_bayar}` -- pecahan resep hari itu per penjamin (migrations/049).
+ *
+ * Lahir dari kebutuhan AKUNTANSI, bukan dari perancangan: BPJS berupa PIUTANG,
+ * umum berupa KAS. Tanpa pecahan ini `{nilai_obat}` adalah satu angka yang
+ * mencampur uang yang sudah masuk dengan uang yang belum -- terukur Juli 2026,
+ * dari Rp17.539.001 ternyata Rp2.181.685 (12,4%) milik pasien BPJS.
+ *
+ * RUPIAH selalu disebut, termasuk saat nol, dengan alasan yang sama persis yang
+ * ditulis untuk `formatRincianDokter()`: ia yang membuat `{nilai_obat}` di kepala
+ * pesan bisa dicocokkan -- jumlahkan kolom rupiah di daftar ini, hasilnya harus
+ * sama persis. Baris yang kadang menyebut rupiah dan kadang tidak membuat
+ * penjumlahan itu mustahil. Jumlah RESEP-nya pun berjumlah dengan
+ * `{jumlah_resep}`; terukur Juli 2026: 500 + 185 = 685.
+ *
+ * `sanitizeValue()` sudah dipanggil di `gabungRekapResep()`, bukan di sini --
+ * supaya nilainya sudah bersih juga di mana pun `BarisCaraBayarResep` dipakai
+ * langsung. Variabel ini masuk `MULTILINE_VARIABLES`, jadi `renderTemplate()`
+ * TIDAK menyanitasinya lagi.
+ *
+ * Penjamin yang namanya tidak terbaca dari master ditampilkan lewat KODENYA,
+ * bukan dibuang dan bukan pula sebagai baris tanpa label -- membuangnya membuat
+ * jumlah pecahannya lebih kecil daripada `{jumlah_resep}` tanpa satu pun
+ * keterangan.
+ */
+export function formatRincianCaraBayarResep(rows: BarisCaraBayarResep[]): string {
+  if (rows.length === 0) return '(tidak ada resep)';
+  return rows
+    .map((b) => {
+      const label = b.nama || `(kode ${sanitizeValue(b.kode) || 'kosong'})`;
+      return `• ${label} : ${formatJumlah(b.jmlResep)} resep, ${formatRupiah(b.nilaiObat)}`;
     })
     .join('\n');
 }

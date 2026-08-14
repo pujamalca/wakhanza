@@ -6231,3 +6231,203 @@ terbukti adalah seluruh rantai di bawahnya: query `kd_pj`, keputusan murninya
 berikut ketiga kasus pinggirnya, jalur `lolosCaraBayarDokumen()` terhadap
 kunjungan sungguhan, dan rencana query-nya.
 
+---
+
+### Pecahan cara bayar pada rekap resep (`migrations/049`)
+
+Judulnya sama persis dengan seksi di `CLAUDE.md`; ini buktinya.
+
+#### Angka yang melahirkan fiturnya
+
+Juli 2026, database produksi:
+
+```
+UMUM             500 resep   Rp15.357.316   <- kas
+BPJS Kesehatan   185 resep    Rp2.181.685   <- piutang
+------------------------------------------
+total            685 resep   Rp17.539.001
+```
+
+12,4% dari angka yang selama ini dibaca sebagai satu kesatuan ternyata belum jadi
+uang. Totalnya cocok dengan `nilaiObat` yang sudah dipatok di
+`farmasiBulanan.test.ts` (17.539.001) dan dengan `COUNT(*)` `resep_obat` Juli
+(685) — jadi pecahannya benar-benar membagi habis, bukan mendekati.
+
+#### Tidak ada jalan lain menuju `kd_pj`
+
+```
+SHOW COLUMNS FROM detail_pemberian_obat;
+  tgl_perawatan jam no_rawat kode_brng h_beli biaya_obat jml
+  embalase tuslah total status kd_bangsal no_batch no_faktur
+```
+
+Nol kolom penjamin. `kd_pj` hanya hidup di `reg_periksa`, jadi pilihannya bukan
+"cara lain yang lebih aman" melainkan antara menyediakan pecahan ini atau tidak
+sama sekali.
+
+#### Invarian 042 yang dilonggarkan, dan apa yang menggantikannya
+
+`khanza/farmasiStaf.ts` menyatakan di atas query headernya bahwa `reg_periksa` dan
+`pasien` TIDAK di-JOIN sama sekali. Query cara bayar MENYEBUT `reg_periksa`.
+Pagarnya berpindah dari "tabelnya tidak disebut" ke bentuk kode:
+
+1. Query TERSENDIRI, bukan join tambahan pada agregat yang sudah ada.
+2. `pasien` tetap tidak disebut; `no_rkm_medis` tidak diambil.
+3. Yang meninggalkan SQL cuma `kd_pj`, `png_jawab`, dan dua angka.
+
+Ketiga klaim yang kini keliru sudah diperbaiki di tempatnya, bukan dibiarkan:
+bullet 042 di `CLAUDE.md`, butir kebijakannya, dan `ARCHITECTURE.md` §5.2.
+Dokumen yang menuliskan aturan MUTLAK sementara kodenya sudah punya kekecualian
+adalah bentuk dokumen basi yang paling berbahaya — pembacanya menyimpulkan sistem
+ini tidak bisa melakukan sesuatu yang sebenarnya bisa.
+
+#### Rencana query
+
+```
+[ok] FARMASI_RESEP_REKAP_CARA_BAYAR ro range PRIMARY  rows~50
+[ok] FARMASI_RESEP_REKAP_CARA_BAYAR r eq_ref PRIMARY  rows~1
+[ok] FARMASI_RESEP_REKAP_CARA_BAYAR pj eq_ref PRIMARY  rows~1
+[ok] FARMASI_RESEP_REKAP_CARA_BAYAR dpo ref PRIMARY  rows~2
+
+verify:plans lolos.
+```
+
+Tanpa izin pindai penuh. `ro` masuk lewat prefiks `no_resep` (PRIMARY),
+`reg_periksa` lewat `no_rawat` (PRIMARY), dan `detail_pemberian_obat` lewat tiga
+kolom terdepan PRIMARY KEY-nya.
+
+#### Dua jebakan SQL, keduanya dibuktikan
+
+**(1) `COUNT(*)` salah 4,5 kali.** `detail_pemberian_obat` berisi satu baris per
+BARANG, jadi join ke sana menggandakan baris resepnya:
+
+```
+png_jawab        COUNT(*)   COUNT(DISTINCT no_resep)
+BPJS Kesehatan        605                        185
+UMUM                 2503                        500
+                    -----                      -----
+                     3108                        685   <- resep sungguhan: 685
+```
+
+3.108 tetap terlihat wajar di dalam sebuah pesan. Dibuktikan MENGGIGIT dengan
+mengganti `COUNT(DISTINCT)` jadi `COUNT(*)` di query produksinya:
+
+```
+[SALAH] 40 != jumlah per cara bayar 181
+EXIT=1
+```
+
+**(2) LEFT JOIN, bukan INNER.** Satu query menghasilkan dua angka dengan pembagi
+yang berbeda — jumlah resep harus berjumlah dengan `{jumlah_resep}` (SELURUH
+resep), rupiahnya dengan `{nilai_obat}` (yang tertagih saja). INNER membuat
+pecahan resepnya hanya menghitung yang sudah divalidasi.
+
+#### Empat invarian penjumlahan, dijaga skripnya
+
+`npm run dryrun:resep -- alca 2026-07-31`:
+
+```
+kolom yang benar-benar terbaca: kd_dokter, nm_dokter, jml_resep, jml_serah,
+  jml_baris, jml_obat, nilai_obat, kd_pj, png_jawab
+[ok] PAGAR PRIVASI -- tidak satu pun kolom pasien, obat, atau dosis terbaca
+
+[ok] total rupiah = jumlah rupiah seluruh dokter
+[ok] jumlah resep = jumlah resep seluruh cara bayar
+[ok] total rupiah = jumlah rupiah seluruh cara bayar
+[ok] diserahkan + belum = jumlah resep
+```
+
+Dua yang di tengah baru; keempatnya menggagalkan skripnya (exit 1) bila salah.
+Perhatikan daftar kolomnya: yang bertambah HANYA `kd_pj` dan `png_jawab`.
+
+#### Pesannya, dirender dari data produksi
+
+```
+*Nilai obat : Rp893.717*
+
+*Rincian per cara bayar:*
+• UMUM : 31 resep, Rp815.981
+• BPJS Kesehatan : 9 resep, Rp77.736
+
+*Rincian per dokter:*
+• dr. Intan Rahma Dewi : 40 resep, 184 baris obat, Rp893.717
+```
+
+31 + 9 = 40 resep; Rp815.981 + Rp77.736 = Rp893.717. Ditaruh SEBELUM rincian per
+dokter karena ia yang menerangkan angka tepat di atasnya: berapa dari jumlah itu
+yang sudah jadi kas.
+
+#### Pagar sanitasi — MENGGIGIT
+
+`rincian_cara_bayar` sudah ada di `MULTILINE_VARIABLES` sejak migrations/047, dan
+pengecualian itu berlaku untuk NAMA variabelnya — jadi perakit BARU yang memakai
+nama yang sama mewarisinya tanpa satu baris pun perubahan di sana. Tidak ada satu
+pun galat yang muncul bila perakitnya lupa menyanitasi; patokan ini yang
+menggantikan galat itu.
+
+`sanitizeValue()` dilepas dari pemetaan penjamin:
+
+```
+× nama penjamin berisi BARIS BARU tidak boleh menambah baris
+Tests: 1 failed, 33 passed, 34 total
+```
+
+Kembali `34 passed` sesudah dipulihkan. 11 uji ditambahkan (suite 1.009 -> 1.020).
+
+#### Kelima gerbang
+
+```
+tsc --noEmit            0 galat
+eslint .                0 galat
+jest                    56 suite, 1020 uji lolos (dari 1009)
+verify:db               sik tulis DITOLAK; audit_log DELETE/UPDATE DITOLAK
+verify:plans            lolos; empat baris EXPLAIN untuk query baru
+next build              lolos (Compiled successfully in 7,2s)
+```
+
+#### Pemasangan — dan di sini restartnya WAJIB, bukan opsional
+
+`npm run migrate` menerapkan `049_resep_rekap_cara_bayar.sql`. Template tersimpan
+diperiksa sesudahnya dan benar memuat kedua baris barunya.
+
+Migrasinya memakai jangkar TANPA baris baru (`*Nilai obat : {nilai_obat}*`)
+berikut `IF(v LIKE '%\r\n%', ...)`. Diperiksa langsung sebelum berkas itu ditulis:
+
+```
+k                             pakai_crlf  sudah_ada
+farmasi.template_resep_rekap           1          0
+```
+
+Template tersimpan memakai **CRLF** — karena staf menyimpannya lewat form dan
+`<textarea>` mengirimkan CRLF sesuai spesifikasi HTML. `REPLACE()` yang
+menambatkan diri pada teks ber-`\n` tidak akan cocok sama sekali, tanpa galat,
+sementara migrasinya tetap tercatat "berhasil" (pelajaran migrations/043).
+
+**Berbeda dari 048, di sini worker WAJIB dimulai ulang dan itu mendesak:**
+
+```
+farmasi.resep_rekap_enabled   1
+farmasi.resep_rekap_jam       20:00
+farmasi.resep_rekap_last_run  2026-08-14
+```
+
+Fiturnya SEDANG BERJALAN dan berbunyi hari itu juga pukul 20:00. Tanpa restart,
+`{rincian_cara_bayar}` dirender kode lama yang tidak mengenalnya lalu menghasilkan
+`*Rincian per cara bayar:*` yang menggantung — bentuk kegagalan yang sama persis
+dengan label total hibah tanpa angka (031) dan `*Nilai obat : *` (043).
+
+Dikerjakan lewat prosedur tiga langkah, dan sengaja DIKUMPULKAN dengan 048
+supaya cukup sekali restart (aturan "jangan menyalakan ulang worker dua kali
+berdekatan"):
+
+```
+Chromium pemegang sesi tersisa: 0
+wakhanza-worker  fork  pid 9420  online  0 restart
+wa_session: status=ready, umur denyut 23 dtk
+```
+
+**Yang BELUM terbukti**: pecahannya belum pernah ikut dalam rekap terjadwal yang
+sungguhan — kiriman pertamanya jatuh pukul 20:00 pada hari migrasinya diterapkan.
+Yang sudah terbukti adalah seluruh rantai di bawahnya: query-nya terhadap data
+produksi, keempat invarian penjumlahannya, perenderan pesannya, pagar privasinya,
+dan pagar sanitasinya.

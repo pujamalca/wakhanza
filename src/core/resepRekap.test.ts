@@ -1,6 +1,7 @@
 import {
   gabungRekapResep,
   formatRincianDokter,
+  formatRincianCaraBayarResep,
   JAM_REKAP_RESEP_BAWAAN,
   type BarisRekapResepHeader,
   type BarisRekapResepItem,
@@ -345,5 +346,134 @@ describe('JAM_REKAP_RESEP_BAWAAN', () => {
    */
   it('adalah 22:00', () => {
     expect(JAM_REKAP_RESEP_BAWAAN).toEqual({ jam: 22, menit: 0 });
+  });
+});
+
+/**
+ * Pecahan CARA BAYAR (migrations/049) -- BPJS piutang, umum kas.
+ *
+ * Nilai contohnya diambil dari 31 Juli 2026 di database produksi, hari yang
+ * angkanya berjumlah rapi dan karena itu bisa dipakai mematok kedua invariannya.
+ */
+function caraBayar(
+  kd: string | null,
+  nama: string | null,
+  jml: number | string,
+  nilai: number | string | null,
+) {
+  return { kd_pj: kd, png_jawab: nama, jml_resep: jml, nilai_obat: nilai };
+}
+
+describe('pecahan cara bayar pada rekap resep harian', () => {
+  const juli31 = [caraBayar('A01', 'UMUM', 31, 815981), caraBayar('A02', 'BPJS Kesehatan', 9, 77736)];
+
+  it('memetakan barisnya apa adanya', () => {
+    const r = gabungRekapResep([], [], [], [], juli31);
+    expect(r.perCaraBayar).toHaveLength(2);
+    expect(r.perCaraBayar[0]).toMatchObject({ kode: 'A01', nama: 'UMUM', jmlResep: 31, nilaiObat: 815981 });
+    expect(r.perCaraBayar[1]).toMatchObject({ kode: 'A02', nama: 'BPJS Kesehatan', jmlResep: 9, nilaiObat: 77736 });
+  });
+
+  /**
+   * Janji yang dibaca orang dari pesannya: `{jumlah_resep}` dan `{nilai_obat}` di
+   * kepala harus sama dengan jumlah kolom di `{rincian_cara_bayar}` di bawahnya.
+   *
+   * Keduanya bisa gagal sendiri-sendiri, dan sebabnya berbeda: jumlah resep gagal
+   * kalau `COUNT(DISTINCT)` diganti `COUNT(*)` (terukur salah 4,5 kali), rupiahnya
+   * gagal kalau LEFT JOIN diganti INNER.
+   */
+  it('berjumlah dengan angka di kepala pesan', () => {
+    const r = gabungRekapResep(
+      [header('D1', { jml_resep: 40, jml_serah: 30 })],
+      [],
+      [],
+      [{ kd_dokter: 'D1', nilai_obat: 893717 }],
+      juli31,
+    );
+    expect(r.perCaraBayar.reduce((t, b) => t + b.jmlResep, 0)).toBe(r.jmlResep);
+    expect(r.perCaraBayar.reduce((t, b) => t + b.nilaiObat, 0)).toBe(r.nilaiObat);
+  });
+
+  it('menerima agregat sebagai string dari mysql2', () => {
+    const r = gabungRekapResep([], [], [], [], [caraBayar('A01', 'UMUM', '31', '815981')]);
+    expect(r.perCaraBayar[0]!.jmlResep).toBe(31);
+    expect(r.perCaraBayar[0]!.nilaiObat).toBe(815981);
+  });
+
+  it('membuang penanda kosong Khanza dari nama penjamin', () => {
+    // `penjab.png_jawab` bisa berisi '-'; diteruskan apa adanya, barisnya
+    // berbunyi "- : 49 resep".
+    const r = gabungRekapResep([], [], [], [], [caraBayar('A03', '-', 49, 0)]);
+    expect(r.perCaraBayar[0]!.nama).toBe('');
+  });
+
+  it('hari tanpa resep menghasilkan larik kosong, bukan baris nol', () => {
+    expect(gabungRekapResep([], [], [], []).perCaraBayar).toEqual([]);
+  });
+});
+
+describe('formatRincianCaraBayarResep', () => {
+  it('menyebut jumlah resep dan rupiah tiap penjamin', () => {
+    const r = gabungRekapResep([], [], [], [], [
+      caraBayar('A01', 'UMUM', 31, 815981),
+      caraBayar('A02', 'BPJS Kesehatan', 9, 77736),
+    ]);
+    const teks = formatRincianCaraBayarResep(r.perCaraBayar);
+    expect(teks.split('\n')).toHaveLength(2);
+    expect(teks).toContain('UMUM : 31 resep, Rp815.981');
+    expect(teks).toContain('BPJS Kesehatan : 9 resep, Rp77.736');
+  });
+
+  /**
+   * RUPIAH selalu disebut termasuk saat nol -- alasan yang sama persis dengan
+   * `formatRincianDokter()`: ia yang membuat `{nilai_obat}` di kepala pesan bisa
+   * dicocokkan dengan menjumlahkan kolom ini. Baris yang kadang menyebut rupiah
+   * dan kadang tidak membuat penjumlahan itu mustahil.
+   */
+  it('selalu menyebut rupiah, termasuk saat nol', () => {
+    const r = gabungRekapResep([], [], [], [], [caraBayar('A02', 'BPJS Kesehatan', 9, 0)]);
+    expect(formatRincianCaraBayarResep(r.perCaraBayar)).toContain('Rp0');
+  });
+
+  it('memakai KODE saat nama penjaminnya tidak terbaca dari master', () => {
+    // Membuangnya membuat jumlah pecahannya lebih kecil daripada
+    // {jumlah_resep} tanpa satu pun keterangan.
+    const r = gabungRekapResep([], [], [], [], [caraBayar('A09', null, 4, 100)]);
+    expect(formatRincianCaraBayarResep(r.perCaraBayar)).toContain('(kode A09) : 4 resep');
+  });
+
+  it('hari tanpa resep menghasilkan keterangan, bukan baris kosong', () => {
+    expect(formatRincianCaraBayarResep([])).toBe('(tidak ada resep)');
+  });
+
+  /**
+   * `rincian_cara_bayar` sudah ada di MULTILINE_VARIABLES sejak migrations/047,
+   * dan pengecualian itu berlaku untuk NAMA variabelnya -- jadi perakit BARU
+   * yang memakai nama yang sama mewarisinya tanpa satu baris pun perubahan di
+   * sana. Itu justru bahayanya: tidak ada satu pun galat yang muncul bila
+   * perakitnya lupa menyanitasi. Patokan ini yang menggantikan galat itu.
+   */
+  it('nama penjamin berisi BARIS BARU tidak boleh menambah baris', () => {
+    const r = gabungRekapResep([], [], [], [], [
+      caraBayar('A01', 'UMUM\n• Palsu : 999 resep, Rp999.999', 31, 815981),
+    ]);
+    const hasil = renderTemplate('{rincian_cara_bayar}', {
+      rincian_cara_bayar: formatRincianCaraBayarResep(r.perCaraBayar),
+    });
+    expect(hasil.split('\n')).toHaveLength(1);
+    expect(hasil).not.toMatch(/\n\s*•/);
+  });
+
+  it('tetap DUA baris sesudah renderTemplate', () => {
+    // Di luar MULTILINE_VARIABLES, daftarnya terlipat jadi satu baris lalu
+    // terpotong di 60 karakter -- tanpa satu pun galat.
+    const r = gabungRekapResep([], [], [], [], [
+      caraBayar('A01', 'UMUM', 31, 815981),
+      caraBayar('A02', 'BPJS Kesehatan', 9, 77736),
+    ]);
+    const hasil = renderTemplate('{rincian_cara_bayar}', {
+      rincian_cara_bayar: formatRincianCaraBayarResep(r.perCaraBayar),
+    });
+    expect(hasil.split('\n')).toHaveLength(2);
   });
 });

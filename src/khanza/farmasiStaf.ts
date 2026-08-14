@@ -346,6 +346,94 @@ function buildRekapResepNilaiSql(): string {
   `;
 }
 
+export interface BarisRekapResepCaraBayar {
+  kd_pj: string | null;
+  png_jawab: string | null;
+  jml_resep: number | string;
+  nilai_obat: number | string | null;
+}
+
+/**
+ * Pecahan per CARA BAYAR untuk satu hari (migrations/049).
+ *
+ * ==========================================================================
+ * Ini MELONGGARKAN invarian yang ditulis tegas di berkas ini, dan itu disengaja
+ * ==========================================================================
+ *
+ * `buildRekapResepHeaderSql()` di atas menyatakan bahwa `reg_periksa` dan
+ * `pasien` TIDAK di-JOIN sama sekali -- "bukan di-JOIN lalu kolomnya tidak
+ * dipilih, melainkan tabelnya memang tidak disebut". Query INI menyebut
+ * `reg_periksa`, dan itu perubahan yang harus dibaca sadar-sadar, bukan
+ * ditemukan belakangan.
+ *
+ * Yang menuntutnya kebutuhan AKUNTANSI yang tidak bisa dijawab dari mana pun
+ * lain: `kd_pj` cuma hidup di `reg_periksa` -- `detail_pemberian_obat` tidak
+ * punya satu pun kolom penjamin, jadi tidak ada jalan memutar. Dan tanpa
+ * pecahan itu, `{nilai_obat}` adalah SATU angka yang mencampur uang yang sudah
+ * masuk dengan uang yang belum: terukur Juli 2026, dari Rp17.539.001 ternyata
+ * Rp2.181.685 (12,4%) milik pasien BPJS yang berupa PIUTANG, bukan kas.
+ *
+ * Pagarnya karena itu berpindah dari "tabelnya tidak disebut" ke BENTUK KODE --
+ * pola yang sama dengan `buildBulananPasienSql()` (046) dan seluruh
+ * `khanza/administrasiBulanan.ts` (047):
+ *
+ *  1. **Query TERSENDIRI**, bukan join tambahan pada agregat yang sudah ada.
+ *     Digabung, `reg_periksa` ikut hadir di query berkolom banyak dan penyunting
+ *     berikutnya yang menambahkan satu kolom lagi ke sana tidak punya satu pun
+ *     tanda bahwa ia sedang melewati pagar. Berdiri sendiri, ia satu fungsi yang
+ *     seluruh daftar SELECT-nya muat dalam satu layar.
+ *  2. **`pasien` tetap TIDAK disebut.** Nama, alamat, dan nomor telepon tidak
+ *     punya jalan menuju berkas ini. `no_rkm_medis` pun tidak diambil.
+ *  3. **Yang meninggalkan SQL cuma penjamin dan angka.** `png_jawab` adalah nama
+ *     INSTANSI, bukan orang.
+ *
+ * ==========================================================================
+ * `COUNT(DISTINCT ro.no_resep)`, dan `COUNT(*)` di sini SALAH 4,5 KALI
+ * ==========================================================================
+ *
+ * `detail_pemberian_obat` berisi satu baris per BARANG, jadi LEFT JOIN ke sana
+ * menggandakan baris resepnya. Terukur pada Juli 2026: `COUNT(*)` menghasilkan
+ * 3.108 sementara resep yang sungguhan 685 -- dan 3.108 tetap terlihat masuk akal
+ * di dalam sebuah pesan. Bentuk kegagalan yang sama persis dengan `ongkir` yang
+ * terhitung sekali per BARANG di `gabungRekap()` (041).
+ *
+ * ==========================================================================
+ * LEFT JOIN, berbeda dari `buildRekapResepNilaiSql()` yang INNER
+ * ==========================================================================
+ *
+ * Di sana INNER benar karena yang dijumlahkan memang uang yang SUDAH masuk
+ * penagihan. Di sini query yang sama harus menghasilkan DUA angka sekaligus, dan
+ * keduanya punya pembagi yang berbeda:
+ *
+ *   jumlah resep  harus berjumlah dengan `{jumlah_resep}`  -> SELURUH resep
+ *   nilai         harus berjumlah dengan `{nilai_obat}`    -> yang tertagih saja
+ *
+ * INNER akan membuat pecahan resepnya hanya menghitung yang sudah divalidasi,
+ * sehingga penjumlahannya tidak lagi cocok dengan angka di baris atasnya --
+ * dan rekap yang tidak berjumlah berhenti dipercaya seluruhnya, bukan sebagian.
+ * Terukur keduanya genap: 500 + 185 = 685 resep, dan
+ * Rp15.357.316 + Rp2.181.685 = Rp17.539.001.
+ */
+function buildRekapResepCaraBayarSql(): string {
+  return `
+    SELECT
+      r.kd_pj                            AS kd_pj,
+      COALESCE(pj.png_jawab, '')         AS png_jawab,
+      COUNT(DISTINCT ro.no_resep)        AS jml_resep,
+      COALESCE(SUM(dpo.total), 0)        AS nilai_obat
+    FROM resep_obat ro
+    JOIN reg_periksa r ON r.no_rawat = ro.no_rawat
+    LEFT JOIN penjab pj ON pj.kd_pj = r.kd_pj
+    LEFT JOIN detail_pemberian_obat dpo
+      ON dpo.tgl_perawatan = ro.tgl_perawatan
+     AND dpo.jam           = ro.jam
+     AND dpo.no_rawat      = ro.no_rawat
+    WHERE ro.no_resep >= :awalPrefix AND ro.no_resep <= :akhirPrefix
+    GROUP BY r.kd_pj, pj.png_jawab
+    ORDER BY nilai_obat DESC
+  `;
+}
+
 /**
  * Agregat satu hari penuh.
  *
@@ -360,15 +448,17 @@ export async function rekapResepHarian(tanggal: string): Promise<{
   item: BarisRekapResepItem[];
   racikan: BarisRekapResepRacikan[];
   nilai: BarisRekapResepNilai[];
+  caraBayar: BarisRekapResepCaraBayar[];
 }> {
   const rep = rentangResepHarian(tanggal);
-  const [header, item, racikan, nilai] = await Promise.all([
+  const [header, item, racikan, nilai, caraBayar] = await Promise.all([
     sikSelect<BarisRekapResepHeader>(buildRekapResepHeaderSql(), rep),
     sikSelect<BarisRekapResepItem>(buildRekapResepItemSql(), rep),
     sikSelect<BarisRekapResepRacikan>(buildRekapResepRacikanSql(), rep),
     sikSelect<BarisRekapResepNilai>(buildRekapResepNilaiSql(), rep),
+    sikSelect<BarisRekapResepCaraBayar>(buildRekapResepCaraBayarSql(), rep),
   ]);
-  return { header, item, racikan, nilai };
+  return { header, item, racikan, nilai, caraBayar };
 }
 
 /**
@@ -396,3 +486,9 @@ registerPlanCheck({ name: 'FARMASI_RESEP_REKAP_HEADER', sql: buildRekapResepHead
 registerPlanCheck({ name: 'FARMASI_RESEP_REKAP_ITEM', sql: buildRekapResepItemSql(), replacements: rekapContoh, maxRows: 5000 });
 registerPlanCheck({ name: 'FARMASI_RESEP_REKAP_RACIKAN', sql: buildRekapResepRacikanSql(), replacements: rekapContoh, maxRows: 5000 });
 registerPlanCheck({ name: 'FARMASI_RESEP_REKAP_NILAI', sql: buildRekapResepNilaiSql(), replacements: rekapContoh, maxRows: 5000 });
+registerPlanCheck({
+  name: 'FARMASI_RESEP_REKAP_CARA_BAYAR',
+  sql: buildRekapResepCaraBayarSql(),
+  replacements: rekapContoh,
+  maxRows: 5000,
+});

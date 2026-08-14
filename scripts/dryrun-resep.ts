@@ -98,6 +98,16 @@ async function main() {
      * sengaja tidak pernah masuk daftar SELECT. Di sinilah klaim itu dibuktikan:
      * pada `Object.keys()` baris yang benar-benar kembali, bukan dengan membaca
      * SQL-nya. `kode_brng` juga dijaga, karena tabel itu memuatnya per baris obat.
+     *
+     * SEJAK migrations/049 ia memikul lebih lagi, dan perubahannya harus dibaca
+     * sadar-sadar: agregat CARA BAYAR menjoinkan `reg_periksa`, sehingga klaim
+     * lama "tabelnya memang tidak disebut" tidak lagi berlaku untuk seluruh modul.
+     * Yang menggantikannya bentuk kode -- query tersendiri, `pasien` tetap tidak
+     * disebut, dan daftar SELECT-nya cuma penjamin plus angka. Justru karena
+     * pagarnya berpindah dari "mustahil" ke "dijaga", pemeriksaan di bawah ini
+     * berubah dari kerapian menjadi SATU-SATUNYA yang membuktikannya: `no_rawat`
+     * dan `no_rkm_medis` kini benar-benar ADA di jangkauan query itu, tinggal satu
+     * kolom SELECT saja jaraknya.
      */
     const TERLARANG = [
       'no_rkm_medis',
@@ -116,6 +126,7 @@ async function main() {
         ...(agregat.item[0] ? Object.keys(agregat.item[0]) : []),
         ...(agregat.racikan[0] ? Object.keys(agregat.racikan[0]) : []),
         ...(agregat.nilai[0] ? Object.keys(agregat.nilai[0]) : []),
+        ...(agregat.caraBayar[0] ? Object.keys(agregat.caraBayar[0]) : []),
       ]),
     ];
     const bocor = kolom.filter((k) => TERLARANG.includes(k));
@@ -127,7 +138,13 @@ async function main() {
     );
     if (bocor.length > 0) process.exitCode = 1;
 
-    const ringkas = gabungRekapResep(agregat.header, agregat.item, agregat.racikan, agregat.nilai);
+    const ringkas = gabungRekapResep(
+      agregat.header,
+      agregat.item,
+      agregat.racikan,
+      agregat.nilai,
+      agregat.caraBayar,
+    );
     console.log(
       `\n  ${ringkas.jmlResep} resep, ${ringkas.jmlBaris} baris obat (${ringkas.jmlObat} satuan), ` +
         `${ringkas.jmlRacikan} racikan; ${ringkas.jmlSerah} diserahkan, ${ringkas.jmlBelumSerah} belum; ` +
@@ -148,6 +165,33 @@ async function main() {
         : `  [SALAH] total ${ringkas.nilaiObat} != jumlah per dokter ${totalDokter}`,
     );
     if (!cocok) process.exitCode = 1;
+
+    /**
+     * Janji KETIGA dan KEEMPAT, keduanya lahir bersama pecahan cara bayar
+     * (migrations/049): pembaca melihat `{jumlah_resep}` dan `{nilai_obat}` di
+     * kepala pesan, lalu menjumlahkan kolom-kolom di `{rincian_cara_bayar}` di
+     * bawahnya dan mengharapkan angka yang sama.
+     *
+     * Keduanya diperiksa terpisah karena bisa gagal sendiri-sendiri, dan
+     * sebabnya berbeda: jumlah resep gagal kalau `COUNT(DISTINCT)` diganti
+     * `COUNT(*)` (terukur salah 4,5 kali -- `detail_pemberian_obat` menggandakan
+     * barisnya), sementara rupiahnya gagal kalau LEFT JOIN-nya diganti INNER.
+     */
+    const resepCaraBayar = ringkas.perCaraBayar.reduce((t, b) => t + b.jmlResep, 0);
+    const nilaiCaraBayar = ringkas.perCaraBayar.reduce((t, b) => t + b.nilaiObat, 0);
+    const cocokResep = resepCaraBayar === ringkas.jmlResep;
+    const cocokNilai = nilaiCaraBayar === ringkas.nilaiObat;
+    console.log(
+      cocokResep
+        ? '  [ok] jumlah resep = jumlah resep seluruh cara bayar'
+        : `  [SALAH] ${ringkas.jmlResep} != jumlah per cara bayar ${resepCaraBayar}`,
+    );
+    console.log(
+      cocokNilai
+        ? '  [ok] total rupiah = jumlah rupiah seluruh cara bayar'
+        : `  [SALAH] ${ringkas.nilaiObat} != jumlah per cara bayar ${nilaiCaraBayar}`,
+    );
+    if (!cocokResep || !cocokNilai) process.exitCode = 1;
 
     /**
      * Janji yang dibaca orang dari pesannya, diperiksa di sini juga: ia

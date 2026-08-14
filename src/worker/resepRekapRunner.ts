@@ -2,6 +2,7 @@ import { getSetting, getSettingBool, getSettingNumber, setSetting, logAudit } fr
 import { rekapResepHarian } from '@/khanza/farmasiStaf';
 import {
   gabungRekapResep,
+  formatRincianCaraBayarResep,
   formatRincianDokter,
   JAM_REKAP_RESEP_BAWAAN,
   type RingkasRekapResep,
@@ -107,6 +108,12 @@ export function susunVarsRekapResep(
     jumlah_belum_serah: formatJumlah(ringkas.jmlBelumSerah),
     nilai_obat: formatRupiah(ringkas.nilaiObat),
     rincian_dokter: formatRincianDokter(ringkas.perDokter),
+    /**
+     * Pecahan per cara bayar (migrations/049) -- BPJS berupa PIUTANG, umum
+     * berupa KAS. Tanpa ini `{nilai_obat}` di atasnya adalah satu angka yang
+     * mencampur uang yang sudah masuk dengan uang yang belum.
+     */
+    rincian_cara_bayar: formatRincianCaraBayarResep(ringkas.perCaraBayar),
     tanggal: formatTanggalPesan(sekarang),
     jam: formatJamPesan(sekarang),
   };
@@ -130,8 +137,8 @@ export async function susunRekapResepHarian(
   tanggalRekap: string,
   sekarang: Date,
 ): Promise<HasilRekapResep> {
-  const { header, item, racikan, nilai } = await rekapResepHarian(tanggalRekap);
-  const ringkas = gabungRekapResep(header, item, racikan, nilai);
+  const { header, item, racikan, nilai, caraBayar } = await rekapResepHarian(tanggalRekap);
+  const ringkas = gabungRekapResep(header, item, racikan, nilai, caraBayar);
 
   const [bodyAda, bodyKosong] = await Promise.all([
     getSetting('farmasi.template_resep_rekap', ''),
