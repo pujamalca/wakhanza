@@ -25,6 +25,7 @@ import { runAdministrasiBulananIfDue } from './administrasiBulananRunner';
 import { runPenilaianRekapIfDue } from './penilaianRunner';
 import { runHibahCycle } from './hibahRunner';
 import { runPemesananCycle } from './pemesananRunner';
+import { runAckWatchdog } from './ackWatchdog';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
 import { initWaClient, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
@@ -429,6 +430,23 @@ async function main(): Promise<void> {
   const pollIntervalMs = await getSettingNumber('polling.interval_ms', 60_000);
   const scanIntervalMs = await getSettingNumber('polling.scan_interval_ms', 300_000);
   logger.info({ pollIntervalMs, scanIntervalMs }, 'memulai siklus poller');
+
+  /**
+   * Jaring pengaman ketiga, dan letaknya SESUDAH `initWaClient()` bukan di atas
+   * bersama kedua watchdog sesi -- itu syarat kebenaran, bukan kerapian.
+   *
+   * Selama penautan, `wa_session.status` masih memuat status milik proses
+   * SEBELUMNYA dan bisa saja berbunyi `ready`, sementara baris `ready` terakhir
+   * di `wa_session_event` juga masih milik sesi itu. Dijalankan di sana, ia akan
+   * menilai pesan-pesan yang dikirim sesi lama -- yang memang tidak akan pernah
+   * berkabar, karena ack hanya tiba selama sesi pengirimnya hidup -- lalu
+   * mengalarmkan keadaan yang justru paling lazim sesudah setiap restart.
+   * Perangkap yang sama persis sudah dibayar `core/watchdog.ts`.
+   *
+   * Lima menit, bukan 60 detik: ambangnya sendiri 10 menit, jadi memeriksanya
+   * lebih rapat tidak mempercepat apa pun selain jumlah query.
+   */
+  void loop('ack-watchdog', runAckWatchdog, scanIntervalMs);
 
   void loop('poller:sisip', runAllSisipCycles, pollIntervalMs);
   // ARCHITECTURE §4.7: kelas pindai (booking) di interval lebih longgar --

@@ -44,6 +44,20 @@ export type AlertKind =
    */
   | 'session_init_stuck'
   | 'health_check_failed'
+  /**
+   * TERPISAH dari `health_check_failed`, dan pemisahannya menentukan TINDAKAN
+   * -- sekaligus menentukan siapa yang harus bangun.
+   *
+   * Yang itu berarti sesi berhenti menjawab, dan worker sudah menyalakan
+   * dirinya ulang sebelum peringatannya terkirim. Yang ini berarti sesi
+   * menjawab setiap pertanyaan dengan benar sementara pesannya tidak pergi ke
+   * mana pun; terukur pada gangguan 15 Agustus 2026, restart TIDAK
+   * memulihkannya, dan yang menyudahinya adalah pemindaian QR ulang yang
+   * menuntut akses fisik ke ponsel nomor RS. Menyatukan keduanya berarti
+   * keterangan pemulihannya salah untuk salah satu -- dan penerima peringatan
+   * mengerjakan langkah yang tidak menyelesaikan apa pun.
+   */
+  | 'ack_stuck'
   | 'startup_failed'
   /** Dua worker hidup sekaligus -- satu di antaranya lepas dari kendali PM2. */
   | 'duplicate_worker'

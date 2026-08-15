@@ -3,7 +3,9 @@ import { WaSession, getSettingBool, getSetting } from '@/models';
 import { resendOutboxAction } from '../antrean/actions';
 import { SystemStatus } from './SystemStatus';
 import { InboundStatus } from './InboundStatus';
+import { OutboundStatus } from './OutboundStatus';
 import { AlertConfigWarning } from './AlertConfigWarning';
+import { bacaPantauAck } from '@/lib/ackPantau';
 import { VolumeChart } from './VolumeChart';
 import {
   startOfDay,
@@ -49,7 +51,7 @@ export default async function RingkasanPage() {
   const session = await auth();
   const isAdmin = session?.user.role === 'admin';
 
-  const [waSession, queue, weekCounts, daily, triggers, problems, inbound, autoReplyEnabled, alertWebhookUrl] =
+  const [waSession, queue, weekCounts, daily, triggers, problems, inbound, pantauAck, autoReplyEnabled, alertWebhookUrl] =
     await Promise.all([
       WaSession.findByPk(1),
       fetchQueueDepth(),
@@ -58,6 +60,10 @@ export default async function RingkasanPage() {
       fetchTriggerBreakdown(startOfDay(CHART_DAYS - 1)),
       fetchRecentProblems(5),
       fetchInboundActivity(),
+      // Pintu yang SAMA dipakai `worker/ackWatchdog.ts`. Dua penurunan berarti
+      // panel ini dan webhook peringatan bisa berkata berlainan tentang satu
+      // keadaan, dan tidak ada cara memilih mana yang benar.
+      bacaPantauAck(),
       getSettingBool('autoreply.enabled', false),
       getSetting('alert.webhook_url'),
     ]);
@@ -107,6 +113,13 @@ export default async function RingkasanPage() {
           itulah kenapa bug LID bisa berjam-jam tanpa satu pun indikator
           berubah. */}
       <InboundStatus inbound={inbound} autoReplyEnabled={autoReplyEnabled} />
+
+      {/* Melengkapi pasangannya: InboundStatus menjawab "apakah kita masih bisa
+          MENDENGAR", yang ini "apakah yang kita kirim benar-benar SAMPAI".
+          Kotak "Terkirim hari ini" di bawah membaca `outbox.status`, dan `sent`
+          cuma berarti WhatsApp menerima titipannya -- pada gangguan 15 Agustus
+          2026 angka itu naik normal sementara nol pesan pergi ke mana pun. */}
+      <OutboundStatus pantau={pantauAck} />
 
       {/* Operator tidak punya akses ke /pengaturan (admin-only), jadi
           menampilkannya kepada mereka cuma menunjuk masalah yang tidak bisa
