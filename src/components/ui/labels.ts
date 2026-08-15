@@ -97,6 +97,13 @@ export const TRIGGER_LABEL: Record<string, string> = {
   BILLING_READY: 'Tagihan',
   BROADCAST: 'Broadcast',
   AUTO_REPLY: 'Balasan otomatis',
+  /**
+   * Dibalas SEORANG PETUGAS dari `/pesan-masuk`, bukan oleh aturan kata kunci.
+   * Labelnya menyebut "petugas" justru supaya bisa dibedakan dari baris di
+   * atasnya saat menelusuri Antrean atau Log -- keduanya berangkat dari pesan
+   * masuk yang sama, dan yang membedakan siapa yang memutuskan isinya.
+   */
+  BALAS_MANUAL: 'Balasan petugas',
   // Perintah /…-jawaban-otomatis lewat WhatsApp (045). Labelnya menyebut
   // "perintah" dan bukan sekadar "balasan": penerimanya staf yang sedang
   // menyusun aturan, jadi baris ini di Antrean/Log tidak boleh terbaca sebagai

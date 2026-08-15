@@ -238,6 +238,40 @@ export async function loadBroadcastContext(body: string): Promise<PipelineContex
 }
 
 /**
+ * Konteks untuk BALAS_MANUAL: petugas mengetik balasan sendiri di
+ * `/pesan-masuk`, ke percakapan yang pesannya baru saja masuk.
+ *
+ * Bentuknya mengikuti BROADCAST -- isi pesan ad-hoc, bukan baris `template` --
+ * dan memakai `enqueueMessage()` yang SAMA PERSIS sesudah ini. Yang dibeli
+ * bukan kerapian melainkan empat hal yang mustahil didapat dari jalur kirim
+ * tersendiri: jeda acak 3-8 detik antar pesan (F5.2), kuota per jam, baris
+ * `send_log`, dan kode pengiriman unik di kaki pesan. Membalas langsung lewat
+ * `client.sendMessage()` dari dashboard akan melewati keempatnya sekaligus --
+ * dan yang diblokir WhatsApp adalah SATU-SATUNYA nomor rumah sakit, sehingga
+ * notifikasi pasien ikut mati bersamanya. Alasan yang sama persis sudah
+ * dibayar saat balasan otomatis dibuat.
+ *
+ * `genericTemplate` jatuh ke `body` seperti BROADCAST, dan itu tidak berakibat
+ * apa-apa di sini: penggantian pesan generik dipicu poli sensitif, sementara
+ * balasan manual tidak berangkat dari sebuah kunjungan sama sekali (`kdPoli`
+ * dan `kdJenisPrw` selalu null), jadi `checkPrivacy` tidak pernah menggigit.
+ */
+export async function loadBalasanContext(body: string): Promise<PipelineContext> {
+  const shared = await loadSharedSettings();
+  return {
+    triggerCode: 'BALAS_MANUAL',
+    template: { body },
+    genericTemplate: shared.genericTemplate ?? body,
+    identity: shared.identity,
+    quietStart: shared.quietStart,
+    quietEnd: shared.quietEnd,
+    sensitivePoli: shared.sensitivePoli,
+    sensitiveExam: shared.sensitiveExam,
+    uniqueCodeTemplate: shared.uniqueCodeTemplate,
+  };
+}
+
+/**
  * Konteks untuk ADMINISTRASI: pengiriman DOKUMEN (surat keterangan sakit/sehat)
  * yang dipicu staf untuk satu pasien.
  *

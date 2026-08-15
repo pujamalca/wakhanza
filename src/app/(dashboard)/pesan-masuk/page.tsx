@@ -1,4 +1,5 @@
 import { Op, fn, col } from 'sequelize';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { InboundMessage, WaGroup, WaSession, getSettingBool, getSettingNumber } from '@/models';
@@ -138,7 +139,7 @@ export default async function PesanMasukPage({
     <div>
       <PageHeader
         title="Pesan masuk"
-        description="Pesan yang diterima nomor WhatsApp rumah sakit, dari perorangan maupun grup — berikut ID pengirim dan ID grupnya."
+        description="Pesan yang diterima nomor WhatsApp rumah sakit, dari perorangan maupun grup. Klik nama pengirimnya untuk membuka percakapan dan membalas."
       />
 
       <GrupPanel
@@ -199,7 +200,17 @@ export default async function PesanMasukPage({
                       {m.createdAt.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
                     </td>
                     <td className={cellClass}>
-                      <div className="font-medium">{m.namaKontak ?? <span className="text-muted-foreground">—</span>}</div>
+                      {/* Nama pengirim jadi PINTU ke percakapannya, bukan kolom
+                          tombol kesembilan: tabel ini sudah menyembunyikan tiga
+                          kolom di bawah `lg`, jadi kolom baru di ujung kanan
+                          akan jadi yang paling jarang terlihat -- persis nasib
+                          centang tujuan di `/farmasi` sebelum digabung. */}
+                      <Link
+                        href={`/pesan-masuk/${encodeURIComponent(m.chatId)}`}
+                        className="font-medium underline-offset-2 hover:underline"
+                      >
+                        {m.namaKontak ?? (m.jenis === 'grup' ? 'Grup' : 'Perorangan')}
+                      </Link>
                       {m.jenis === 'grup' && (
                         <div className="text-xs text-muted-foreground">di {m.namaChat ?? 'grup'}</div>
                       )}

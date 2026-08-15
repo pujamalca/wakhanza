@@ -181,6 +181,21 @@ const BYPASS_QUIET_HOURS = new Set([
   'BPJS_BATAL',
   'ADMINISTRASI',
   /**
+   * BALAS_MANUAL: petugas mengetik balasan sendiri di `/pesan-masuk`.
+   *
+   * Alasannya sama persis dengan `ADMINISTRASI` tepat di atasnya, dan BUKAN
+   * alasan "jamnya dipilih staf" yang dipakai keempat rekap: yang membenarkan
+   * pengecualian di sini adalah ADANYA MANUSIA YANG MENEKAN KIRIM pada detik
+   * itu, untuk seseorang yang baru saja mengirim pesan. Menahannya sampai 07:00
+   * berarti jawaban atas pertanyaan pukul 21:30 tiba sembilan jam kemudian --
+   * dan petugas yang mengetiknya tidak akan pernah tahu kenapa, karena
+   * halamannya melaporkan "terkirim".
+   *
+   * Sama seperti `AUTO_REPLY`, yang membatasi penyalahgunaannya bukan jam tenang
+   * melainkan bahwa ia mustahil terjadi tanpa ada yang mengetiknya.
+   */
+  'BALAS_MANUAL',
+  /**
    * ADMINISTRASI_BULANAN (047): alasan yang sama persis dengan FARMASI_BULANAN --
    * kelas WAKTU berperiode bulan, dan yang dipilih staf bukan cuma jamnya
    * melainkan juga tanggalnya (`administrasi.bulanan_tanggal`,
