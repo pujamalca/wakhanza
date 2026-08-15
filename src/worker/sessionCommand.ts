@@ -142,14 +142,95 @@ async function syncGroups(): Promise<void> {
 }
 
 /**
+ * Fase sesi saat perintah dibaca. Diserahkan pemanggil karena hanya
+ * `worker/index.ts` yang tahu apakah `initWaClient()` sudah selesai.
+ */
+export type FaseSesi = 'menautkan' | 'siap';
+
+/**
+ * Apa yang harus dikerjakan PEMANGGIL sesudahnya.
+ *
+ * Perintah yang menuntut sesi lahir kembali dijawab dengan meminta restart,
+ * bukan dengan memanggil `client.initialize()` dari sini -- lihat alasannya di
+ * cabang `logout`. Bentuk nilai balik dipilih supaya `shutdown()` tetap tinggal
+ * di `index.ts`: mengimpornya ke sini membuat lingkaran impor antara dua berkas
+ * yang sama-sama dimuat saat worker menyala.
+ */
+export type HasilPerintah = 'tidak-ada' | 'dikerjakan' | 'minta-restart' | 'ditunda';
+
+/**
  * ARCHITECTURE §1: dashboard menitip perintah lewat wa_session.command;
  * worker membacanya lalu mengosongkannya. Command dikonsumsi (di-set balik
  * ke 'none') SEBELUM dieksekusi supaya perintah yang gagal tidak diulang
  * tanpa henti tiap siklus.
+ *
+ * ==========================================================================
+ * Kenapa fase penautan ditangani TERPISAH
+ * ==========================================================================
+ *
+ * Loop ini dulu dipasang SESUDAH `await initWaClient()`, sehingga selama
+ * penautan ia tidak ada sama sekali. Akibatnya persis kebalikan dari yang
+ * dibutuhkan: tombol "Sambung ulang" dan "Keluar sesi" berhenti dibaca tepat
+ * pada keadaan yang paling membuat orang menekannya, dan yang terlihat bukan
+ * "lambat" melainkan tombol yang tidak melakukan apa-apa. Terukur pada gangguan
+ * 15 Agustus 2026: penautan gagal berulang selama empat puluh menit, dan
+ * sepanjang itu tidak satu pun perintah dari dashboard pernah dibaca.
+ *
+ * Menaikkan loopnya begitu saja ditolak dengan dua alasan yang MASIH berlaku:
+ * ia memanggil `getClient()` yang menuntut halaman jadi, dan ia MENGOSONGKAN
+ * kolom perintah sebelum bertindak -- jadi perintah akan ditelan diam-diam.
+ * Keduanya ditutup di sini alih-alih dihindari: selama fase `menautkan`,
+ * `getClient()` tidak pernah disentuh, dan perintah yang belum bisa dikerjakan
+ * TIDAK dikonsumsi -- ia tetap menunggu sampai sesinya hidup, persis seperti
+ * sebelumnya.
+ *
+ * Yang berubah cuma `reconnect`, dan justru itu yang dicari orang: saat
+ * penautan menggantung, "sambung ulang" berarti "sudahi percobaan ini, mulai
+ * lagi" -- dan itu tidak menuntut halaman apa pun.
  */
-export async function processSessionCommand(): Promise<void> {
+export async function processSessionCommand(fase: FaseSesi = 'siap'): Promise<HasilPerintah> {
   const row = await WaSession.findByPk(1);
-  if (!row || row.command === 'none') return;
+  if (!row || row.command === 'none') return 'tidak-ada';
+
+  /**
+   * SAMBUNG ULANG saat QR sedang tampil TIDAK menyalakan ulang apa pun.
+   *
+   * Diperiksa di luar percabangan fase karena `qr_pending` bisa muncul di
+   * keduanya: sebelum init selesai (pemasangan pertama) maupun sesudah logout
+   * pada klien yang sudah jadi.
+   *
+   * Sebabnya sudah tertulis di `sessionWatchdog()`, yang mengecualikan
+   * `qr_pending` dari batas waktunya dengan kalimat yang sama: "restart di
+   * tengahnya justru menerbitkan QR baru sehingga kode yang sedang dipindai
+   * petugas jadi kedaluwarsa". Aturan itu sudah ada, dan versi pertama
+   * perbaikan responsivitas ini melewatinya -- terukur pada 15 Agustus 2026,
+   * tombolnya ditekan dua kali pukul 19:44:41 dan 19:45:06, dan tiap tekanan
+   * membatalkan QR yang sedang ditatap petugas. Tombol yang responsif tapi
+   * merusak lebih buruk daripada tombol yang diam.
+   *
+   * Perintahnya tetap DIKONSUMSI, bukan ditunda: menundanya berarti ia menyala
+   * belakangan pada saat yang tidak diminta siapa pun -- justru mungkin tepat
+   * saat QR berikutnya tampil.
+   */
+  if (row.command === 'reconnect' && row.status === 'qr_pending') {
+    await WaSession.update({ command: 'none' }, { where: { id: 1 } });
+    logger.info('perintah sambung ulang diabaikan: QR sedang menunggu dipindai');
+    return 'dikerjakan';
+  }
+
+  if (fase === 'menautkan') {
+    if (row.command !== 'reconnect') {
+      // SENGAJA tidak dikonsumsi: `logout` dan `sync_groups` sama-sama menuntut
+      // halaman yang sudah jadi. Mengosongkan kolomnya di sini berarti perintah
+      // staf hilang tanpa jejak, dan dari layar itu tidak bisa dibedakan dari
+      // perintah yang sudah dikerjakan.
+      logger.info({ command: row.command }, 'perintah ditunda: sesi masih menautkan');
+      return 'ditunda';
+    }
+    await WaSession.update({ command: 'none' }, { where: { id: 1 } });
+    logger.warn('perintah sambung ulang saat penautan belum selesai -- worker dimulai ulang');
+    return 'minta-restart';
+  }
 
   const command = row.command;
   await WaSession.update({ command: 'none' }, { where: { id: 1 } });
@@ -179,7 +260,23 @@ export async function processSessionCommand(): Promise<void> {
         );
       }
 
-      await client.initialize();
+      /**
+       * MINTA RESTART, bukan `await client.initialize()` di sini.
+       *
+       * Baris itu dulu menahan loop perintah selama seluruh penautan ulang --
+       * dan penautan yang menggantung tidak dijaga watchdog mana pun dari sini,
+       * karena `BATAS_INIT_MS` hanya mengawasi `initWaClient()` di `main()`.
+       * Terukur pada gangguan 15 Agustus 2026, penautan yang gagal menggantung
+       * sampai `protocolTimeout` 300 detik: tombol "Keluar sesi" karena itu
+       * tampak menggantung lima menit, padahal perangkatnya sudah lepas dan
+       * statusnya sudah dikoreksi pada baris-baris di atas.
+       *
+       * Proses baru mengerjakan penautannya di bawah pengawasan penuh, dan
+       * jalur itu sudah teruji tiap kali PM2 menyalakan ulang worker. Jadi yang
+       * dibuang bukan kemampuan, melainkan satu jalur init kedua yang tidak
+       * terjaga.
+       */
+      return 'minta-restart';
     } else if (command === 'reconnect') {
       logger.info('perintah sambung ulang diterima dari dashboard');
       await client.resetState();
@@ -191,4 +288,5 @@ export async function processSessionCommand(): Promise<void> {
     logger.error({ command, ...safeError(err) }, 'gagal menjalankan perintah sesi dari dashboard');
     await WaSession.update({ lastError: safeError(err).message }, { where: { id: 1 } });
   }
+  return 'dikerjakan';
 }

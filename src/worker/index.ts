@@ -412,16 +412,42 @@ async function main(): Promise<void> {
    * Sequelize: `updateHeartbeat()` satu UPDATE, dan `sessionWatchdog()` bahkan
    * TIDAK membaca statusnya selama penautan (lihat `core/watchdog.ts`).
    *
-   * `session-command` SENGAJA tetap di bawah dan tidak ikut naik. Ia memanggil
-   * `getClient()` lalu `client.logout()`/`resetState()` -- yang menuntut halaman
-   * yang sudah jadi, sementara selama penautan halamannya justru itu yang belum
-   * ada. Yang lebih buruk: ia MENGOSONGKAN kolom perintah sebelum bertindak,
-   * jadi menaikkannya berarti perintah dari dashboard ditelan diam-diam tepat
-   * pada keadaan yang paling membutuhkannya. Perintah yang datang selama
-   * penautan tetap tersimpan dan dijalankan begitu sesi hidup.
+   * `session-command` IKUT NAIK, dan itu koreksi atas keputusan sebelumnya.
+   *
+   * Dulu ia sengaja ditinggal di bawah dengan dua alasan yang MASIH benar: ia
+   * memanggil `getClient()` yang menuntut halaman jadi, dan ia mengosongkan
+   * kolom perintah sebelum bertindak, sehingga menaikkannya begitu saja berarti
+   * perintah staf ditelan diam-diam. Yang KELIRU adalah kesimpulannya --
+   * "perintah yang datang selama penautan tetap tersimpan dan dijalankan begitu
+   * sesi hidup" hanya benar bila sesinya AKHIRNYA hidup. Saat penautan gagal
+   * berulang, loopnya tidak pernah ada, dan tombol "Sambung ulang"/"Keluar
+   * sesi" berhenti dibaca tepat pada keadaan yang paling membuat orang
+   * menekannya. Terukur pada gangguan 15 Agustus 2026: empat puluh menit tanpa
+   * satu pun perintah dashboard terbaca.
+   *
+   * Kedua alasan aslinya kini ditutup DI DALAM `processSessionCommand()` lewat
+   * parameter fase, bukan dihindari dengan menaruh loopnya di bawah: selama
+   * `menautkan` ia tidak pernah menyentuh `getClient()`, dan perintah yang belum
+   * bisa dikerjakan TIDAK dikonsumsi.
    */
   void loop('heartbeat', updateHeartbeat, 30_000);
   void loop('session-watchdog', sessionWatchdog, 60_000);
+  void loop(
+    'session-command',
+    async () => {
+      // `initSelesai` dibaca SAAT DIPANGGIL, bukan ditangkap sekali saat loopnya
+      // dipasang -- kalau tidak, ia selamanya bernilai false.
+      const hasil = await processSessionCommand(initSelesai ? 'siap' : 'menautkan');
+      if (hasil === 'minta-restart') {
+        // Lewat `shutdown()`, BUKAN `process.exit()`: keluar tanpa menutup
+        // Chromium meninggalkan state sesi setengah tertulis, dan proses
+        // penggantinya mewarisi kerusakannya. Pelajaran yang sama sudah dibayar
+        // sessionWatchdog().
+        await shutdown('perintah sesi dari dashboard', 1);
+      }
+    },
+    5_000,
+  );
 
   initMulaiAt = Date.now();
   await initWaClient();
@@ -700,15 +726,6 @@ async function main(): Promise<void> {
    */
   void loop('administrasi-bulanan', runAdministrasiBulananIfDue, scanIntervalMs);
   void dispatcherLoop();
-  /**
-   * Satu-satunya loop sesi yang tetap di BAWAH penautan; `heartbeat` dan
-   * `session-watchdog` sudah dipasang di atas `initWaClient()` -- lihat
-   * penjelasan urutannya di sana, berikut kenapa yang satu ini tidak ikut naik.
-   *
-   * Arti umur denyut itu sendiri ada di `updateHeartbeat()` (`wa-client.ts`),
-   * berikut jebakan zona waktu saat memeriksanya lewat `mysql`.
-   */
-  void loop('session-command', processSessionCommand, 5_000);
 
   await startScheduler();
   startCleanupSchedule();
