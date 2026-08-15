@@ -86,11 +86,20 @@ tidak. Dibuktikan pada hasil build: berkas `.woff2` ada di `.next/static/media/`
 
 ### Panjang baris
 
-`.measure` = `max-width: 68ch`. Wajib untuk apa pun yang berisi kalimat.
+`.measure` = `max-width: 68ch`. Wajib untuk kalimat yang berdiri **langsung di
+atas kanvas halaman** — deskripsi `PageHeader`, deskripsi `Section`, prosa di
+`HelpPanel`, paragraf lepas di dalam form.
 
 Di monitor loket 1920px, satu paragraf selebar halaman menghasilkan baris ~180
 karakter. Mata kehilangan tempatnya saat kembali ke awal baris, jadi paragrafnya
 berhenti terbaca **justru karena ruangnya berlimpah**.
+
+**Kekecualiannya: prosa DI DALAM kotak berbingkai** (`Callout`, `SwitchCard`).
+Di sana bingkainya sudah membatasi panjang baris, dan menumpuk `measure` di
+atasnya menghasilkan kotak yang teksnya berhenti di tengah sementara garisnya
+merentang penuh — yang terbaca bukan baris yang enak dibaca melainkan kotak
+yang separuhnya kosong, apalagi bersebelahan dengan kartu lain yang prosanya
+memang penuh. Batas panjangnya diserahkan ke lebar kotaknya sendiri.
 
 ---
 
@@ -237,9 +246,10 @@ lipatan, deretan judul terlipat itu sendiri menjadi kebisingan yang baru.
 
 - [ ] Satu `<h1>` (`text-display`), judul bagian `text-title`, tidak ada lompatan tingkat
 - [ ] Tidak ada kalimat di `text-caption`
-- [ ] Apa pun yang berisi paragraf memakai `.measure`
+- [ ] Paragraf yang berdiri di atas kanvas memakai `.measure`; yang di dalam kotak berbingkai TIDAK
 - [ ] Prosa tingkat B ada di `HelpPanel`, bukan di kanvas
-- [ ] Peringatan tingkat A **terbentang**, tidak dilipat
+- [ ] Peringatan tingkat A **terbentang secara bawaan** (boleh dilipat staf, tapi tidak dimulai terlipat)
+- [ ] Kartu sakelar memakai `SwitchCard`, bukan `<section>` yang disalin
 - [ ] Kontrol sebaris punya tinggi sama (`h-9`)
 - [ ] Status tidak pernah disampaikan warna saja
 - [ ] Diperiksa di mode gelap **secara terpisah**, bukan disimpulkan dari terang

@@ -36,11 +36,16 @@ function Sakelar({
 /**
  * Sakelar UTAMA ERM.
  *
- * Peringatannya sengaja TIDAK dilipat -- ia tingkat A (pagar): dibaca SEBELUM
+ * Peringatannya TERBENTANG secara bawaan -- ia tingkat A (pagar): dibaca SEBELUM
  * tindakan yang tidak bisa ditarik kembali. Pesan WhatsApp yang sudah terkirim
  * ke sebuah grup tidak bisa ditarik, dan yang beredar di sini adalah nama pasien
- * berikut nomor rekam medisnya. Melipatnya menukar halaman yang lebih pendek
- * dengan keputusan yang diambil tanpa keterangan.
+ * berikut nomor rekam medisnya. Membiarkannya terlipat secara bawaan menukar
+ * halaman yang lebih pendek dengan keputusan yang diambil tanpa keterangan.
+ *
+ * Sejak `Callout` selalu berbentuk `<details>`, ia tetap BISA ditutup staf yang
+ * sudah hafal isinya. Yang dijaga di sini keadaan AWAL-nya, bukan ada-tidaknya
+ * segitiga pelipat -- dan itu pembedaan yang penting: kemampuan melipat tidak
+ * menyembunyikan apa pun dengan sendirinya.
  */
 export function MasterSwitch({
   aktif,

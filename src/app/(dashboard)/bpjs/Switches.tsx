@@ -2,7 +2,7 @@
 
 import { useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Button, Badge, IconAlertTriangle, IconCheck } from '@/components/ui';
+import { Button, SwitchCard } from '@/components/ui';
 import { toggleBpjsAction, toggleBatalAction, toggleKontrolAction } from './actions';
 
 /**
@@ -13,6 +13,12 @@ import { toggleBpjsAction, toggleBatalAction, toggleKontrolAction } from './acti
  * setengah-jadi + tombol), dan tiga salinan yang berbeda-beda sedikit adalah
  * cara paling gampang membuat satu sakelar diam-diam berhenti menampilkan
  * peringatannya.
+ *
+ * Kerangkanya sendiri kini `SwitchCard` di `components/ui`: halaman ini sampai
+ * pada abstraksi yang sama secara terpisah dari `/farmasi`, dan dua kerangka
+ * yang menjawab pertanyaan yang sama adalah dua yang cepat atau lambat berbeda
+ * -- yang di sini justru sudah membuktikannya, karena hanya salah satunya yang
+ * bisa dilipat sampai keduanya disatukan.
  */
 function SakelarBesar({
   judul,
@@ -30,27 +36,12 @@ function SakelarBesar({
   const [pending, start] = useTransition();
 
   return (
-    <section
-      className={`mb-6 rounded-lg border p-4 ${
-        enabled ? 'border-success/30 bg-success/5' : 'border-warning/30 bg-warning/5'
-      }`}
-    >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className={enabled ? 'text-success' : 'text-warning'}>
-            {enabled ? <IconCheck className="h-5 w-5" /> : <IconAlertTriangle className="h-5 w-5" />}
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-title">{judul}</h2>
-              <Badge variant={enabled ? 'success' : 'warning'}>{enabled ? 'Menyala' : 'Mati'}</Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">{penjelasan}</p>
-            {enabled && peringatan && (
-              <p className="mt-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">{peringatan}</p>
-            )}
-          </div>
-        </div>
+    <SwitchCard
+      enabled={enabled}
+      judul={judul}
+      tingkat="utama"
+      className="mb-6"
+      aksi={
         <Button
           variant={enabled ? 'secondary' : 'primary'}
           className="w-full shrink-0 justify-center sm:w-auto"
@@ -59,8 +50,13 @@ function SakelarBesar({
         >
           {pending ? 'Menyimpan...' : enabled ? 'Matikan' : 'Nyalakan'}
         </Button>
-      </div>
-    </section>
+      }
+    >
+      <p className="text-sm text-muted-foreground">{penjelasan}</p>
+      {enabled && peringatan && (
+        <p className="mt-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">{peringatan}</p>
+      )}
+    </SwitchCard>
   );
 }
 

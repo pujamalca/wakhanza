@@ -77,9 +77,12 @@ export interface CalloutProps {
   variant?: CalloutVariant;
   title: ReactNode;
   children?: ReactNode;
-  /** Melipat isinya di balik judul. Judul tetap selalu terlihat. */
+  /**
+   * Mulai dalam keadaan TERLIPAT. Melipatnya sendiri selalu bisa dilakukan --
+   * lihat catatan di bawah; yang diatur prop ini cuma keadaan awalnya.
+   */
   collapsible?: boolean;
-  /** Hanya berlaku bila `collapsible`. */
+  /** Membentangkan kotak yang `collapsible`. */
   defaultOpen?: boolean;
   className?: string;
 }
@@ -120,22 +123,35 @@ export function Callout({
 
   if (!children) return <div className={kotak}><span className="font-medium">{judul}</span></div>;
 
-  if (!collapsible) {
-    return (
-      <div className={kotak}>
-        <p className="font-medium">{judul}</p>
-        <div className={`measure mt-1 text-muted-foreground ${jarakIsi}`}>{children}</div>
-      </div>
-    );
-  }
-
+  /**
+   * SELALU `<details>`, tidak pernah lagi `<div>` mati.
+   *
+   * Sebelumnya kotak yang tidak ditandai `collapsible` sama sekali tidak bisa
+   * dilipat, dan di halaman seperti `/farmasi` -- yang memuat belasan kotak
+   * keterangan panjang -- itu berarti staf yang sudah hafal isinya tetap harus
+   * menggulir melewati seluruhnya, tiap kali. Kemampuan melipat tidak
+   * menyembunyikan apa pun dengan sendirinya; yang menyembunyikan adalah
+   * keadaan AWAL, dan itu tetap diputuskan pemanggil.
+   *
+   * Karena itu bawaannya terbentang: kotak yang selama ini selalu terlihat
+   * TETAP terlihat setelah perubahan ini, cuma kini punya segitiga untuk
+   * ditutup. Yang sudah menandai dirinya `collapsible` tetap mulai terlipat
+   * seperti sebelumnya. Nol perubahan pada apa yang terbaca saat halaman
+   * dibuka -- yang bertambah cuma pilihannya.
+   */
   return (
     // `<summary>` sengaja TIDAK dijadikan flex: di Chromium itu menghapus
     // segitiga pembukanya, sehingga satu-satunya tanda bahwa kotak ini bisa
     // dibuka ikut hilang. Perataannya dikerjakan span di dalamnya.
-    <details className={kotak} open={defaultOpen}>
+    <details className={kotak} open={!collapsible || defaultOpen}>
       <summary className="cursor-pointer font-medium marker:text-muted-foreground">{judul}</summary>
-      <div className={`measure mt-2 text-muted-foreground ${jarakIsi}`}>{children}</div>
+      {/* TANPA `measure`. Aturan 68ch benar untuk prosa yang berdiri sendiri di
+          atas latar halaman, dan salah di dalam kotak berbingkai: bingkainya
+          merentang penuh sementara teksnya berhenti di tengah, sehingga yang
+          terlihat bukan baris yang enak dibaca melainkan kotak yang separuhnya
+          kosong -- apalagi bersebelahan dengan kartu sakelar yang prosanya
+          memang penuh. Panjang barisnya kini dibatasi lebar kotaknya sendiri. */}
+      <div className={`mt-2 text-muted-foreground ${jarakIsi}`}>{children}</div>
     </details>
   );
 }

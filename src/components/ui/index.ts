@@ -2,6 +2,7 @@ export * from './Button';
 export * from './LinkButton';
 export * from './Card';
 export * from './Callout';
+export * from './SwitchCard';
 export * from './HelpPanel';
 export * from './Section';
 export * from './Petunjuk';
