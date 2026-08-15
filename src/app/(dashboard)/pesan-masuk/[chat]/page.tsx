@@ -17,6 +17,7 @@ import {
   IconChevronLeft,
 } from '@/components/ui';
 import { BalasForm } from './BalasForm';
+import { KotakGulung } from './KotakGulung';
 
 /**
  * Satu PERCAKAPAN, dibaca dari dua tabel sekaligus.
@@ -175,59 +176,64 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
         </Callout>
       )}
 
-      <section className="mb-4 space-y-2 rounded-lg border bg-surface-sunken p-3">
-        {lini.length > BATAS_BARIS && (
-          <p className="pb-1 text-center text-xs text-muted-foreground">
-            Menampilkan {BATAS_BARIS} pesan terakhir tiap arah.
-          </p>
-        )}
-        {lini.map((b) => {
-          const kirimSendiri = b.arah === 'keluar';
-          return (
-            <div key={b.kunci} className={`flex ${kirimSendiri ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-lg border px-3 py-2 sm:max-w-[70%] ${
-                  kirimSendiri ? 'border-primary/25 bg-primary/5' : 'border-border bg-card'
-                }`}
-              >
-                {!kirimSendiri && keGrup && b.namaPengirim && (
-                  <p className="mb-0.5 text-xs font-medium text-muted-foreground">{b.namaPengirim}</p>
-                )}
-                {b.teks ? (
-                  // `whitespace-pre-wrap` supaya baris baru yang diketik orang
-                  // tetap terlihat seperti yang dikirimnya. Dirender sebagai
-                  // TEKS biasa, tidak pernah HTML -- isinya datang dari luar.
-                  <p className="whitespace-pre-wrap break-words text-sm">{b.teks}</p>
-                ) : (
-                  <p className="text-xs italic text-muted-foreground">{b.keterangan}</p>
-                )}
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                  <span>{jam(b.waktu)}</span>
-                  {kirimSendiri && b.triggerCode && (
-                    <span title={b.triggerCode}>{triggerLabel(b.triggerCode)}</span>
+      {/* Riwayatnya yang bergulir, bukan halamannya. Kotak balasan di bawah
+          karena itu tetap terlihat tanpa menggulir melewati seluruh percakapan
+          lebih dulu -- dan itu satu-satunya alasan halaman ini ada. */}
+      <div className="mb-4">
+        <KotakGulung penanda={lini.length}>
+          {lini.length > BATAS_BARIS && (
+            <p className="pb-1 text-center text-xs text-muted-foreground">
+              Menampilkan {BATAS_BARIS} pesan terakhir tiap arah.
+            </p>
+          )}
+          {lini.map((b) => {
+            const kirimSendiri = b.arah === 'keluar';
+            return (
+              <div key={b.kunci} className={`flex ${kirimSendiri ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[85%] rounded-lg border px-3 py-2 sm:max-w-[70%] ${
+                    kirimSendiri ? 'border-primary/25 bg-primary/5' : 'border-border bg-card'
+                  }`}
+                >
+                  {!kirimSendiri && keGrup && b.namaPengirim && (
+                    <p className="mb-0.5 text-xs font-medium text-muted-foreground">{b.namaPengirim}</p>
                   )}
-                  {kirimSendiri && b.status && (
-                    <Badge variant={outboxStatusVariant(b.status as never)}>{outboxStatusLabel(b.status as never)}</Badge>
+                  {b.teks ? (
+                    // `whitespace-pre-wrap` supaya baris baru yang diketik orang
+                    // tetap terlihat seperti yang dikirimnya. Dirender sebagai
+                    // TEKS biasa, tidak pernah HTML -- isinya datang dari luar.
+                    <p className="whitespace-pre-wrap break-words text-sm">{b.teks}</p>
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground">{b.keterangan}</p>
                   )}
-                  {/* Kabar terkirim TIDAK ditampilkan sebagai "belum sampai"
-                      saat kosong: konfirmasi hanya tiba selama sesi yang
-                      mengirimnya masih hidup, jadi kolom kosong adalah
-                      ketiadaan kabar, bukan kabar buruk (lihat core/waAck.ts). */}
-                  {kirimSendiri && b.ackLevel !== null && <span>{labelAck(b.ackLevel, keGrup)}</span>}
-                  {/* Kalimatnya sendiri yang menerangkan, bukan `title=`:
-                      keterangan yang cuma muncul saat tetikus berhenti di
-                      atasnya tidak pernah muncul di layar sentuh, dan tidak
-                      terjangkau Ctrl+F. Selisih di bawah semenit sengaja
-                      didiamkan -- itu jeda antre biasa, bukan penundaan. */}
-                  {kirimSendiri && b.terkirimAt && b.terkirimAt.getTime() - b.waktu.getTime() > 60_000 && (
-                    <span>tertunda, baru terkirim {jam(b.terkirimAt)}</span>
-                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span>{jam(b.waktu)}</span>
+                    {kirimSendiri && b.triggerCode && <span>{triggerLabel(b.triggerCode)}</span>}
+                    {kirimSendiri && b.status && (
+                      <Badge variant={outboxStatusVariant(b.status as never)}>
+                        {outboxStatusLabel(b.status as never)}
+                      </Badge>
+                    )}
+                    {/* Kabar terkirim TIDAK ditampilkan sebagai "belum sampai"
+                        saat kosong: konfirmasi hanya tiba selama sesi yang
+                        mengirimnya masih hidup, jadi kolom kosong adalah
+                        ketiadaan kabar, bukan kabar buruk (lihat core/waAck.ts). */}
+                    {kirimSendiri && b.ackLevel !== null && <span>{labelAck(b.ackLevel, keGrup)}</span>}
+                    {/* Kalimatnya sendiri yang menerangkan, bukan `title=`:
+                        keterangan yang cuma muncul saat tetikus berhenti di
+                        atasnya tidak pernah muncul di layar sentuh, dan tidak
+                        terjangkau Ctrl+F. Selisih di bawah semenit sengaja
+                        didiamkan -- itu jeda antre biasa, bukan penundaan. */}
+                    {kirimSendiri && b.terkirimAt && b.terkirimAt.getTime() - b.waktu.getTime() > 60_000 && (
+                      <span>tertunda, baru terkirim {jam(b.terkirimAt)}</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </section>
+            );
+          })}
+        </KotakGulung>
+      </div>
 
       <BalasForm chatId={chatId} keGrup={keGrup} bisaDibalas={keGrup || Boolean(nomor)} />
     </div>
