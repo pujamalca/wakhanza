@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { heartbeatStale } from '@/lib/health';
+import { diagnosaKoneksi } from '@/core/koneksiDiagnosa';
 import {
   Card,
   Badge,
@@ -22,6 +23,16 @@ interface KoneksiStatus {
   phoneNumber: string | null;
   heartbeatAt: string | null;
   lastError: string | null;
+  statusSejak: string | null;
+  percobaanMenautkan: number;
+  jendelaPercobaanMenit: number;
+}
+
+function formatSelang(detik: number): string {
+  if (detik < 60) return `${detik} detik`;
+  const menit = Math.floor(detik / 60);
+  if (menit < 60) return `${menit} menit`;
+  return `${Math.floor(menit / 60)} jam ${menit % 60} menit`;
 }
 
 async function fetchStatus(): Promise<KoneksiStatus> {
@@ -32,7 +43,7 @@ async function fetchStatus(): Promise<KoneksiStatus> {
 
 export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['koneksi-status'],
     queryFn: fetchStatus,
     refetchInterval: 3000,
@@ -65,6 +76,31 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
   const stale = heartbeatStale(data.heartbeatAt);
   const showQr = data.status === 'qr_pending' && data.qrData;
 
+  /**
+   * Acuan waktunya `dataUpdatedAt` milik query, BUKAN `Date.now()`.
+   *
+   * `Date.now()` di badan komponen adalah pemanggilan tak murni dan ditolak
+   * `react-hooks/purity` -- aturan yang benar: dua render atas data yang sama
+   * tidak boleh berbeda hanya karena waktunya berjalan. Membungkusnya di dalam
+   * fungsi pembantu memang menyembunyikannya dari linter, tapi itu menyiasati
+   * aturannya alih-alih memenuhinya.
+   *
+   * `dataUpdatedAt` adalah state milik hook, jadi ia masukan render yang sah,
+   * dan ia bergerak tiap `refetchInterval` (3 detik) -- angkanya tetap berjalan
+   * di layar selama staf menungguinya. Ia juga lebih jujur: yang ditampilkan
+   * memang "sejauh pembacaan terakhir", bukan jam browser yang bisa menyimpang
+   * dari jam server.
+   */
+  const detikDiStatus = data.statusSejak
+    ? Math.max(0, Math.floor((dataUpdatedAt - new Date(data.statusSejak).getTime()) / 1000))
+    : null;
+  const diagnosa = diagnosaKoneksi({
+    status: data.status,
+    detikDiStatus,
+    percobaanMenautkan: data.percobaanMenautkan,
+  });
+  const menautkanBermasalah = diagnosa === 'menautkan-lama' || diagnosa === 'menautkan-berulang';
+
   return (
     <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
       <Card>
@@ -77,7 +113,45 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
         </div>
         <p className="mt-2 text-sm text-muted-foreground">{waStatusHelp(data.status)}</p>
 
+        {/* Berhenti cuma berkata "Menghubungkan".
+            Sebelum ini, penautan yang sudah gagal empat belas kali tampak persis
+            sama dengan yang baru dimulai delapan detik lalu -- dan staf yang
+            menunggui halaman ini tidak punya satu pun cara membedakannya. */}
+        {menautkanBermasalah && (
+          <div className="mt-3 rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs">
+            <p className="flex gap-2">
+              <IconAlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+              <span>
+                {diagnosa === 'menautkan-berulang' ? (
+                  <>
+                    Penautan gagal <span className="font-medium">{data.percobaanMenautkan} kali</span> dalam{' '}
+                    {data.jendelaPercobaanMenit} menit terakhir. Worker mencoba lagi sendiri tiap ~3 menit; penautan
+                    yang berhasil selesai dalam hitungan detik, jadi yang tersangkut biasanya baru berhasil pada
+                    percobaan keberapa.
+                  </>
+                ) : (
+                  <>
+                    Sudah <span className="font-medium">{formatSelang(detikDiStatus ?? 0)}</span> di tahap ini.
+                    Penautan yang sehat selesai di bawah 15 detik, jadi ini kemungkinan tersangkut — worker akan
+                    menyerah pada menit ke-3 lalu mencoba lagi sendiri.
+                  </>
+                )}
+              </span>
+            </p>
+            <p className="mt-2 pl-6 text-muted-foreground">
+              Selama ini berlangsung tidak ada pesan yang terkirim, tapi tidak ada yang hilang: semuanya menunggu di
+              antrean dan berangkat begitu sesi hidup.
+            </p>
+          </div>
+        )}
+
         <dl className="mt-4 space-y-2 border-t pt-3 text-sm">
+          {detikDiStatus !== null && data.status !== 'ready' && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Di tahap ini sejak</dt>
+              <dd className={menautkanBermasalah ? 'text-warning' : ''}>{formatSelang(detikDiStatus)} lalu</dd>
+            </div>
+          )}
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">Nomor pengirim</dt>
             <dd className="tabular-nums">{data.phoneNumber ?? '-'}</dd>
@@ -105,11 +179,35 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
         )}
 
         {isAdmin && (
-          <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
+          <div className="mt-4 border-t pt-3">
+            {/* Perintah dititipkan lewat tabel, bukan dikerjakan seketika:
+                dashboard dan worker memang tidak pernah bicara lewat HTTP.
+                Tanpa kalimat ini, tombol yang "tidak melakukan apa-apa" selama
+                beberapa detik terbaca sebagai rusak, dan orang menekannya lagi
+                -- yang pada Sambung ulang berarti menyalakan ulang worker dua
+                kali. */}
+            {commandMutation.isSuccess && !commandMutation.isPending && (
+              <p className="mb-2 rounded-md border border-info/25 bg-info/5 p-2 text-xs text-muted-foreground">
+                Perintah terkirim. Worker membacanya paling lama beberapa detik lagi — status di atas berubah sendiri
+                begitu dikerjakan.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
               size="md"
-              disabled={commandMutation.isPending}
+              /**
+               * Dimatikan selama QR tampil, dan itu bukan kehalusan: sejak
+               * perintah sesi benar-benar dibaca saat menautkan, tiap tekanan
+               * menyalakan ulang worker -- yang menerbitkan QR BARU dan
+               * membatalkan kode yang sedang ditatap petugas. Terjadi sungguhan
+               * pada 15 Agustus 2026, dua kali berturut-turut.
+               *
+               * Worker juga menolaknya di sisinya sendiri (lihat
+               * `processSessionCommand`), jadi ini lapis kedua -- tapi lapis
+               * yang menjelaskan, sementara yang di worker cuma mendiamkan.
+               */
+              disabled={commandMutation.isPending || data.status === 'qr_pending'}
               onClick={() => commandMutation.mutate('reconnect')}
             >
               <IconRefresh className="h-4 w-4" />
@@ -128,6 +226,13 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
               <IconLogout className="h-4 w-4" />
               Keluar sesi
             </Button>
+            </div>
+            {data.status === 'qr_pending' && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                &ldquo;Sambung ulang&rdquo; dimatikan selama QR menunggu dipindai — menekannya akan menerbitkan kode
+                baru dan membatalkan yang sedang tampil.
+              </p>
+            )}
           </div>
         )}
       </Card>
