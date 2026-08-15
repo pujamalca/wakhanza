@@ -6431,3 +6431,282 @@ sungguhan — kiriman pertamanya jatuh pukul 20:00 pada hari migrasinya diterapk
 Yang sudah terbukti adalah seluruh rantai di bawahnya: query-nya terhadap data
 produksi, keempat invarian penjumlahannya, perenderan pesannya, pagar privasinya,
 dan pagar sanitasinya.
+
+## Rincian per tindakan, dan pengecualian yang MELIPAT (`migrations/050`)
+
+Judulnya sama persis dengan seksi di `CLAUDE.md`.
+
+### Tabel tindakan: yang ADA dan yang DIPAKAI
+
+Diperiksa lewat `information_schema.TABLES` + `COUNT(*)` sungguhan — bukan
+`TABLE_ROWS`, yang perkiraan pada InnoDB dan membulat ke nol pada tabel kecil
+(pelajaran 030):
+
+```
+rawat_jl_dr              12215 baris
+rawat_jl_pr                  0 baris
+rawat_jl_drpr                3 baris
+rawat_inap_dr                0 baris
+rawat_inap_pr                0 baris
+rawat_inap_drpr              0 baris
+jns_perawatan             1312 baris
+```
+
+PK keenamnya, terbaca dari `information_schema.STATISTICS`:
+
+```
+rawat_jl_dr        (no_rawat, kd_jenis_prw, kd_dokter, tgl_perawatan, jam_rawat)
+rawat_jl_pr        (no_rawat, kd_jenis_prw, nip, tgl_perawatan, jam_rawat)
+rawat_jl_drpr      (no_rawat, kd_jenis_prw, kd_dokter, nip, tgl_perawatan, jam_rawat)
+rawat_inap_dr      (no_rawat, kd_jenis_prw, kd_dokter, tgl_perawatan, jam_rawat)
+rawat_inap_pr      (no_rawat, kd_jenis_prw, nip, tgl_perawatan, jam_rawat)
+rawat_inap_drpr    (no_rawat, kd_jenis_prw, kd_dokter, nip, tgl_perawatan, jam_rawat)
+```
+
+`no_rawat` memimpin keenamnya — itulah yang membuat prefiks bulanan memangkas
+lewat indeks tanpa izin pindai penuh, dan yang membuat kelima tabel kosong akan
+beralih sendiri ke `range` begitu terisi.
+
+`kd_jenis_prw` yang tidak ada di katalog: **0 kode** sepanjang seluruh riwayat.
+`LEFT JOIN` tetap dipakai justru karena nol itu murah dijaga.
+
+### Sebaran per bulan, dan sebaran Juli 2026 seutuhnya
+
+```
+202601  baris   541  jenis   14  kunjungan   363
+202602  baris   437  jenis   14  kunjungan   309
+202603  baris   592  jenis   16  kunjungan   410
+202604  baris   615  jenis   16  kunjungan   424
+202605  baris   556  jenis   20  kunjungan   363
+202606  baris   648  jenis   16  kunjungan   443
+202607  baris   649  jenis   15  kunjungan   470
+```
+
+Juli 2026, seluruh 15 jenis:
+
+```
+   473 ( 72.9%)  RJ24578 | konsultasi dokter umum
+    65 ( 10.0%)  RJ24571 | Injeksi Obat
+    30 (  4.6%)  RJ24581 | puyer
+    17 (  2.6%)  RJ24575 | Gula Darah
+    16 (  2.5%)  RJ24579 | nebulisasi
+    13 (  2.0%)  RJ24576 | Asam Urat
+     9 (  1.4%)  RJ24577 | Kolesterol
+     9 (  1.4%)  RJ24568 | Woud toilet ringan
+     6 (  0.9%)  RJ24567 | Pemasangan Infus
+     4 (  0.6%)  RJ24588 | kunjungan rumah perawat
+     2 (  0.3%)  RJ24574 | Hecting
+     2 (  0.3%)  RJ24586 | operasi kecil
+     1 (  0.2%)  RJ24573 | Kunjungan Rumah
+     1 (  0.2%)  RJ24572 | Ekstraksi Benda Asing
+     1 (  0.2%)  RJ24570 | Wound Toilet Besar
+```
+
+Ekor: **6 dari 15 jenis ≤5 kali**, menyumbang 11 baris. Kedua angka inilah yang
+menjadi kedua alasan pengecualian ada — kebisingan (72,9%) dan privasi (ekor).
+
+Kunjungan yang punya tindakan, terhadap total kunjungan bulan itu:
+
+```
+202601  363 dari 596 kunjungan punya tindakan (60.9%)
+202604  424 dari 631 kunjungan punya tindakan (67.2%)
+202607  470 dari 668 kunjungan punya tindakan (70.4%)
+```
+
+### Rencana query — nol izin pindai penuh baru
+
+`npm run verify:plans`, exit **0**:
+
+```
+[ok] ADM_BULANAN_KUNJUNGAN r range PRIMARY  rows~668
+[ok] ADM_BULANAN_KUNJUNGAN tk5 ref PRIMARY  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN tk4 ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN tk3 ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN tk2 ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN tk1 ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_KUNJUNGAN tk0 ref no_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_TINDAKAN <derived2> (hasil subquery, sudah tersaring)  rows~654
+[ok] ADM_BULANAN_TINDAKAN j eq_ref PRIMARY  rows~1
+[ok] ADM_BULANAN_TINDAKAN rawat_jl_dr range no_rawat  rows~649  (Using index)
+[ok] ADM_BULANAN_TINDAKAN rawat_jl_pr index biaya_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_TINDAKAN rawat_jl_drpr index rawat_jl_drpr_ibfk_2  rows~3  (Using index)
+[ok] ADM_BULANAN_TINDAKAN rawat_inap_dr index tgl_perawatan  rows~1  (Using index)
+[ok] ADM_BULANAN_TINDAKAN rawat_inap_pr index biaya_rawat  rows~1  (Using index)
+[ok] ADM_BULANAN_TINDAKAN rawat_inap_drpr index rawat_inap_drpr_ibfk_2  rows~1  (Using index)
+[ok] ADM_BULANAN_NAMA_TINDAKAN j range PRIMARY  rows~2
+```
+
+Keenam `EXISTS` yang ditambahkan ke query kunjungan seluruhnya `ref` +
+`Using index`; tidak satu pun `ALL`, jadi `allowFullScan` TIDAK ditambahkan untuk
+satu tabel pun. Waktu jalan query rincian, tiga kali berturut-turut pada kondisi
+hangat: **3 ms, 2 ms, 2 ms**.
+
+### Migrasi: CRLF diperiksa SEBELUM dijalankan, dan sisipannya dibuktikan
+
+Template tersimpan sebelum migrasi:
+
+```
+panjang           : 560
+punya CRLF        : true
+punya jangkar     : true
+sudah ada tindakan: false
+```
+
+CRLF terkonfirmasi — persis jebakan yang dibayar 043 dan 049. Sesudah
+`npm run migrate` (`[migrate] selesai 050_administrasi_bulanan_tindakan.sql`):
+
+```
+panjang           : 719
+punya CRLF        : true
+punya jangkar     : true
+sudah ada tindakan: true
+```
+
+Cuplikan hasilnya membuktikan baris baru yang disisipkan mengikuti gaya yang
+sudah dipakai, bukan LF telanjang — CRLF di setiap sambungan:
+
+```
+..."*Cara bayar*\r\n{rincian_cara_bayar}\r\n\r\n*Tindakan*\r\nTotal tindakan :
+{jumlah_tindakan} dari {jumlah_jenis_tindakan} jenis\r\nKunjungan tanpa tindakan :
+{jumlah_tanpa_tindakan}\r\n\r\n{rincian_tindakan}\r\n\r\n*Kelengkapan berkas terisi*...
+```
+
+### Pesan yang benar-benar dirender, terhadap data produksi
+
+`npm run dryrun:adm-bulanan`, exit **0**. Bagian tindakannya:
+
+```
+*Tindakan*
+Total tindakan : 649 dari 15 jenis
+Kunjungan tanpa tindakan : 198
+
+• konsultasi dokter umum : 473 (72,9%)
+• Injeksi Obat : 65 (10%)
+• puyer : 30 (4,6%)
+...
+• Kunjungan Rumah : 1 (0,2%)
+
+*Kelengkapan berkas terisi*
+• Resep : 634 (94,9%)
+• Tindakan : 470 (70,4%)
+• SOAPIE : 486 (72,8%)
+• Diagnosa : 3 (0,4%)
+• Resume : 0 (0%)
+• Asesmen awal : 94 dari 191 pasien baru (49,2%)
+```
+
+### Pagar privasi — diperiksa pada objek barisnya, dan dibuktikan MENGGIGIT
+
+Kolom yang benar-benar terbaca dari ketujuh agregat:
+
+```
+jml_kunjungan, jml_pasien, jml_batal, jml_baru, jml_belum_bayar, ada_resep,
+ada_diagnosa, ada_soapie, ada_resume, ada_tindakan, baru_tanpa_asesmen,
+kd_pj, png_jawab, kd_jenis_prw, nm_perawatan, jml, jml_pasien_berulang,
+jml_kunjungan_berulang
+
+[ok] PAGAR PRIVASI -- tidak satu pun kolom identitas, poli, atau isi rekam medis terbaca
+```
+
+Dari keenam tabel tindakan yang menyeberang ke Node cuma `kd_jenis_prw`,
+`nm_perawatan`, dan sebuah `COUNT`. `kd_dokter`, `nip`, dan `biaya_rawat`
+ditambahkan ke daftar terlarang `dryrun:adm-bulanan`.
+
+Dibuktikan menggigit dengan menambahkan `MAX(x.no_rawat) AS no_rawat` ke daftar
+SELECT dengan sengaja:
+
+```
+[BOCOR] kolom terlarang terbaca: no_rawat -- lihat komentar pembuka khanza/administrasiBulanan.ts
+exit code: 1
+```
+
+Dikembalikan sesudahnya.
+
+### Invarian penjumlahan — tujuh, seluruhnya lolos
+
+```
+[ok] baru + lama = kunjungan
+[ok] ada resep + tanpa resep = kunjungan
+[ok] asesmen terisi + belum = pasien baru
+[ok] ada tindakan + tanpa tindakan = kunjungan
+[ok] tampil + dicentang + lewat batas = seluruh tindakan
+[ok] jenis tampil + dicentang + lewat batas = seluruh jenis
+[ok] jumlah pecahan cara bayar = jumlah kunjungan
+```
+
+Dua dari ketiga yang baru adalah yang menjaga janji "melipat, bukan membuang".
+Dibuktikan MENGGIGIT dengan mengubah `jmlTindakan` supaya mengecualikan yang
+dicentang:
+
+```
+Tests: 3 failed, 36 passed, 39 total
+```
+
+Dikembalikan sesudahnya.
+
+### Pagar sanitasi `nm_perawatan` — dibuktikan MENGGIGIT
+
+Dengan `sanitizeValue()` dilepas dari `bagiTindakan()`:
+
+```
+● pagar MULTILINE › nama tindakan berisi BARIS BARU tidak boleh menambah baris
+● pagar MULTILINE › nama tindakan sudah bersih SEBELUM perakit teksnya dipanggil
+Tests: 2 failed, 37 passed, 39 total
+```
+
+Dikembalikan sesudahnya. Uji keduanya berbentuk PERILAKU (jumlah baris sesudah
+`renderTemplate`), bukan keanggotaan himpunan — kewajiban yang tertulis di
+`MULTILINE_VARIABLES`.
+
+### Gerbang
+
+```
+npm run typecheck     0 galat
+npm run lint          0 galat
+npm test              58 suite, 1052 uji lolos
+npm run verify:db     lolos (sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK)
+npm run verify:plans  exit 0
+npm run migrate       1 migrasi diterapkan
+npm run build         lolos
+```
+
+### Pemasangan
+
+`administrasi.bulanan_enabled` SUDAH bernilai `'1'` di mesin ini (tanggal kirim 5,
+`administrasi.bulanan_last_run` = `202607`), jadi restart bukan opsional.
+
+Sesi diperiksa SEHAT lebih dulu — `status: 'ready'`, `umur_denyut: 22` detik,
+`last_error: null`, 176 baris `outbox` dua hari terakhir seluruhnya `sent`.
+Dibaca lewat Sequelize, jadi `TIMESTAMPDIFF` MENTAH yang benar (zona sesinya
+`+00:00`, `NOW()` ikut UTC).
+
+Prosedur tiga langkah dari PowerShell:
+
+```
+pm2 stop wakhanza-worker
+Chromium pemegang sesi tersisa: 0        <- shutdown IPC bersih, nol yatim
+pm2 start wakhanza-worker
+```
+
+Log sesudahnya: satu pid (15204), `WhatsApp terautentikasi, menunggu ready` lalu
+`WhatsApp siap` — nol pengulangan fase `menautkan`, nol kaskade restart. Sesi
+diperiksa ulang: `ready`, denyut 22 detik.
+
+`wakhanza-web` juga dimulai ulang sesudah `npm run build`. Buildnya terbukti
+memuat perubahannya (`grep -rl "Tindakan yang dilipat" .next/server` menemukan
+chunk `administrasi`), dan instance PM2 melayani: `/login` → 200,
+`/administrasi?tab=bulanan` → 307 (dialihkan ke login, gerbang `proxy.ts` benar).
+
+### Yang BELUM terbukti
+
+Rekapnya belum pernah berangkat terjadwal dengan bagian tindakan di dalamnya —
+`bulanJatuhTempo()` mengembalikan null hari ini (penanda `202607` sudah sama
+dengan bulan targetnya), jadi kiriman berikutnya **5 September 2026** berisi rekap
+Agustus. Yang sudah terbukti seluruh rantai di bawahnya: query terhadap data
+produksi, ketujuh invarian penjumlahannya, perenderan pesannya, pagar privasinya,
+pagar sanitasinya, dan sisipan migrasinya.
+
+Belum ada satu pun tindakan yang dicentang, jadi cabang "Dikecualikan" dan cabang
+batas baris belum pernah dirender terhadap data produksi — keduanya terbukti lewat
+uji unit atas data Juli 2026 yang sebenarnya, termasuk cabang batas baris yang
+menuntut 45 jenis buatan karena produksi cuma punya 15.

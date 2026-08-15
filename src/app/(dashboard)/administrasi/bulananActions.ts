@@ -12,7 +12,11 @@ import {
   TANGGAL_KIRIM_MAKS,
 } from '@/core/rekapBulan';
 import { parseTarget, type JenisTarget } from '@/core/farmasiTarget';
-import { susunRekapAdmBulanan, muatTargetAdmBulanan } from '@/worker/administrasiBulananRunner';
+import {
+  susunRekapAdmBulanan,
+  muatTargetAdmBulanan,
+  KUNCI_TINDAKAN_KECUALI,
+} from '@/worker/administrasiBulananRunner';
 import { loadFarmasiContext, enqueueMessage } from '@/worker/pipeline';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { getHospitalIdentity } from '@/khanza/common';
@@ -95,6 +99,28 @@ export async function simpanBulananAction(
   const templateKosong = String(formData.get('template_bulanan_kosong') ?? '');
 
   /**
+   * Kotak centang "kecualikan tindakan".
+   *
+   * `getAll()`, bukan `get()` -- `CheckboxList` merender satu input per pilihan
+   * dengan `name` yang sama. Yang tidak tercentang tidak terkirim sama sekali,
+   * jadi tidak ada nilai kosong yang perlu disaring; `filter` di bawah menjaga
+   * bentuk yang datang dari luar form.
+   *
+   * Uniknya lewat `Set` supaya nilai kembar tidak menggandakan barisnya di JSON
+   * yang tersimpan. `sort()` supaya nilai tersimpannya STABIL: tanpa itu, dua
+   * penyimpanan yang isinya sama persis menghasilkan dua string berbeda, dan
+   * jejak `audit_log` berbunyi "berubah" pada perubahan yang tidak ada.
+   */
+  const tindakanKecuali = [
+    ...new Set(
+      formData
+        .getAll('tindakan_kecuali')
+        .map((v) => String(v).trim())
+        .filter((v) => v !== ''),
+    ),
+  ].sort();
+
+  /**
    * Tanggal dan jam ditolak di DEPAN orang yang bisa memperbaikinya seketika.
    *
    * Worker sengaja lebih pemaaf (jatuh ke bawaan berikut `warn`), dan pembagian
@@ -137,15 +163,30 @@ export async function simpanBulananAction(
   await setSetting('administrasi.bulanan_jam', tulisJamRekap(jam));
   await setSetting('administrasi.template_bulanan', template);
   await setSetting('administrasi.template_bulanan_kosong', templateKosong);
+  await setSetting(KUNCI_TINDAKAN_KECUALI, JSON.stringify(tindakanKecuali));
+  /**
+   * Kodenya IKUT dicatat, bukan cuma jumlahnya.
+   *
+   * `audit_log` append-only, jadi ia satu-satunya tempat yang bisa menjawab
+   * "sejak kapan tindakan ini berhenti disebut di rekap" -- pertanyaan yang
+   * pasti muncul saat seseorang membandingkan rekap dua bulan lalu dengan rekap
+   * bulan ini dan menemukan satu baris hilang. Kodenya pendek dan jumlahnya
+   * belasan, jadi ongkosnya nol.
+   */
   await logAudit(
     session!.user.username,
     'administrasi_bulanan_pesan',
     'administrasi.template_bulanan',
-    `tanggal ${tanggal} pukul ${tulisJamRekap(jam)}; pesan saat kosong: ${templateKosong.trim() ? 'diisi' : 'diam'}`,
+    `tanggal ${tanggal} pukul ${tulisJamRekap(jam)}; pesan saat kosong: ${templateKosong.trim() ? 'diisi' : 'diam'}; ` +
+      `tindakan dikecualikan: ${tindakanKecuali.length === 0 ? 'tidak ada' : `${tindakanKecuali.length} (${tindakanKecuali.join(', ')})`}`,
   );
   segarkan();
   return {
-    sukses: `Pengaturan rekap bulanan tersimpan. Kiriman berikutnya tanggal ${tanggal} pukul ${tulisJamRekap(jam)}.`,
+    sukses:
+      `Pengaturan rekap bulanan tersimpan. Kiriman berikutnya tanggal ${tanggal} pukul ${tulisJamRekap(jam)}.` +
+      (tindakanKecuali.length > 0
+        ? ` ${tindakanKecuali.length} jenis tindakan dilipat jadi satu baris — jumlahnya tetap terhitung di total.`
+        : ''),
   };
 }
 

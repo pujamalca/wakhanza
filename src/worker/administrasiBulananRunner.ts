@@ -1,10 +1,18 @@
-import { AdministrasiTarget, getSetting, getSettingBool, setSetting, logAudit } from '@/models';
+import {
+  AdministrasiTarget,
+  getSetting,
+  getSettingBool,
+  getSettingJson,
+  setSetting,
+  logAudit,
+} from '@/models';
 import { rekapAdministrasiBulanan } from '@/khanza/administrasiBulanan';
 import {
   gabungAdmBulanan,
   formatRincianCaraBayar,
   formatRincianBerkas,
   formatRincianPasien,
+  formatRincianTindakan,
   judulBulanAdm,
   type RingkasAdmBulanan,
 } from '@/core/administrasiBulanan';
@@ -69,6 +77,41 @@ const AKTOR = 'system:administrasi_bulanan';
 const KUNCI_PENANDA = 'administrasi.bulanan_last_run';
 
 /**
+ * Daftar `kd_jenis_prw` yang dilipat jadi satu baris agregat di rincian tindakan.
+ * JSON array; KOSONG = tidak ada yang dikecualikan, seluruh jenis disebut.
+ *
+ * JSON dan bukan pisah-koma karena bentuk ini SELALU diisi lewat kotak centang,
+ * tidak pernah diketik tangan -- precedent terbarunya `dokumen.*_cara_bayar`
+ * (migrations/048), yang bentuknya sama persis: daftar kode dari master Khanza
+ * yang dipilih lewat picker. Kunci berdaftar yang memang diketik staf
+ * (`privacy.sensitive_poli_codes`, `farmasi.stok_keywords`, `erm.penilaian_jam`)
+ * tetap pisah-koma, dengan alasan yang ditulis di `core/rekapJadwal.ts`.
+ */
+export const KUNCI_TINDAKAN_KECUALI = 'administrasi.bulanan_tindakan_kecuali';
+
+/**
+ * Satu pintu untuk KETIGA pembacanya: worker, pratinjau/tombol uji, dan halaman
+ * yang merender kotak centangnya.
+ *
+ * Tiga tempat yang menguraikan sendiri adalah tiga kesempatan berbeda tafsir soal
+ * nilai yang bukan larik, dan yang paling mungkin menyimpang adalah HALAMANNYA --
+ * satu-satunya dari ketiganya yang tidak mengirim apa pun, sehingga centang yang
+ * tampil berbeda dari yang benar-benar berlaku tidak menghasilkan satu pun galat.
+ * Bentuk kegagalan yang sudah berkali-kali dibayar (`respectsOptOut()`,
+ * `core/tujuanPemicu.ts`, `SCHEDULE_ACTOR`).
+ *
+ * Nilai yang bukan larik atau bukan string DIBUANG, bukan menggugurkan seluruh
+ * daftarnya: satu entri rusak hasil suntingan SQL langsung tidak boleh membuat
+ * seluruh pengecualian staf berhenti berlaku diam-diam.
+ */
+export async function bacaTindakanKecuali(): Promise<string[]> {
+  const daftar = await getSettingJson<string[]>(KUNCI_TINDAKAN_KECUALI, []);
+  return Array.isArray(daftar)
+    ? daftar.filter((k): k is string => typeof k === 'string' && k.trim() !== '').map((k) => k.trim())
+    : [];
+}
+
+/**
  * Tujuan yang mencentang "terima rekap bulanan".
  *
  * `isActive` TETAP ikut disyaratkan, dan itu bukan pengetatan berlebih melainkan
@@ -114,6 +157,10 @@ export function susunVarsAdmBulanan(
     jumlah_ada_diagnosa: formatJumlah(r.jmlAdaDiagnosa),
     jumlah_ada_soapie: formatJumlah(r.jmlAdaSoapie),
     jumlah_ada_resume: formatJumlah(r.jmlAdaResume),
+    jumlah_ada_tindakan: formatJumlah(r.jmlAdaTindakan),
+    jumlah_tanpa_tindakan: formatJumlah(r.jmlTanpaTindakan),
+    jumlah_tindakan: formatJumlah(r.jmlTindakan),
+    jumlah_jenis_tindakan: formatJumlah(r.jmlJenisTindakan),
     jumlah_baru_ada_asesmen: formatJumlah(r.jmlBaruAdaAsesmen),
     jumlah_baru_tanpa_asesmen: formatJumlah(r.jmlBaruTanpaAsesmen),
     jumlah_belum_bayar: formatJumlah(r.jmlBelumBayar),
@@ -122,6 +169,7 @@ export function susunVarsAdmBulanan(
     rincian_cara_bayar: formatRincianCaraBayar(r),
     rincian_pasien: formatRincianPasien(r),
     rincian_berkas: formatRincianBerkas(r),
+    rincian_tindakan: formatRincianTindakan(r),
     tanggal: formatTanggalPesan(sekarang),
     jam: formatJamPesan(sekarang),
   };
@@ -145,13 +193,20 @@ export async function susunRekapAdmBulanan(
   ym: string,
   sekarang: Date,
 ): Promise<HasilRekapAdmBulanan> {
-  const agregat = await rekapAdministrasiBulanan(ym);
-  const ringkas = gabungAdmBulanan(ym, agregat);
-
-  const [bodyAda, bodyKosong] = await Promise.all([
+  /**
+   * Pengecualian dibaca BERBARENGAN dengan template, bukan sesudah `sik`.
+   *
+   * Ia menentukan bentuk pesannya, bukan isi query-nya -- `rekapAdministrasiBulanan()`
+   * tetap membaca seluruh tindakan apa pun centangnya, justru supaya
+   * `{jumlah_tindakan}` tidak diam-diam mengecil saat staf mencentang sesuatu.
+   */
+  const [agregat, kecuali, bodyAda, bodyKosong] = await Promise.all([
+    rekapAdministrasiBulanan(ym),
+    bacaTindakanKecuali(),
     getSetting('administrasi.template_bulanan', ''),
     getSetting('administrasi.template_bulanan_kosong', ''),
   ]);
+  const ringkas = gabungAdmBulanan(ym, agregat, kecuali);
 
   /**
    * Template kosong = DIAM, dan HANYA pada cabang "bulan itu tanpa satu pun

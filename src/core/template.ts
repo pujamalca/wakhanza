@@ -765,9 +765,27 @@ export const REKAP_ADM_BULANAN_TEMPLATE_VARIABLES = [
   'jumlah_ada_diagnosa',
   'jumlah_ada_soapie',
   'jumlah_ada_resume',
+  'jumlah_ada_tindakan',
+  'jumlah_tanpa_tindakan',
   'jumlah_baru_ada_asesmen',
   'jumlah_baru_tanpa_asesmen',
   'jumlah_belum_bayar',
+  /*
+   * --- tindakan ---
+   *
+   * `{jumlah_tindakan}` menghitung BERAPA KALI tindakan dikerjakan;
+   * `{jumlah_ada_tindakan}` di atas menghitung berapa KUNJUNGAN yang punya
+   * setidaknya satu. Keduanya disediakan karena satu kunjungan bisa punya
+   * beberapa tindakan -- terukur 649 tindakan atas 470 kunjungan pada Juli 2026 --
+   * dan memakai yang satu dengan label yang satunya meleset sebanyak itu.
+   *
+   * Keduanya menghitung SELURUH tindakan bulan itu, termasuk yang dikecualikan
+   * staf. Angka yang diam-diam mengecil begitu seseorang mencentang sebuah
+   * tindakan akan membuat perbandingan antar bulan berbohong tanpa satu pun
+   * tanda.
+   */
+  'jumlah_tindakan',
+  'jumlah_jenis_tindakan',
   /* --- dokumen --- */
   'jumlah_surat_sakit',
   'jumlah_surat_kontrol',
@@ -775,6 +793,7 @@ export const REKAP_ADM_BULANAN_TEMPLATE_VARIABLES = [
   'rincian_cara_bayar',
   'rincian_pasien',
   'rincian_berkas',
+  'rincian_tindakan',
   /* --- identitas --- */
   'tanggal',
   'jam',
@@ -992,6 +1011,16 @@ const MULTILINE_VARIABLES = new Set<string>([
   'rincian_cara_bayar',
   'rincian_pasien',
   'rincian_berkas',
+  /**
+   * `rincian_tindakan` sekelas `rincian_cara_bayar`, BUKAN sekelas dua di
+   * atasnya: ia membawa `jns_perawatan.nm_perawatan`, input bebas petugas Khanza
+   * (terukur "puyer", "Woud toilet ringan"). Sanitasinya dikerjakan
+   * `bagiTindakan()` di dalam `gabungAdmBulanan()` alih-alih perakit teksnya,
+   * supaya nilainya sudah bersih juga di picker "kecualikan tindakan" pada
+   * dashboard yang tidak melewati perakit itu sama sekali. Patokannya uji
+   * PERILAKU di administrasiBulanan.test.ts.
+   */
+  'rincian_tindakan',
 ]);
 
 export function renderTemplate(body: string, vars: Partial<Record<TemplateVariable, string>>): string {

@@ -55,9 +55,12 @@ async function main() {
   const { rekapAdministrasiBulanan } = await import('../src/khanza/administrasiBulanan');
   const { gabungAdmBulanan } = await import('../src/core/administrasiBulanan');
   const { bulanRekap, labelBulan, bacaTanggalKirim } = await import('../src/core/rekapBulan');
-  const { susunVarsAdmBulanan, TRIGGER_ADMINISTRASI_BULANAN, muatTargetAdmBulanan } = await import(
-    '../src/worker/administrasiBulananRunner'
-  );
+  const {
+    susunVarsAdmBulanan,
+    TRIGGER_ADMINISTRASI_BULANAN,
+    muatTargetAdmBulanan,
+    bacaTindakanKecuali,
+  } = await import('../src/worker/administrasiBulananRunner');
   const { renderTemplate } = await import('../src/core/template');
   const { getSetting, getSettingBool } = await import('../src/models');
   const { identityVars, loadUniqueCodeTemplate } = await import('../src/worker/pipeline');
@@ -141,6 +144,20 @@ async function main() {
       'terapi',
       'status_prb',
       'HBA1C',
+      /**
+       * Keenam tabel tindakan (migrations/050). `no_rawat` sudah dilarang di
+       * atas -- ia disebut DI DALAM tabel turunan yang menyatukan keenamnya, dan
+       * kehadirannya di sini berarti seseorang menaikkannya jadi kolom hasil.
+       *
+       * `kd_dokter`/`nip` dilarang karena alasan yang BERBEDA dari kolom klinis:
+       * keduanya tidak menyingkap apa pun tentang pasien, tapi memecah tindakan
+       * per petugas mengubah rekap kunjungan menjadi laporan kinerja per orang --
+       * keputusan tersendiri yang tidak pernah diminta, dan satu baris SELECT
+       * jaraknya.
+       */
+      'kd_dokter',
+      'nip',
+      'biaya_rawat',
     ];
 
     /**
@@ -168,7 +185,18 @@ async function main() {
     );
     if (bocor.length > 0) process.exitCode = 1;
 
-    const r = gabungAdmBulanan(bulan, agregat);
+    /**
+     * Pengecualian dibaca dari `app_setting` yang SAMA dipakai worker, bukan
+     * larik kosong. Kalau tidak, dryrun menampilkan rincian yang lebih panjang
+     * daripada yang benar-benar terkirim -- dan pratinjau yang berbeda dari
+     * kenyataan lebih buruk daripada tanpa pratinjau.
+     */
+    const kecuali = await bacaTindakanKecuali();
+    console.log(
+      `  tindakan dikecualikan                : ${kecuali.length === 0 ? '(tidak ada)' : kecuali.join(', ')}`,
+    );
+
+    const r = gabungAdmBulanan(bulan, agregat, kecuali);
     console.log(
       `\n  ${r.jmlKunjungan} kunjungan dari ${r.jmlPasien} pasien; ` +
         `${r.jmlBaru} baru, ${r.jmlLama} lama, ${r.jmlBatal} batal`,
@@ -184,6 +212,11 @@ async function main() {
     console.log(`  surat sakit ${r.jmlSuratSakit}, surat kontrol ${r.jmlSuratKontrol}`);
     console.log(
       `  cara bayar    : ${r.caraBayar.length === 0 ? '(tidak ada)' : r.caraBayar.map((b) => `${b.nama || b.kode} ${b.kunjungan}`).join(', ')}`,
+    );
+    console.log(
+      `  tindakan      : ${r.jmlTindakan} tindakan, ${r.jmlJenisTindakan} jenis, ` +
+        `${r.jmlAdaTindakan}/${r.jmlKunjungan} kunjungan bertindakan; ` +
+        `dilipat ${r.jmlJenisDikecualikan} dicentang + ${r.jmlJenisLain} lewat batas baris`,
     );
 
     /**
@@ -202,6 +235,28 @@ async function main() {
         'asesmen terisi + belum = pasien baru',
         r.jmlBaruAdaAsesmen + r.jmlBaruTanpaAsesmen === r.jmlBaru,
         `${r.jmlBaruAdaAsesmen} + ${r.jmlBaruTanpaAsesmen} != ${r.jmlBaru}`,
+      ],
+      [
+        'ada tindakan + tanpa tindakan = kunjungan',
+        r.jmlAdaTindakan + r.jmlTanpaTindakan === r.jmlKunjungan,
+        `${r.jmlAdaTindakan} + ${r.jmlTanpaTindakan} != ${r.jmlKunjungan}`,
+      ],
+      /**
+       * Janji yang paling gampang rusak di migrations/050, dan yang paling
+       * senyap: pengecualian MELIPAT, tidak membuang. Begitu ada yang
+       * menyaringnya di WHERE alih-alih di perakit, angka ini berhenti genap --
+       * dan yang terlihat cuma rincian yang tidak sampai seratus persen.
+       */
+      [
+        'tampil + dicentang + lewat batas = seluruh tindakan',
+        r.tindakan.reduce((n, b) => n + b.jumlah, 0) + r.jmlTindakanDikecualikan + r.jmlTindakanLain ===
+          r.jmlTindakan,
+        `${r.tindakan.reduce((n, b) => n + b.jumlah, 0)} + ${r.jmlTindakanDikecualikan} + ${r.jmlTindakanLain} != ${r.jmlTindakan}`,
+      ],
+      [
+        'jenis tampil + dicentang + lewat batas = seluruh jenis',
+        r.tindakan.length + r.jmlJenisDikecualikan + r.jmlJenisLain === r.jmlJenisTindakan,
+        `${r.tindakan.length} + ${r.jmlJenisDikecualikan} + ${r.jmlJenisLain} != ${r.jmlJenisTindakan}`,
       ],
     ];
     console.log('');

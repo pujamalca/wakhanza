@@ -41,6 +41,36 @@ export interface BarisCaraBayar {
   pasien: number;
 }
 
+/** Satu jenis tindakan dan berapa kali ia dikerjakan bulan itu. */
+export interface BarisTindakan {
+  kode: string;
+  /** Sudah dibersihkan dan disanitasi. Kosong bila katalognya tidak menyebutkan apa pun. */
+  nama: string;
+  jumlah: number;
+}
+
+/**
+ * Berapa baris tindakan yang disebut satu per satu sebelum sisanya dilipat.
+ *
+ * TERUKUR tidak pernah menggigit di instalasi ini: 14-20 jenis sebulan sepanjang
+ * 2026. Yang dijaganya instalasi berkatalog penuh -- `jns_perawatan` di sini saja
+ * berisi 1.312 baris, dan rumah sakit yang benar-benar memakainya bisa
+ * mengerjakan ratusan jenis sebulan. Tanpa batas, `{rincian_tindakan}` tumbuh
+ * mengikuti data sampai menabrak batas panjang pesan yang terukur 13.035 karakter
+ * (migrations/022) -- diam-diam, karena WhatsApp memotongnya di ujung sana.
+ *
+ * Batas ini ada JUSTRU karena runner rekap ini menyatakan dirinya "TANPA
+ * pemecahan bagian", dan alasan yang ditulis di sana berpijak pada
+ * `{rincian_cara_bayar}` yang tumbuh mengikuti jumlah PENJAMIN (terukur dua).
+ * Variabel ini tumbuh mengikuti jumlah TINDAKAN, jadi alasan itu cuma tetap benar
+ * kalau panjangnya dibatasi di sini.
+ *
+ * Yang terpotong TIDAK hilang: ia dilipat jadi satu baris berisi jumlah jenis dan
+ * jumlah tindakannya, sehingga pecahannya tetap berjumlah dengan totalnya dan
+ * pembacanya tahu ada yang tidak disebut.
+ */
+export const MAKS_BARIS_TINDAKAN = 40;
+
 export interface RingkasAdmBulanan {
   bulan: string;
   /* --- kunjungan & pasien --- */
@@ -52,6 +82,21 @@ export interface RingkasAdmBulanan {
   jmlBerulang: number;
   jmlKunjunganBerulang: number;
   caraBayar: BarisCaraBayar[];
+  /* --- tindakan --- */
+  /** SELURUH tindakan bulan itu, termasuk yang dikecualikan. */
+  jmlTindakan: number;
+  /** Jenis berbeda, termasuk yang dikecualikan. */
+  jmlJenisTindakan: number;
+  jmlAdaTindakan: number;
+  jmlTanpaTindakan: number;
+  /** Yang disebut satu per satu -- sudah dikurangi pengecualian DAN batas baris. */
+  tindakan: BarisTindakan[];
+  /** Dilipat karena staf mencentangnya di `/administrasi?tab=bulanan`. */
+  jmlTindakanDikecualikan: number;
+  jmlJenisDikecualikan: number;
+  /** Dilipat karena melewati `MAKS_BARIS_TINDAKAN`, bukan karena dicentang. */
+  jmlTindakanLain: number;
+  jmlJenisLain: number;
   /* --- kelengkapan berkas --- */
   jmlBaruTanpaAsesmen: number;
   jmlBaruAdaAsesmen: number;
@@ -82,6 +127,63 @@ function angka(nilai: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Baris tindakan mentah dibagi tiga: yang disebut, yang dicentang staf, dan yang
+ * lewat batas baris.
+ *
+ * MENGURUTKAN SENDIRI alih-alih memercayai `ORDER BY` query-nya, dan itu bukan
+ * kehati-hatian kosong: batas barisnya memotong dari EKOR, jadi urutan yang
+ * berbeda berarti jenis yang berbeda yang terlipat. Fungsi murni yang hasilnya
+ * bergantung pada urutan masukan adalah fungsi yang ujinya lolos sementara
+ * produksinya melipat baris yang salah. Pengurut keduanya `kode` supaya jumlah
+ * yang sama tidak menghasilkan urutan yang berubah-ubah antar pemanggilan.
+ *
+ * Nama tindakan lewat `isianSurat()` lalu `sanitizeValue()`, urutan yang sama dan
+ * karena alasan yang sama seperti `png_jawab` di bawah -- `nm_perawatan` juga
+ * input bebas petugas Khanza (terukur: "puyer", "Woud toilet ringan"), dan
+ * penanda `'-'` milik Khanza akan lolos apa adanya lewat sanitizer.
+ */
+function bagiTindakan(
+  baris: NonNullable<AdmBulananMentah['tindakan']>,
+  kecuali: readonly string[],
+): Pick<
+  RingkasAdmBulanan,
+  | 'jmlTindakan'
+  | 'jmlJenisTindakan'
+  | 'tindakan'
+  | 'jmlTindakanDikecualikan'
+  | 'jmlJenisDikecualikan'
+  | 'jmlTindakanLain'
+  | 'jmlJenisLain'
+> {
+  const dicentang = new Set(kecuali.map((k) => k.trim()).filter((k) => k !== ''));
+
+  const semua: BarisTindakan[] = baris
+    .map((b) => ({
+      kode: String(b.kd_jenis_prw ?? '').trim(),
+      nama: sanitizeValue(isianSurat(b.nm_perawatan)),
+      jumlah: angka(b.jml),
+    }))
+    .sort((a, b) => b.jumlah - a.jumlah || a.kode.localeCompare(b.kode));
+
+  const jmlTindakan = semua.reduce((n, b) => n + b.jumlah, 0);
+
+  const dikecualikan = semua.filter((b) => dicentang.has(b.kode));
+  const tersisa = semua.filter((b) => !dicentang.has(b.kode));
+  const tampil = tersisa.slice(0, MAKS_BARIS_TINDAKAN);
+  const lain = tersisa.slice(MAKS_BARIS_TINDAKAN);
+
+  return {
+    jmlTindakan,
+    jmlJenisTindakan: semua.length,
+    tindakan: tampil,
+    jmlTindakanDikecualikan: dikecualikan.reduce((n, b) => n + b.jumlah, 0),
+    jmlJenisDikecualikan: dikecualikan.length,
+    jmlTindakanLain: lain.reduce((n, b) => n + b.jumlah, 0),
+    jmlJenisLain: lain.length,
+  };
+}
+
 /** Bentuk mentah tiap agregat, sebagaimana datang dari SQL. */
 export interface AdmBulananMentah {
   kunjungan?: {
@@ -94,6 +196,7 @@ export interface AdmBulananMentah {
     ada_diagnosa?: number | string | null;
     ada_soapie?: number | string | null;
     ada_resume?: number | string | null;
+    ada_tindakan?: number | string | null;
     baru_tanpa_asesmen?: number | string | null;
   } | null;
   caraBayar?: {
@@ -101,6 +204,11 @@ export interface AdmBulananMentah {
     png_jawab?: string | null;
     jml_kunjungan?: number | string | null;
     jml_pasien?: number | string | null;
+  }[];
+  tindakan?: {
+    kd_jenis_prw?: string | null;
+    nm_perawatan?: string | null;
+    jml?: number | string | null;
   }[];
   berulang?: {
     jml_pasien_berulang?: number | string | null;
@@ -131,13 +239,46 @@ export interface AdmBulananMentah {
  * Ketiganya dijepit di nol: penghitung yang entah bagaimana melebihi pembaginya
  * akan menghasilkan angka negatif, dan "-3 pasien lama" jauh lebih merusak
  * kepercayaan daripada nol yang sedikit meleset.
+ *
+ * ==========================================================================
+ * `kecuali` MELIPAT tindakan, tidak pernah membuangnya
+ * ==========================================================================
+ *
+ * Tindakan yang dicentang staf kehilangan barisnya sendiri lalu masuk satu baris
+ * agregat -- tapi tetap ikut dalam `jmlTindakan` dan `jmlJenisTindakan`. Kedua
+ * bentuk yang lebih sederhana ditolak, masing-masing karena berbohong ke arah
+ * yang berbeda:
+ *
+ *   dibuang dari TOTAL   -> `{jumlah_tindakan}` diam-diam berarti "tindakan
+ *                           kecuali yang tidak kami sebutkan", dan tidak ada satu
+ *                           pun tanda di pesannya yang mengatakan itu.
+ *   dibuang dari DAFTAR  -> barisnya berhenti berjumlah dengan totalnya, persis
+ *                           yang `formatRincianCaraBayar()` dan ketiga pasangan
+ *                           turunan di atas ada untuk mencegah.
+ *
+ * Melipat menutup keduanya sekaligus, dan untuk alasan PRIVASI ia justru yang
+ * benar: "Dikecualikan (3 jenis) : 11" menyembunyikan nama tindakannya sambil
+ * tetap jujur soal jumlahnya. Terukur, itu bukan kekhawatiran teoretis -- pada
+ * Juli 2026, 6 dari 15 jenis dikerjakan 5 kali atau kurang, dan satu baris
+ * "operasi kecil : 2" pada bulan sepi adalah keterangan tentang dua orang
+ * tertentu. Keberatan yang SAMA PERSIS membuat migrations/047 sengaja tidak
+ * memecah rekap ini per poli.
+ *
+ * Bawaannya larik kosong: nol pengecualian, seluruh jenis disebut satu per satu.
  */
-export function gabungAdmBulanan(bulan: string, m: AdmBulananMentah): RingkasAdmBulanan {
+export function gabungAdmBulanan(
+  bulan: string,
+  m: AdmBulananMentah,
+  kecuali: readonly string[] = [],
+): RingkasAdmBulanan {
   const k = m.kunjungan;
   const jmlKunjungan = angka(k?.jml_kunjungan);
   const jmlBaru = angka(k?.jml_baru);
   const jmlAdaResep = angka(k?.ada_resep);
+  const jmlAdaTindakan = angka(k?.ada_tindakan);
   const jmlBaruTanpaAsesmen = angka(k?.baru_tanpa_asesmen);
+
+  const tin = bagiTindakan(m.tindakan ?? [], kecuali);
 
   return {
     bulan,
@@ -161,6 +302,9 @@ export function gabungAdmBulanan(bulan: string, m: AdmBulananMentah): RingkasAdm
       kunjungan: angka(b.jml_kunjungan),
       pasien: angka(b.jml_pasien),
     })),
+    ...tin,
+    jmlAdaTindakan,
+    jmlTanpaTindakan: Math.max(0, jmlKunjungan - jmlAdaTindakan),
     jmlBaruTanpaAsesmen,
     jmlBaruAdaAsesmen: Math.max(0, jmlBaru - jmlBaruTanpaAsesmen),
     jmlAdaResep,
@@ -240,6 +384,56 @@ export function formatRincianCaraBayar(r: RingkasAdmBulanan): string {
 }
 
 /**
+ * `{rincian_tindakan}` -- berapa kali tiap jenis tindakan dikerjakan bulan itu.
+ *
+ * SANITASI WAJIB, sama seperti `formatRincianCaraBayar()` dan lewat alasan yang
+ * sama: `jns_perawatan.nm_perawatan` input bebas petugas Khanza, dan nama yang
+ * memuat baris baru bisa menyisipkan barisnya sendiri lalu memalsukan struktur
+ * pengumuman resmi RS (§9.2). Dikerjakan `bagiTindakan()` di dalam
+ * `gabungAdmBulanan()` -- bukan di sini -- supaya nilainya sudah bersih di mana
+ * pun `BarisTindakan` dipakai, termasuk di picker dashboard yang tidak melewati
+ * fungsi ini sama sekali. Dipatok uji PERILAKU di `administrasiBulanan.test.ts`.
+ *
+ * Pembaginya `jmlTindakan` -- TOTAL termasuk yang dilipat -- sehingga seluruh
+ * baris, dua baris lipatan di bawahnya, dan persentasenya berjumlah seratus
+ * persen. Memakai jumlah yang tampil saja akan membuat pecahannya sampai 100%
+ * sementara satu baris di bawahnya menyebut angka yang tidak terhitung di
+ * dalamnya.
+ *
+ * KEDUA baris lipatan dipisah, tidak dilebur jadi satu "Lainnya". Keduanya
+ * memang menyembunyikan nama, tapi sebabnya berlawanan dan tindakannya berbeda:
+ * yang satu KEPUTUSAN staf yang bisa dibatalkan lewat satu centang, yang satu
+ * KETERBATASAN panjang pesan yang tidak bisa diapa-apakan dari halaman mana pun.
+ * Dilebur, "Lainnya : 484" tidak memberi tahu siapa pun yang mana.
+ *
+ * Tindakan yang namanya tidak terbaca dari katalog ditampilkan lewat KODENYA --
+ * aturan yang sama dengan penjamin tanpa nama, dan sebabnya sama: baris tanpa
+ * label membuat angkanya tidak bisa ditelusuri ke mana pun.
+ */
+export function formatRincianTindakan(r: RingkasAdmBulanan): string {
+  if (r.jmlJenisTindakan === 0) return '(tidak ada tindakan tercatat)';
+
+  const baris = r.tindakan.map((b) => {
+    const label = b.nama || `(kode ${sanitizeValue(b.kode) || 'kosong'})`;
+    return `• ${label} : ${formatJumlah(b.jumlah)}${persen(b.jumlah, r.jmlTindakan)}`;
+  });
+
+  if (r.jmlJenisDikecualikan > 0) {
+    baris.push(
+      `• Dikecualikan (${formatJumlah(r.jmlJenisDikecualikan)} jenis) : ` +
+        `${formatJumlah(r.jmlTindakanDikecualikan)}${persen(r.jmlTindakanDikecualikan, r.jmlTindakan)}`,
+    );
+  }
+  if (r.jmlJenisLain > 0) {
+    baris.push(
+      `• dan ${formatJumlah(r.jmlJenisLain)} jenis lain : ` +
+        `${formatJumlah(r.jmlTindakanLain)}${persen(r.jmlTindakanLain, r.jmlTindakan)}`,
+    );
+  }
+  return baris.join('\n');
+}
+
+/**
  * `{rincian_berkas}` -- seberapa lengkap berkas kunjungan bulan itu terisi.
  *
  * Ditulis dari sisi yang TERISI, bukan sisi yang belum, dan itu kebalikan dari
@@ -269,6 +463,17 @@ export function formatRincianCaraBayar(r: RingkasAdmBulanan): string {
 export function formatRincianBerkas(r: RingkasAdmBulanan): string {
   const baris = [
     `• Resep : ${formatJumlah(r.jmlAdaResep)}${persen(r.jmlAdaResep, r.jmlKunjungan)}`,
+    /**
+     * Tindakan ikut di sini, bukan di `{rincian_tindakan}`, karena yang diukur
+     * KELENGKAPAN -- berapa kunjungan yang punya setidaknya satu tindakan
+     * tercatat, pembagi yang sama dengan keempat baris di sekitarnya. Rincian per
+     * jenis menjawab pertanyaan lain (apa saja yang dikerjakan) dengan pembagi
+     * lain (jumlah tindakan), dan mencampurnya membuat dua persentase berbeda
+     * berdampingan tanpa ada yang menyebut pembaginya.
+     *
+     * Terukur bergerak seperti SOAPIE: 60,9% (Januari 2026) -> 70,4% (Juli).
+     */
+    `• Tindakan : ${formatJumlah(r.jmlAdaTindakan)}${persen(r.jmlAdaTindakan, r.jmlKunjungan)}`,
     `• SOAPIE : ${formatJumlah(r.jmlAdaSoapie)}${persen(r.jmlAdaSoapie, r.jmlKunjungan)}`,
     `• Diagnosa : ${formatJumlah(r.jmlAdaDiagnosa)}${persen(r.jmlAdaDiagnosa, r.jmlKunjungan)}`,
     `• Resume : ${formatJumlah(r.jmlAdaResume)}${persen(r.jmlAdaResume, r.jmlKunjungan)}`,

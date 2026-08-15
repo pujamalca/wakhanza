@@ -3,7 +3,9 @@ import {
   formatRincianCaraBayar,
   formatRincianBerkas,
   formatRincianPasien,
+  formatRincianTindakan,
   judulBulanAdm,
+  MAKS_BARIS_TINDAKAN,
   type AdmBulananMentah,
 } from './administrasiBulanan';
 import { renderTemplate } from './template';
@@ -28,11 +30,35 @@ function juli(): AdmBulananMentah {
       ada_diagnosa: 3,
       ada_soapie: 486,
       ada_resume: 0,
+      ada_tindakan: 470,
       baru_tanpa_asesmen: 97,
     },
     caraBayar: [
       { kd_pj: 'A01', png_jawab: 'UMUM', jml_kunjungan: 473, jml_pasien: 411 },
       { kd_pj: 'A02', png_jawab: 'BPJS Kesehatan', jml_kunjungan: 195, jml_pasien: 156 },
+    ],
+    /**
+     * Kelima belas jenis sebagaimana benar-benar terukur -- bukan tiga baris
+     * contoh. Sebarannya yang menjadikan fiturnya masuk akal, dan sebaran itu
+     * punya DUA sifat yang tidak muncul pada data karangan: satu jenis menelan
+     * 72,9%, dan enam jenis dikerjakan lima kali atau kurang.
+     */
+    tindakan: [
+      { kd_jenis_prw: 'RJ24578', nm_perawatan: 'konsultasi dokter umum', jml: 473 },
+      { kd_jenis_prw: 'RJ24571', nm_perawatan: 'Injeksi Obat', jml: 65 },
+      { kd_jenis_prw: 'RJ24581', nm_perawatan: 'puyer', jml: 30 },
+      { kd_jenis_prw: 'RJ24575', nm_perawatan: 'Gula Darah', jml: 17 },
+      { kd_jenis_prw: 'RJ24579', nm_perawatan: 'nebulisasi', jml: 16 },
+      { kd_jenis_prw: 'RJ24576', nm_perawatan: 'Asam Urat', jml: 13 },
+      { kd_jenis_prw: 'RJ24577', nm_perawatan: 'Kolesterol', jml: 9 },
+      { kd_jenis_prw: 'RJ24568', nm_perawatan: 'Woud toilet ringan', jml: 9 },
+      { kd_jenis_prw: 'RJ24567', nm_perawatan: 'Pemasangan Infus', jml: 6 },
+      { kd_jenis_prw: 'RJ24588', nm_perawatan: 'kunjungan rumah perawat', jml: 4 },
+      { kd_jenis_prw: 'RJ24574', nm_perawatan: 'Hecting', jml: 2 },
+      { kd_jenis_prw: 'RJ24586', nm_perawatan: 'operasi kecil', jml: 2 },
+      { kd_jenis_prw: 'RJ24573', nm_perawatan: 'Kunjungan Rumah', jml: 1 },
+      { kd_jenis_prw: 'RJ24572', nm_perawatan: 'Ekstraksi Benda Asing', jml: 1 },
+      { kd_jenis_prw: 'RJ24570', nm_perawatan: 'Wound Toilet Besar', jml: 1 },
     ],
     berulang: { jml_pasien_berulang: 81, jml_kunjungan_berulang: 186 },
     suratSakit: { jml: 0 },
@@ -207,6 +233,155 @@ describe('formatRincianPasien', () => {
   });
 });
 
+/* ==========================================================================
+ * TINDAKAN (migrations/050)
+ * ========================================================================== */
+
+describe('tindakan -- pengecualian MELIPAT, tidak membuang', () => {
+  it('tanpa pengecualian, seluruh jenis disebut dan totalnya utuh', () => {
+    const r = gabungAdmBulanan('202607', juli());
+    expect(r.jmlTindakan).toBe(649);
+    expect(r.jmlJenisTindakan).toBe(15);
+    expect(r.tindakan).toHaveLength(15);
+    expect(r.jmlJenisDikecualikan).toBe(0);
+    expect(r.jmlJenisLain).toBe(0);
+  });
+
+  /**
+   * INTI fiturnya, dan satu-satunya yang gagal DIAM kalau bentuknya dibalik.
+   *
+   * Menyaring di WHERE alih-alih di perakit menghasilkan angka yang tetap
+   * terlihat masuk akal -- 176 tindakan, 14 jenis -- lalu perbandingan antar
+   * bulan berbohong sejak bulan pertama seseorang mencentang sesuatu.
+   */
+  it('yang dicentang tetap terhitung di TOTAL, cuma kehilangan barisnya', () => {
+    const r = gabungAdmBulanan('202607', juli(), ['RJ24578']);
+
+    expect(r.jmlTindakan).toBe(649);
+    expect(r.jmlJenisTindakan).toBe(15);
+
+    expect(r.tindakan).toHaveLength(14);
+    expect(r.tindakan.map((b) => b.kode)).not.toContain('RJ24578');
+    expect(r.jmlTindakanDikecualikan).toBe(473);
+    expect(r.jmlJenisDikecualikan).toBe(1);
+  });
+
+  it('tampil + dicentang + lewat batas SELALU berjumlah dengan totalnya', () => {
+    for (const kecuali of [[], ['RJ24578'], ['RJ24586', 'RJ24574', 'RJ24572'], ['RJ99999']]) {
+      const r = gabungAdmBulanan('202607', juli(), kecuali);
+      const tampil = r.tindakan.reduce((n, b) => n + b.jumlah, 0);
+      expect(tampil + r.jmlTindakanDikecualikan + r.jmlTindakanLain).toBe(r.jmlTindakan);
+      expect(r.tindakan.length + r.jmlJenisDikecualikan + r.jmlJenisLain).toBe(r.jmlJenisTindakan);
+    }
+  });
+
+  it('kode yang dicentang tapi tidak dikerjakan bulan itu tidak mengubah apa pun', () => {
+    // Keadaan yang wajar: staf mencentang sesuatu, lalu bulan berikutnya
+    // tindakan itu tidak dikerjakan sama sekali.
+    const r = gabungAdmBulanan('202607', juli(), ['RJ99999']);
+    expect(r.tindakan).toHaveLength(15);
+    expect(r.jmlJenisDikecualikan).toBe(0);
+    expect(r.jmlTindakan).toBe(649);
+  });
+
+  it('mengurutkan SENDIRI, tidak memercayai urutan masukan', () => {
+    // Batas barisnya memotong dari EKOR, jadi urutan yang keliru berarti jenis
+    // yang keliru yang terlipat.
+    const terbalik = juli();
+    terbalik.tindakan = [...terbalik.tindakan!].reverse();
+    const r = gabungAdmBulanan('202607', terbalik);
+    expect(r.tindakan[0]!.kode).toBe('RJ24578');
+    expect(r.tindakan[0]!.jumlah).toBe(473);
+  });
+
+  it('yang lewat MAKS_BARIS_TINDAKAN dilipat ke barisnya SENDIRI', () => {
+    const banyak: AdmBulananMentah = {
+      kunjungan: { jml_kunjungan: 1000 },
+      tindakan: Array.from({ length: MAKS_BARIS_TINDAKAN + 5 }, (_, i) => ({
+        kd_jenis_prw: `RJ${String(i).padStart(5, '0')}`,
+        nm_perawatan: `Tindakan ${i}`,
+        jml: 100 - i,
+      })),
+    };
+    const r = gabungAdmBulanan('202607', banyak);
+    expect(r.tindakan).toHaveLength(MAKS_BARIS_TINDAKAN);
+    expect(r.jmlJenisLain).toBe(5);
+    expect(r.jmlJenisDikecualikan).toBe(0);
+    expect(r.tindakan.reduce((n, b) => n + b.jumlah, 0) + r.jmlTindakanLain).toBe(r.jmlTindakan);
+  });
+
+  it('kunjungan bertindakan diturunkan dan dijepit di nol', () => {
+    expect(gabungAdmBulanan('202607', juli()).jmlTanpaTindakan).toBe(198);
+
+    const mustahil = gabungAdmBulanan('202607', {
+      kunjungan: { jml_kunjungan: 10, ada_tindakan: 99 },
+    });
+    expect(mustahil.jmlTanpaTindakan).toBe(0);
+  });
+});
+
+describe('formatRincianTindakan', () => {
+  it('menyebut tiap jenis berikut persentase terhadap SELURUH tindakan', () => {
+    const teks = formatRincianTindakan(gabungAdmBulanan('202607', juli()));
+    expect(teks.split('\n')).toHaveLength(15);
+    expect(teks).toContain('konsultasi dokter umum : 473 (72,9%)');
+  });
+
+  /**
+   * Pembaginya TOTAL, bukan jumlah yang tampil.
+   *
+   * Kalau tidak, baris yang tampil menjumlah seratus persen sementara baris
+   * "Dikecualikan" tepat di bawahnya menyebut angka yang tidak terhitung di
+   * dalamnya -- dan pembacanya tidak punya cara mengetahui mana yang benar.
+   */
+  it('persentase tetap dihitung terhadap total walau ada yang dilipat', () => {
+    const teks = formatRincianTindakan(gabungAdmBulanan('202607', juli(), ['RJ24578']));
+    expect(teks).toContain('Injeksi Obat : 65 (10%)');
+    expect(teks).toContain('Dikecualikan (1 jenis) : 473 (72,9%)');
+  });
+
+  /**
+   * DUA baris lipatan, tidak dilebur.
+   *
+   * Keduanya menyembunyikan nama, tapi yang satu keputusan staf yang bisa
+   * dibatalkan lewat satu centang dan yang satu keterbatasan panjang pesan.
+   */
+  it('lipatan karena dicentang dan karena batas baris punya baris masing-masing', () => {
+    const banyak: AdmBulananMentah = {
+      kunjungan: { jml_kunjungan: 1000 },
+      tindakan: Array.from({ length: MAKS_BARIS_TINDAKAN + 5 }, (_, i) => ({
+        kd_jenis_prw: `RJ${String(i).padStart(5, '0')}`,
+        nm_perawatan: `Tindakan ${i}`,
+        jml: 100 - i,
+      })),
+    };
+    const teks = formatRincianTindakan(gabungAdmBulanan('202607', banyak, ['RJ00000']));
+    expect(teks).toContain('Dikecualikan (1 jenis)');
+    expect(teks).toContain('jenis lain');
+  });
+
+  it('bulan tanpa tindakan punya kalimatnya sendiri, bukan daftar kosong', () => {
+    const r = gabungAdmBulanan('202607', { kunjungan: { jml_kunjungan: 10 }, tindakan: [] });
+    expect(formatRincianTindakan(r)).toBe('(tidak ada tindakan tercatat)');
+  });
+
+  it('tindakan tanpa nama di katalog tampil lewat KODENYA', () => {
+    const r = gabungAdmBulanan('202607', {
+      kunjungan: { jml_kunjungan: 10 },
+      tindakan: [{ kd_jenis_prw: 'RJ00001', nm_perawatan: null, jml: 3 }],
+    });
+    expect(formatRincianTindakan(r)).toContain('(kode RJ00001) : 3');
+  });
+
+  it('penanda "-" milik Khanza tidak dicetak sebagai nama', () => {
+    const r = gabungAdmBulanan('202607', {
+      kunjungan: { jml_kunjungan: 10 },
+      tindakan: [{ kd_jenis_prw: 'RJ00001', nm_perawatan: '-', jml: 3 }],
+    });
+    expect(formatRincianTindakan(r)).toContain('(kode RJ00001)');
+  });
+});
+
 describe('judulBulanAdm', () => {
   it('menerjemahkan ke nama bulan Indonesia', () => {
     expect(judulBulanAdm(gabungAdmBulanan('202607', {}))).toBe('Juli 2026');
@@ -226,11 +401,11 @@ describe('pagar MULTILINE -- uji PERILAKU, bukan keanggotaan himpunan', () => {
     expect(hasil).toContain('BPJS Kesehatan');
   });
 
-  it('rincian_berkas tetap LIMA baris, rincian_pasien tetap EMPAT', () => {
+  it('rincian_berkas tetap ENAM baris, rincian_pasien tetap EMPAT', () => {
     const r = gabungAdmBulanan('202607', juli());
     expect(
       renderTemplate('{rincian_berkas}', { rincian_berkas: formatRincianBerkas(r) }).split('\n'),
-    ).toHaveLength(5);
+    ).toHaveLength(6);
     expect(
       renderTemplate('{rincian_pasien}', { rincian_pasien: formatRincianPasien(r) }).split('\n'),
     ).toHaveLength(4);
@@ -271,6 +446,43 @@ describe('pagar MULTILINE -- uji PERILAKU, bukan keanggotaan himpunan', () => {
      */
     expect(hasil.split('\n')).toHaveLength(1);
     expect(hasil).not.toMatch(/\n\s*•/);
+  });
+
+  /**
+   * `rincian_tindakan` sekelas `rincian_cara_bayar`, bukan sekelas dua yang
+   * literal: ia membawa `jns_perawatan.nm_perawatan`, juga input bebas petugas
+   * Khanza (terukur "puyer", "Woud toilet ringan").
+   */
+  it('nama tindakan berisi BARIS BARU tidak boleh menambah baris', () => {
+    const r = gabungAdmBulanan('202607', {
+      kunjungan: { jml_kunjungan: 10 },
+      tindakan: [
+        { kd_jenis_prw: 'RJ00001', nm_perawatan: 'Injeksi\n• Palsu : 999', jml: 10 },
+      ],
+    });
+    const hasil = renderTemplate('{rincian_tindakan}', {
+      rincian_tindakan: formatRincianTindakan(r),
+    });
+    expect(hasil.split('\n')).toHaveLength(1);
+    expect(hasil).not.toMatch(/\n\s*•/);
+  });
+
+  it('nama tindakan sudah bersih SEBELUM perakit teksnya dipanggil', () => {
+    // Dipatok terpisah karena picker "kecualikan tindakan" di dashboard membaca
+    // daftarnya langsung, tanpa melewati formatRincianTindakan().
+    const r = gabungAdmBulanan('202607', {
+      tindakan: [{ kd_jenis_prw: 'RJ00001', nm_perawatan: 'Injeksi\nBaris kedua', jml: 1 }],
+    });
+    expect(r.tindakan[0]!.nama).not.toContain('\n');
+  });
+
+  it('rincian_tindakan tetap 15 baris sesudah renderTemplate', () => {
+    const r = gabungAdmBulanan('202607', juli());
+    const hasil = renderTemplate('{rincian_tindakan}', {
+      rincian_tindakan: formatRincianTindakan(r),
+    });
+    expect(hasil.split('\n')).toHaveLength(15);
+    expect(hasil).toContain('Ekstraksi Benda Asing');
   });
 
   it('nama penjamin sudah bersih SEBELUM perakit teksnya dipanggil', () => {

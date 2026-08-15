@@ -1,6 +1,7 @@
 import {
   bacaTanggalKirim,
   bulanRekap,
+  bulanSebelum,
   bulanSesudah,
   bulanJatuhTempo,
   labelBulan,
@@ -75,6 +76,35 @@ describe('bulanSesudah', () => {
   it('mempertahankan bentuk dua digit', () => {
     expect(bulanSesudah('202608')).toBe('202609');
     expect(bulanSesudah('202609')).toBe('202610');
+  });
+});
+
+describe('bulanSebelum', () => {
+  it('mundur satu bulan', () => {
+    expect(bulanSebelum('202607')).toBe('202606');
+  });
+
+  it('menyeberangi pergantian tahun', () => {
+    expect(bulanSebelum('202601')).toBe('202512');
+  });
+
+  it('mundur beberapa bulan sekaligus, termasuk melewati Januari', () => {
+    // Jendela picker "kecualikan tindakan" memakai bentuk ini: tiga bulan
+    // terakhir termasuk bulan berjalan.
+    expect(bulanSebelum('202608', 2)).toBe('202606');
+    expect(bulanSebelum('202602', 2)).toBe('202512');
+    expect(bulanSebelum('202601', 12)).toBe('202501');
+  });
+
+  it('bulan Desember dan Januari tidak meluber', () => {
+    // `setMonth()` pada tanggal 31 meluber ke bulan berikutnya; aritmetika di
+    // sini murni bilangan, jadi jebakan itu tidak punya tempat untuk hidup.
+    expect(bulanSebelum('202612')).toBe('202611');
+    expect(bulanSebelum('202603', 2)).toBe('202601');
+  });
+
+  it('bentuk yang tidak dikenali dikembalikan apa adanya', () => {
+    expect(bulanSebelum('bukan-bulan')).toBe('bukan-bulan');
   });
 });
 

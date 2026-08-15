@@ -150,6 +150,26 @@ export function bulanSesudah(ym: string): string {
 }
 
 /**
+ * `n` bulan SEBELUM `ym`, `"YYYYMM"`. Pasangan `bulanSesudah()`.
+ *
+ * Dipakai menyusun jendela beberapa bulan ke belakang -- sejauh ini cuma daftar
+ * pilihan "kecualikan tindakan" di `/administrasi?tab=bulanan`, yang berangkat
+ * dari tindakan yang benar-benar dikerjakan alih-alih dari katalog 1.312 baris.
+ *
+ * Aritmetika bulan MURNI, tidak lewat `Date`. `setMonth()` pada tanggal 31 meluber
+ * ke bulan berikutnya (31 Maret dikurangi sebulan menjadi 3 Maret), dan
+ * `bulanRekap()` harus menyetel tanggal ke 1 lebih dulu justru karena itu. Di sini
+ * tidak ada tanggal sama sekali, jadi jebakannya tidak punya tempat untuk hidup.
+ */
+export function bulanSebelum(ym: string, n = 1): string {
+  const cocok = /^(\d{4})(\d{2})$/.exec(ym);
+  if (!cocok) return ym;
+  const total = Number(cocok[1]) * 12 + (Number(cocok[2]) - 1) - n;
+  if (total < 0) return ym;
+  return `${Math.floor(total / 12)}${String((total % 12) + 1).padStart(2, '0')}`;
+}
+
+/**
  * Bulan mana yang jatuh tempo SEKARANG, atau `null` bila belum/sudah.
  *
  * Tiga syarat, dan urutan pemeriksaannya tidak mengubah hasil -- semuanya harus

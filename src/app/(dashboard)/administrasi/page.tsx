@@ -39,11 +39,17 @@ import { Template, AdministrasiTarget, WaGroup, WaSession } from '@/models';
 import {
   bacaTanggalKirim,
   bulanJatuhTempo,
+  bulanRekap,
+  bulanSebelum,
+  bulanSesudah,
   labelBulan,
   TANGGAL_KIRIM_BAWAAN,
   JAM_REKAP_BULANAN_BAWAAN,
 } from '@/core/rekapBulan';
 import { bacaJamRekap, tulisJamRekap } from '@/core/rekapJadwal';
+import { daftarTindakanTerpakai, namaTindakanByKode } from '@/khanza/administrasiBulanan';
+import { bacaTindakanKecuali } from '@/worker/administrasiBulananRunner';
+import { sanitizeValue } from '@/core/template';
 import { Callout, HelpPanel, PageHeader, Pagination, Section, Tabs, type TabStatus } from '@/components/ui';
 import { BantuanAdministrasi } from './bantuan';
 import { SuratTable, type BarisSurat } from './SuratTable';
@@ -302,6 +308,63 @@ export default async function AdministrasiPage({
           const jam = tulisJamRekap(bacaJamRekap(jamRaw) ?? JAM_REKAP_BULANAN_BAWAAN);
 
           /**
+           * Bahan kotak centang "kecualikan tindakan".
+           *
+           * Ini SATU-SATUNYA pembacaan `sik` di cabang tab ini, dan ia terjadi
+           * hanya saat tab Rekap bulanan dibuka -- tabnya berbasis URL, jadi
+           * halaman yang tidak membukanya tidak menyentuh kolam `sik` yang sengaja
+           * dibatasi `pool.max: 2`. Terukur 2-3 ms.
+           *
+           * TIGA bulan, termasuk bulan berjalan. Satu bulan terlalu sempit --
+           * tindakan yang dikerjakan sekali di bulan lalu tidak akan muncul untuk
+           * dicentang -- sementara setahun mulai mengumpulkan jenis yang sudah
+           * ditinggalkan. Terukur, tiga bulan menghasilkan sekitar dua puluh
+           * pilihan.
+           *
+           * Kode yang SUDAH dicentang tapi tidak muncul di jendela itu DITAMBAHKAN
+           * berikut namanya, bukan dibiarkan hilang: kotak centang yang tidak
+           * dirender tidak ikut terkirim saat form disimpan, sehingga
+           * pengecualiannya akan batal sendiri tanpa satu pun galat pada bulan
+           * pertama tindakan itu tidak dikerjakan. Ditambahkan sebagai PILIHAN dan
+           * bukan input tersembunyi supaya ia tetap bisa dilepas -- pelajaran
+           * `pilihanTersembunyi()` di /broadcast.
+           */
+          /**
+           * Bulan BERJALAN, dirakit dari dua fungsi yang sudah diuji alih-alih
+           * dari `Date` langsung: `bulanRekap()` sengaja menyetel tanggal ke 1
+           * sebelum mengurangi bulan, karena `setMonth()` pada tanggal 31 meluber
+           * ke bulan berikutnya. Menghitungnya sendiri di sini berarti membayar
+           * pelajaran itu untuk kedua kalinya.
+           */
+          const ymKini = bulanSesudah(bulanRekap(new Date()));
+          const [tindakanDipakai, kecuali] = await Promise.all([
+            daftarTindakanTerpakai(bulanSebelum(ymKini, 2), ymKini),
+            bacaTindakanKecuali(),
+          ]);
+          const terlihat = new Set(tindakanDipakai.map((t) => String(t.kd_jenis_prw ?? '').trim()));
+          const tertinggal = kecuali.filter((k) => !terlihat.has(k));
+          const tambahan = tertinggal.length > 0 ? await namaTindakanByKode(tertinggal) : [];
+
+          /**
+           * `isianSurat()` lalu `sanitizeValue()`, urutan dan alasan yang sama
+           * persis dengan `gabungAdmBulanan()`: `nm_perawatan` input bebas petugas
+           * Khanza, dan penanda `'-'` miliknya lolos apa adanya lewat sanitizer.
+           * Dikerjakan di sini juga karena daftar ini TIDAK melewati perakit teks
+           * rekapnya sama sekali.
+           */
+          const opsiTindakan = [...tindakanDipakai, ...tambahan].map((t) => {
+            const kode = String(t.kd_jenis_prw ?? '').trim();
+            const nama = sanitizeValue(isianSurat(t.nm_perawatan));
+            const jml = Number(t.jml) || 0;
+            return {
+              kode,
+              nama: nama
+                ? `${nama}${jml > 0 ? ` (${jml}×)` : ' — tidak dikerjakan 3 bulan terakhir'}`
+                : `(kode ${kode || 'kosong'})`,
+            };
+          });
+
+          /**
            * Bulan mana yang LANGSUNG berangkat begitu sakelarnya dinyalakan.
            *
            * Dihitung lewat `bulanJatuhTempo()` yang SAMA dipakai worker, bukan
@@ -318,6 +381,8 @@ export default async function AdministrasiPage({
               jam,
               template: template ?? '',
               templateKosong: templateKosong ?? '',
+              opsiTindakan,
+              tindakanKecuali: kecuali,
             },
             terakhir: penanda?.trim() ? labelBulan(penanda.trim()) : '',
             langsungBerangkat: jatuh ? labelBulan(jatuh) : '',

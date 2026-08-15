@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
-import { Button, ConfirmDialog, Input, MessageEditor, Petunjuk } from '@/components/ui';
+import { Button, CheckboxList, ConfirmDialog, Input, MessageEditor, Petunjuk } from '@/components/ui';
+import type { CheckboxListOption } from '@/components/ui';
 import { REKAP_ADM_BULANAN_TEMPLATE_VARIABLES } from '@/core/template';
 import { TANGGAL_KIRIM_MIN, TANGGAL_KIRIM_MAKS } from '@/core/rekapBulan';
 import {
@@ -17,6 +18,9 @@ export interface NilaiBulanan {
   jam: string;
   template: string;
   templateKosong: string;
+  /** Tindakan yang benar-benar dikerjakan 3 bulan terakhir, plus yang sudah dicentang. */
+  opsiTindakan: CheckboxListOption[];
+  tindakanKecuali: string[];
 }
 
 const NAMA_BULAN = [
@@ -208,7 +212,7 @@ export function BulananForm({ nilai, adaTujuan }: { nilai: NilaiBulanan; adaTuju
             variables={REKAP_ADM_BULANAN_TEMPLATE_VARIABLES}
             rows={18}
             disabled={simpanPending}
-            hint="{rincian_pasien}, {rincian_cara_bayar}, dan {rincian_berkas} dirakit sistem — masing-masing beberapa baris siap pakai."
+            hint="{rincian_pasien}, {rincian_cara_bayar}, {rincian_tindakan}, dan {rincian_berkas} dirakit sistem — masing-masing beberapa baris siap pakai."
           />
 
           {/* Tiga hal yang paling mudah disalahpahami, dan ketiganya bisa membuat
@@ -268,6 +272,56 @@ export function BulananForm({ nilai, adaTujuan }: { nilai: NilaiBulanan; adaTuju
               yang bisa berubah, dan hari petugas mulai mengisinya adalah hari angkanya mulai berarti. Disembunyikan,
               &ldquo;tidak ada resume&rdquo; tidak bisa dibedakan dari &ldquo;fiturnya tidak membaca resume&rdquo;.
             </Petunjuk>
+          </p>
+        </div>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Pengecualian tindakan                                              */}
+        {/* ------------------------------------------------------------------ */}
+        <div>
+          <div className="mb-1 flex items-center gap-1">
+            <label className="text-xs font-medium">
+              Tindakan yang dilipat di {'{rincian_tindakan}'}{' '}
+              <span className="text-muted-foreground">(opsional)</span>
+            </label>
+            <Petunjuk untuk="Mengecualikan tindakan dari rincian">
+              Yang dicentang <span className="font-medium text-foreground">kehilangan barisnya sendiri</span> lalu masuk
+              satu baris &ldquo;Dikecualikan (N jenis) : M&rdquo; &mdash; tapi{' '}
+              <span className="font-medium text-foreground">tetap terhitung</span> di {'{jumlah_tindakan}'} dan{' '}
+              {'{jumlah_jenis_tindakan}'}.
+              <br />
+              <br />
+              Dilipat, bukan dibuang, supaya angkanya tetap berjumlah: pecahan yang tidak sampai seratus persen membuat
+              pembacanya mencari baris yang hilang, dan total yang diam-diam mengecil membuat perbandingan antar bulan
+              berbohong tanpa satu pun tanda.
+              <br />
+              <br />
+              DUA hal yang lazim dicentang. Pertama,{' '}
+              <span className="font-medium text-foreground">tindakan yang ada di hampir tiap kunjungan</span> &mdash;
+              terukur &ldquo;konsultasi dokter umum&rdquo; 473 dari 649 (72,9%) pada Juli 2026, jadi ia tidak memberi
+              tahu apa pun sementara ia yang membuat keempat belas sisanya terlihat seperti pembulatan. Kedua,{' '}
+              <span className="font-medium text-foreground">tindakan yang jarang</span> &mdash; 6 dari 15 jenis
+              dikerjakan 5 kali atau kurang, dan pada bulan sepi satu baris berangka 2 adalah keterangan tentang dua
+              orang tertentu.
+            </Petunjuk>
+          </div>
+          {nilai.opsiTindakan.length === 0 ? (
+            <p className="rounded-md border border-border bg-background/50 p-2 text-xs text-muted-foreground">
+              Belum ada tindakan tercatat dalam tiga bulan terakhir, jadi belum ada yang bisa dicentang. Daftarnya
+              terisi sendiri begitu poliklinik mulai mencatat tindakan.
+            </p>
+          ) : (
+            <CheckboxList
+              name="tindakan_kecuali"
+              options={nilai.opsiTindakan}
+              defaultSelected={nilai.tindakanKecuali}
+              searchPlaceholder="Cari tindakan..."
+            />
+          )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Daftarnya berisi tindakan yang <span className="font-medium text-foreground">benar-benar dikerjakan</span>{' '}
+            tiga bulan terakhir &mdash; bukan seluruh katalog Khanza, yang berisi lebih dari seribu baris dan sebagian
+            besarnya tidak pernah muncul. Tindakan baru bisa dicentang pada bulan pertama ia terlihat.
           </p>
         </div>
 

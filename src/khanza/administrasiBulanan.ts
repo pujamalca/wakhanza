@@ -66,6 +66,50 @@ export function rentangBulanTanggal(ym: string): { awalTgl: string; akhirTgl: st
 }
 
 /* ==========================================================================
+ * TABEL TINDAKAN -- satu daftar, dipakai DUA bentuk query
+ * ==========================================================================
+ *
+ * Khanza memecah tindakan menurut siapa yang mengerjakannya (dokter, paramedis,
+ * keduanya) DIKALI jalur perawatannya (jalan, inap), sehingga satu pertanyaan
+ * sederhana -- "tindakan apa saja yang dikerjakan bulan ini" -- harus dibaca dari
+ * ENAM tabel berbentuk sama.
+ *
+ * Keenamnya dipakai walau lima di antaranya kosong hari ini (terukur:
+ * `rawat_jl_dr` 12.215, `rawat_jl_drpr` 3, empat sisanya NOL). Alasannya sama
+ * yang membuat `buildAdmKunjunganSql()` tidak menyaring `status_lanjut='Ralan'`:
+ * rekap ini menghitung SELURUH kunjungan, jadi membaca tindakannya dari jalur
+ * rawat jalan saja akan membuat pembilang dan pembaginya berbeda pada hari RS
+ * mulai melayani rawat inap -- tanpa satu pun galat, dan dengan angka yang tetap
+ * terlihat masuk akal.
+ *
+ * Daftarnya SATU, dan itu bukan kerapian: ia dipakai membangun UNION pada rincian
+ * per tindakan DAN rantai `EXISTS` pada penghitung "kunjungan yang punya
+ * tindakan". Dua daftar berarti dua kesempatan menambahkan tabel ke salah satunya
+ * saja, dan yang muncul saat menyimpang bukan galat melainkan dua angka dari satu
+ * sistem yang berhenti berjumlah.
+ *
+ * Keenam PK berawalan `no_rawat` (terukur), jadi prefiks bulanannya memangkas
+ * lewat indeks pada keenamnya -- `range` pada yang berisi, `index` + `Using index`
+ * pada yang kosong. TANPA izin pindai penuh, dan itu tidak akan berubah saat
+ * tabelnya terisi: yang kosong beralih ke `range` justru karena pemangkasnya PK.
+ */
+const TABEL_TINDAKAN = [
+  'rawat_jl_dr',
+  'rawat_jl_pr',
+  'rawat_jl_drpr',
+  'rawat_inap_dr',
+  'rawat_inap_pr',
+  'rawat_inap_drpr',
+] as const;
+
+/** `EXISTS(...) OR EXISTS(...)` untuk keenam tabel, terhadap alias `r`. */
+function adaTindakanSql(): string {
+  return TABEL_TINDAKAN.map(
+    (t, i) => `EXISTS(SELECT 1 FROM ${t} tk${i} WHERE tk${i}.no_rawat = r.no_rawat)`,
+  ).join('\n           OR ');
+}
+
+/* ==========================================================================
  * KUNJUNGAN + KELENGKAPAN BERKAS -- satu query
  * ========================================================================== */
 
@@ -79,6 +123,7 @@ export interface BarisAdmKunjungan {
   ada_diagnosa: number | string | null;
   ada_soapie: number | string | null;
   ada_resume: number | string | null;
+  ada_tindakan: number | string | null;
   baru_tanpa_asesmen: number | string | null;
 }
 
@@ -147,6 +192,24 @@ export interface BarisAdmKunjungan {
  * Cabang asesmennya sendiri tetap aman: `NOT EXISTS` terhadap tabel `_ralan`
  * akan menjaring pasien ranap sebagai "belum diasesmen", dan itu memang keadaan
  * yang harus terlihat -- lihat catatannya di `core/administrasiBulanan.ts`.
+ *
+ * --------------------------------------------------------------------------
+ * `ada_tindakan` tinggal DI SINI, bukan jadi query ketujuh
+ * --------------------------------------------------------------------------
+ *
+ * Ia penghitung per-KUNJUNGAN ("berapa kunjungan yang punya setidaknya satu
+ * tindakan"), jadi ia berangkat dari baris `reg_periksa` yang sama persis dengan
+ * kesembilan penghitung di atasnya -- aturan yang sudah ditulis di kepala fungsi
+ * ini. Query tersendiri berarti membaca rentang yang sama sekali lagi untuk
+ * jawaban yang tidak bisa diturunkan dari rincian per tindakan: satu kunjungan
+ * bisa punya beberapa jenis tindakan, sehingga menjumlahkan kunjungan per jenis
+ * menghitungnya berkali-kali.
+ *
+ * Rantai `EXISTS`-nya dirakit dari `TABEL_TINDAKAN` yang SAMA dipakai UNION di
+ * bawah, bukan diketik ulang.
+ *
+ * Terukur, dan angkanya kelas yang sama dengan SOAPIE: kunjungan yang punya
+ * tindakan bergerak 60,9% (Januari 2026) -> 70,4% (Juli 2026).
  */
 function buildAdmKunjunganSql(): string {
   return `
@@ -164,6 +227,7 @@ function buildAdmKunjunganSql(): string {
                   WHERE pr.no_rawat = r.no_rawat))                AS ada_soapie,
       SUM(EXISTS(SELECT 1 FROM resume_pasien rs
                   WHERE rs.no_rawat = r.no_rawat))                AS ada_resume,
+      SUM(${adaTindakanSql()})                                    AS ada_tindakan,
       SUM(r.status_poli = 'Baru'
           AND NOT EXISTS(SELECT 1 FROM penilaian_awal_keperawatan_ralan p
                           WHERE p.no_rawat = r.no_rawat))         AS baru_tanpa_asesmen
@@ -216,6 +280,138 @@ function buildAdmCaraBayarSql(): string {
     WHERE r.no_rawat >= :awal AND r.no_rawat < :akhir
     GROUP BY r.kd_pj, pj.png_jawab
     ORDER BY jml_kunjungan DESC
+  `;
+}
+
+/* ==========================================================================
+ * TINDAKAN
+ * ========================================================================== */
+
+export interface BarisAdmTindakan {
+  kd_jenis_prw: string;
+  nm_perawatan: string | null;
+  jml: number | string;
+}
+
+/**
+ * Berapa kali tiap jenis tindakan dikerjakan bulan itu.
+ *
+ * DINAMIS lewat `GROUP BY`, bukan kolom tetap -- alasan yang sama persis dengan
+ * pecahan cara bayar: katalog `jns_perawatan` berisi 1.312 baris sementara yang
+ * benar-benar dikerjakan 14-20 jenis sebulan, dan kolom tetap akan menelan jenis
+ * ke-21 diam-diam pada bulan pertama poliklinik memakainya.
+ *
+ * --------------------------------------------------------------------------
+ * Yang KELUAR cuma kode, nama, dan bilangan
+ * --------------------------------------------------------------------------
+ *
+ * `no_rawat` disebut DI DALAM tabel turunan -- ia yang menyatukan keenam sumber --
+ * tapi tidak pernah menjadi kolom hasil, sama seperti `no_rkm_medis` di
+ * `buildAdmBerulangSql()`. Yang menyeberang ke Node cuma `kd_jenis_prw`,
+ * `nm_perawatan`, dan sebuah `COUNT`. `kd_dokter`/`nip` tidak diambil sama sekali:
+ * memecah tindakan per petugas mengubah rekap kunjungan menjadi laporan kinerja
+ * per orang, dan itu keputusan tersendiri yang tidak pernah diminta.
+ *
+ * --------------------------------------------------------------------------
+ * `LEFT JOIN`, dan `jns_perawatan.status` TIDAK disaring
+ * --------------------------------------------------------------------------
+ *
+ * Keduanya mengikuti `buildAdmCaraBayarSql()` lewat alasan yang sama. `LEFT JOIN`
+ * menjaga tindakan yang kodenya sudah tidak ada lagi di katalog tetap muncul
+ * sebagai barisnya sendiri -- INNER akan membuangnya, sehingga jumlah pecahannya
+ * lebih kecil daripada totalnya tanpa satu pun keterangan. Terukur nol kode yatim
+ * hari ini, dan justru itu yang membuat penjagaannya murah.
+ *
+ * `status` sengaja dibiarkan: tindakan yang dinonaktifkan bulan lalu tetap
+ * tindakan yang dikerjakan bulan lalu. Menyaringnya mengganti fakta yang benar
+ * dengan kekosongan -- KEBALIKAN dari pelajaran `p.status='1'` pada jadwal dokter,
+ * yang menjawab "layanan apa yang MASIH dilayani".
+ *
+ * --------------------------------------------------------------------------
+ * PENGECUALIAN TIDAK dikerjakan di sini
+ * --------------------------------------------------------------------------
+ *
+ * Daftar tindakan yang dikecualikan staf (`administrasi.bulanan_tindakan_kecuali`)
+ * disaring di `core/administrasiBulanan.ts`, bukan di WHERE. Dua sebab, dan
+ * keduanya mengikat: yang dikecualikan tetap harus ikut TERHITUNG di total
+ * (kalau tidak, pecahannya berhenti berjumlah -- lihat `gabungAdmBulanan()`), dan
+ * modul `khanza/` tidak boleh membaca `app_setting` sama sekali. Pola yang sama
+ * dengan `farmasi.stok_pakai_batch` dan `administrasi.sertakan_diagnosa`.
+ */
+function buildAdmTindakanSql(): string {
+  const union = TABEL_TINDAKAN.map(
+    (t) => `SELECT no_rawat, kd_jenis_prw FROM ${t}\n        WHERE no_rawat >= :awal AND no_rawat < :akhir`,
+  ).join('\n      UNION ALL\n      ');
+
+  return `
+    SELECT
+      x.kd_jenis_prw  AS kd_jenis_prw,
+      j.nm_perawatan  AS nm_perawatan,
+      COUNT(*)        AS jml
+    FROM (
+      ${union}
+    ) x
+    LEFT JOIN jns_perawatan j ON j.kd_jenis_prw = x.kd_jenis_prw
+    GROUP BY x.kd_jenis_prw, j.nm_perawatan
+    ORDER BY jml DESC, x.kd_jenis_prw ASC
+  `;
+}
+
+/**
+ * Daftar tindakan yang BENAR-BENAR dikerjakan dalam sebuah rentang bulan --
+ * bahan pilihan untuk kotak centang "kecualikan" di dashboard.
+ *
+ * Query yang SAMA dipakai rekapnya, cuma rentangnya lebih lebar. Dua bentuk SQL
+ * untuk satu pertanyaan berarti dua rencana yang harus dijaga terpisah, dan yang
+ * paling mungkin memburuk tanpa terlihat adalah yang cuma dipakai satu halaman.
+ *
+ * Berangkat dari `rawat_jl_dr` dan bukan dari katalog `jns_perawatan`, dan itu
+ * keputusan: katalognya 1.312 baris sementara yang dipakai 14-20 sebulan. Daftar
+ * 1.312 kotak centang adalah daftar yang tidak dibaca siapa pun, dan yang
+ * dicentang di sana akan tersimpan sebagai kode yang tidak pernah muncul.
+ *
+ * AKIBAT yang harus disadari: tindakan yang belum pernah dikerjakan tidak bisa
+ * dikecualikan di muka. Itu diterima -- yang mengganggu adalah yang muncul, dan
+ * tindakan baru selalu bisa dicentang pada bulan pertama ia terlihat.
+ */
+export async function daftarTindakanTerpakai(
+  ymAwal: string,
+  ymAkhir: string,
+): Promise<BarisAdmTindakan[]> {
+  return sikSelect<BarisAdmTindakan>(buildAdmTindakanSql(), {
+    awal: rentangBulanRawat(ymAwal).awal,
+    akhir: rentangBulanRawat(ymAkhir).akhir,
+  });
+}
+
+/**
+ * Nama tindakan untuk sekumpulan kode tertentu.
+ *
+ * Ada karena satu celah yang gagal DIAM di picker "kecualikan tindakan": daftar
+ * pilihannya berangkat dari tindakan yang benar-benar dikerjakan beberapa bulan
+ * terakhir, jadi tindakan yang SUDAH dicentang lalu berhenti dikerjakan akan
+ * lenyap dari daftar itu -- dan kotak centang yang tidak dirender tidak ikut
+ * terkirim saat form disimpan. Yang terlihat staf: pengecualian yang batal
+ * sendiri, tanpa satu pun galat, pada bulan pertama tindakan itu tidak muncul.
+ *
+ * Jalan keluarnya MENAMBAHKAN kode itu ke daftar pilihan berikut namanya, bukan
+ * menitipkannya sebagai input tersembunyi. Input tersembunyi memang membuatnya
+ * bertahan, tapi sekaligus membuatnya MUSTAHIL dilepas -- pelajaran yang sudah
+ * dibayar `pilihanTersembunyi()` di `/broadcast`.
+ *
+ * `IN` pada PRIMARY KEY, jadi `eq_ref`/`range` tanpa kolom bantu. Hanya dijalankan
+ * saat memang ada kode yang tertinggal.
+ */
+export async function namaTindakanByKode(kodes: string[]): Promise<BarisAdmTindakan[]> {
+  if (kodes.length === 0) return [];
+  return sikSelect<BarisAdmTindakan>(buildNamaTindakanSql(), { kodes });
+}
+
+function buildNamaTindakanSql(): string {
+  return `
+    SELECT j.kd_jenis_prw AS kd_jenis_prw, j.nm_perawatan AS nm_perawatan, 0 AS jml
+    FROM jns_perawatan j
+    WHERE j.kd_jenis_prw IN (:kodes)
   `;
 }
 
@@ -359,6 +555,7 @@ function buildAdmKontrolBridgingSql(): string {
 export interface AgregatAdmBulanan {
   kunjungan: BarisAdmKunjungan | null;
   caraBayar: BarisAdmCaraBayar[];
+  tindakan: BarisAdmTindakan[];
   berulang: BarisAdmBerulang | null;
   suratSakit: BarisAdmJumlah | null;
   kontrolSkdp: BarisAdmJumlah | null;
@@ -366,32 +563,36 @@ export interface AgregatAdmBulanan {
 }
 
 /**
- * Enam agregat untuk satu bulan penuh.
+ * Tujuh agregat untuk satu bulan penuh.
  *
  * Dijalankan BERBARENGAN walau kolam `sik` sengaja dibatasi `pool.max: 2`:
  * mysql2 mengantrekan sisanya, dan fungsi ini jalan SEKALI SEBULAN. Alasan yang
  * sama sudah dipakai `rekapFarmasiBulanan()`.
  *
  * Kelima agregat berbaris-tunggal memakai `?? null`, dan `core/` sudah
- * memperlakukan null sebagai nol. `caraBayar` justru sebaliknya -- ia memang
- * banyak baris, dan larik kosong berarti bulan tanpa kunjungan sama sekali.
+ * memperlakukan null sebagai nol. `caraBayar` dan `tindakan` justru sebaliknya --
+ * keduanya memang banyak baris, dan larik kosong berarti bulan tanpa kunjungan
+ * (atau, untuk tindakan, bulan yang tak satu pun tindakannya tercatat).
  */
 export async function rekapAdministrasiBulanan(ym: string): Promise<AgregatAdmBulanan> {
   const rawat = rentangBulanRawat(ym);
   const tgl = rentangBulanTanggal(ym);
 
-  const [kunjungan, caraBayar, berulang, suratSakit, kontrolSkdp, kontrolBridging] = await Promise.all([
-    sikSelect<BarisAdmKunjungan>(buildAdmKunjunganSql(), rawat),
-    sikSelect<BarisAdmCaraBayar>(buildAdmCaraBayarSql(), rawat),
-    sikSelect<BarisAdmBerulang>(buildAdmBerulangSql(), rawat),
-    sikSelect<BarisAdmJumlah>(buildAdmSuratSakitSql(), rawat),
-    sikSelect<BarisAdmJumlah>(buildAdmKontrolSkdpSql(), tgl),
-    sikSelect<BarisAdmJumlah>(buildAdmKontrolBridgingSql(), tgl),
-  ]);
+  const [kunjungan, caraBayar, tindakan, berulang, suratSakit, kontrolSkdp, kontrolBridging] =
+    await Promise.all([
+      sikSelect<BarisAdmKunjungan>(buildAdmKunjunganSql(), rawat),
+      sikSelect<BarisAdmCaraBayar>(buildAdmCaraBayarSql(), rawat),
+      sikSelect<BarisAdmTindakan>(buildAdmTindakanSql(), rawat),
+      sikSelect<BarisAdmBerulang>(buildAdmBerulangSql(), rawat),
+      sikSelect<BarisAdmJumlah>(buildAdmSuratSakitSql(), rawat),
+      sikSelect<BarisAdmJumlah>(buildAdmKontrolSkdpSql(), tgl),
+      sikSelect<BarisAdmJumlah>(buildAdmKontrolBridgingSql(), tgl),
+    ]);
 
   return {
     kunjungan: kunjungan[0] ?? null,
     caraBayar,
+    tindakan,
     berulang: berulang[0] ?? null,
     suratSakit: suratSakit[0] ?? null,
     kontrolSkdp: kontrolSkdp[0] ?? null,
@@ -435,6 +636,27 @@ registerPlanCheck({
   name: 'ADM_BULANAN_CARA_BAYAR',
   sql: buildAdmCaraBayarSql(),
   replacements: contohRawat,
+  maxRows: MAKS_BARIS_BULAN,
+});
+/**
+ * Rincian per tindakan. TANPA izin pindai penuh untuk keenam tabelnya, dan itu
+ * terukur bukan diharapkan: `rawat_jl_dr` `range no_rawat` + `Using index`
+ * (covering), kelima yang kosong `type=index` + `Using index` -- bukan `ALL`.
+ *
+ * `<derived3>` memang `type=ALL`, dan `scripts/verify-plans.ts` sudah
+ * mengecualikan tabel turunan: isinya hasil yang SUDAH tersaring, bukan tabel
+ * dasar. Alasan yang sama sudah dipakai `ADM_BULANAN_BERULANG`.
+ */
+registerPlanCheck({
+  name: 'ADM_BULANAN_TINDAKAN',
+  sql: buildAdmTindakanSql(),
+  replacements: contohRawat,
+  maxRows: MAKS_BARIS_BULAN,
+});
+registerPlanCheck({
+  name: 'ADM_BULANAN_NAMA_TINDAKAN',
+  sql: buildNamaTindakanSql(),
+  replacements: { kodes: ['RJ00000', 'RJ00001'] },
   maxRows: MAKS_BARIS_BULAN,
 });
 registerPlanCheck({
