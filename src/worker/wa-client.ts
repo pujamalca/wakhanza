@@ -285,6 +285,51 @@ export async function bersihkanDirektoriSesi(): Promise<boolean> {
 export async function initWaClient(): Promise<Client> {
   const sessionPath = process.env.WA_SESSION_PATH ?? './.wwebjs_auth';
 
+  /**
+   * Status dikoreksi SEBELUM penautan dimulai, bukan menunggu event pertama.
+   *
+   * ==========================================================================
+   * Kenapa: `/koneksi` bisa berkata "tersambung, siap mengirim" selama sesi
+   * yang sama sekali belum ada
+   * ==========================================================================
+   *
+   * Setiap penulisan status di berkas ini terjadi di dalam EVENT HANDLER --
+   * `qr`, `authenticated`, `ready`, `disconnected`, `auth_failure`. Saat
+   * penautan menggantung, tidak satu pun event itu pernah menyala, jadi tidak
+   * ada yang menimpa `ready` milik proses SEBELUMNYA: barisnya bukan basi
+   * karena salah ditulis, melainkan karena tidak pernah disentuh sama sekali.
+   *
+   * Denyut tidak menolong, dan itu justru akibat perbaikan yang benar: ia
+   * ditulis TANPA SYARAT supaya "basi = tidak ada proses yang hidup" punya satu
+   * tafsir. Proses yang sedang tersangkut menautkan memang hidup dan memang
+   * berdenyut. Jadi kedua sinyal yang dipunyai dashboard sama-sama berkata
+   * sehat, sementara tidak satu pun pesan bisa keluar.
+   *
+   * Terukur pada gangguan 15 Agustus 2026 pukul 18:40-19:21: empat penautan
+   * gagal berturut-turut, `wa_session.status` tetap `ready` dengan denyut 27
+   * detik, `qr_data` KOSONG dan `qr_issued_at` NULL -- sementara peringatan
+   * `session_init_stuck` benar-benar terkirim ke webhook. Halaman dan
+   * peringatannya saling bertentangan, dan yang dipercaya orang adalah
+   * halamannya.
+   *
+   * Akibat kedua yang ikut tertutup: `dispatchTick()` menggerbangi dirinya pada
+   * `isWaReady()`, yang membaca baris ini. `ready` yang palsu membuatnya
+   * mencoba mengirim ke sesi yang belum jadi -- percobaan yang menghabiskan
+   * jatah `attempts` untuk keadaan yang belum sempat dicoba sama sekali.
+   *
+   * `authenticating` dan bukan nilai enum baru: ia sudah berarti "belum siap"
+   * bagi setiap pembacanya, dan menambah nilai keenam menuntut migrasi ENUM
+   * plus keputusan di tiap tempat yang mencocokkannya. Yang dibutuhkan di sini
+   * cuma berhenti berbohong, bukan kosakata baru.
+   *
+   * TIDAK mengganggu `sessionWatchdog()`: ia sengaja tidak membaca status
+   * selama fase penautan (`initSelesai`), dan tetap begitu -- yang diperbaiki
+   * di sini bacaan DASHBOARD, bukan bacaan watchdog.
+   */
+  await catatTransisiStatus({ status: 'authenticating' }).catch((err) =>
+    logger.error(safeError(err), 'gagal menandai sesi sedang menautkan'),
+  );
+
   client = new Client({
     // `rmMaxRetries: 0` sengaja MENURUNKAN ketahanan pustaka, bukan menaikkannya.
     //
