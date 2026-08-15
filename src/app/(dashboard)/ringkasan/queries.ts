@@ -1,12 +1,13 @@
 import { QueryTypes } from 'sequelize';
 import { db } from '@/db/wakhanza';
 import { Outbox, type OutboxStatus } from '@/models';
+import { keSqlUtc, offsetLokalMenit } from '@/core/sqlWaktu';
 
 /**
  * Agregasi untuk halaman Ringkasan. Semuanya menyaring `outbox.created_at`,
- * yaitu kolom yang diindeks `ix_created (status, created_at)` di
- * `migrations/009` -- rentang tanggal apa pun di sini HARUS lewat kolom itu,
- * bukan `sent_at`/`event_at` yang tidak terindeks.
+ * yaitu kolom TERDEPAN pada indeks `ix_created (created_at, status,
+ * trigger_code)` di `migrations/009` -- rentang tanggal apa pun di sini HARUS
+ * lewat kolom itu, bukan `sent_at`/`event_at` yang tidak terindeks.
  *
  * Satu definisi hari dipakai konsisten di seluruh halaman: **hari pesan itu
  * masuk antrean**, bukan hari ia berhasil terkirim. Pesan yang muncul pukul
@@ -16,6 +17,19 @@ import { Outbox, type OutboxStatus } from '@/models';
  *
  * Semua tanggal memakai getter/setter Date lokal -- konsisten dengan asumsi
  * seluruh proyek bahwa server RS berzona WIB (lihat core/quietHours.ts).
+ *
+ * ==========================================================================
+ * TIDAK PERNAH menyerahkan `Date` ke `replacements` -- selalu `keSqlUtc()`
+ * ==========================================================================
+ *
+ * Kolom-kolomnya menyimpan UTC, sementara `Date` yang diserahkan lewat
+ * `replacements` diserialisasi ke waktu LOKAL, sehingga setiap batas meleset
+ * tepat tujuh jam. Terukur pada berkas ini sebelum diperbaiki: "24 jam
+ * terakhir" pada `fetchInboundActivity()` sebenarnya menghitung 17 jam, dan
+ * "hari ini" sebenarnya dimulai pukul 07:00 WIB, bukan tengah malam. Yang
+ * kedua nyaris tak pernah terlihat cuma karena jam tenang mengosongkan justru
+ * jendela 00:00-07:00 -- kebetulan, bukan kebenaran. Lihat `core/sqlWaktu.ts`
+ * untuk pengukurannya dan untuk kenapa jalur model Sequelize tidak terkena.
  */
 
 /** SUM(kondisi) di MariaDB mengembalikan DECIMAL, yang dibaca mysql2 sebagai string. */
@@ -39,7 +53,7 @@ function dayKey(d: Date): string {
 export async function fetchStatusCounts(since: Date): Promise<Partial<Record<OutboxStatus, number>>> {
   const rows = await db.query<{ status: OutboxStatus; n: unknown }>(
     'SELECT status, COUNT(*) AS n FROM outbox WHERE created_at >= :since GROUP BY status',
-    { replacements: { since }, type: QueryTypes.SELECT },
+    { replacements: { since: keSqlUtc(since) }, type: QueryTypes.SELECT },
   );
   return Object.fromEntries(rows.map((r) => [r.status, toInt(r.n)]));
 }
@@ -80,15 +94,28 @@ export interface DayVolume {
  */
 export async function fetchDailyVolume(days: number): Promise<DayVolume[]> {
   const since = startOfDay(days - 1);
+  /**
+   * Offset WAJIB, dan ketiadaannya adalah bug KEDUA yang berdiri sendiri dari
+   * batas `since`. `created_at` menyimpan UTC, jadi mengelompokkannya apa
+   * adanya menghasilkan ember per hari UTC sementara `dayKey()` di bawah
+   * menghasilkan kunci per hari LOKAL. Keduanya lalu dicocokkan lewat `Map`.
+   *
+   * Akibatnya bukan galat melainkan pergeseran: pesan yang lahir antara 00:00
+   * dan 07:00 WIB jatuh ke ember hari SEBELUMNYA -- dan karena kunci yang tidak
+   * ketemu diisi nol, batangnya tampak wajar. Poller berjalan 24 jam, jadi
+   * pendaftaran dini hari memang ada.
+   */
   const rows = await db.query<{ d: string; sent: unknown; failed: unknown }>(
-    `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS d,
+    `SELECT DATE_FORMAT(created_at + INTERVAL :offsetMenit MINUTE, '%Y-%m-%d') AS d,
             SUM(status = 'sent') AS sent,
             SUM(status IN ('failed', 'failed_permanent', 'expired')) AS failed
        FROM outbox
       WHERE created_at >= :since
         AND status IN ('sent', 'failed', 'failed_permanent', 'expired')
       GROUP BY d`,
-    { replacements: { since }, type: QueryTypes.SELECT },
+    // Penggeseran ada di SELECT/GROUP BY, bukan di WHERE -- `created_at` di
+    // WHERE tetap telanjang sehingga `ix_created` tetap terpakai.
+    { replacements: { since: keSqlUtc(since), offsetMenit: offsetLokalMenit(since) }, type: QueryTypes.SELECT },
   );
 
   const byKey = new Map(rows.map((r) => [r.d, { sent: toInt(r.sent), failed: toInt(r.failed) }]));
@@ -145,7 +172,7 @@ export async function fetchInboundActivity(): Promise<InboundActivity> {
             SUM(created_at >= :since AND outcome = 'no_match') AS unmatched,
             MAX(created_at) AS last_at
        FROM auto_reply_log`,
-    { replacements: { since }, type: QueryTypes.SELECT },
+    { replacements: { since: keSqlUtc(since) }, type: QueryTypes.SELECT },
   );
   const lastAt = row?.last_at ? new Date(row.last_at) : null;
   return {
@@ -174,7 +201,7 @@ export async function fetchTriggerBreakdown(since: Date): Promise<TriggerRow[]> 
       WHERE created_at >= :since
       GROUP BY trigger_code
       ORDER BY total DESC`,
-    { replacements: { since }, type: QueryTypes.SELECT },
+    { replacements: { since: keSqlUtc(since) }, type: QueryTypes.SELECT },
   );
   return rows.map((r) => ({ code: r.code, total: toInt(r.total), sent: toInt(r.sent) }));
 }
