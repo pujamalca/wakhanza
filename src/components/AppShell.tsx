@@ -54,7 +54,8 @@ export type NavIcon =
   | 'shield'
   | 'user'
   | 'users'
-  | 'erm';
+  | 'erm'
+  | 'formulir';
 
 const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   gauge: IconGauge,
@@ -75,6 +76,14 @@ const ICONS: Record<NavIcon, ComponentType<IconProps>> = {
   user: IconUser,
   users: IconUsers,
   erm: IconClipboardPulse,
+  /**
+   * Sengaja memakai ulang gambar ERM alih-alih `file` yang sudah dipakai BPJS
+   * dan Template. Ikon yang sama di grup yang BERBEDA masih bisa dibedakan
+   * lewat letaknya; tiga menu beribu gambar sama di dalam SATU grup tidak.
+   * Kuncinya tetap sendiri supaya keduanya bisa berpisah tanpa menyentuh
+   * pemanggil mana pun.
+   */
+  formulir: IconClipboardPulse,
 };
 
 export interface NavItem {

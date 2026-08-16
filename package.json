@@ -33,7 +33,8 @@
     "dryrun:adm-bulanan": "tsx scripts/dryrun-adm-bulanan.ts",
     "dryrun:dokumen": "tsx scripts/dryrun-dokumen.ts",
     "dryrun:stok": "tsx scripts/dryrun-stok.ts",
-    "dryrun:penilaian": "tsx scripts/dryrun-penilaian.ts"
+    "dryrun:penilaian": "tsx scripts/dryrun-penilaian.ts",
+    "dryrun:formulir": "tsx scripts/dryrun-formulir.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

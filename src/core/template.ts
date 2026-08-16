@@ -914,6 +914,44 @@ export function extractVariables(body: string): string[] {
   return [...names];
 }
 
+/**
+ * Membuat `renderTemplate()` menjadi operasi IDENTITAS untuk sepotong teks:
+ * tiap `{variabel}` yang muncul di dalamnya dipetakan ke bentuk literalnya
+ * sendiri.
+ *
+ * Ada karena beberapa jalur mengirim teks yang BUKAN template -- balasan wizard
+ * perintah (045), balasan manual petugas dari `/pesan-masuk`, dan pertanyaan
+ * formulir (051) -- tapi tetap melewati `renderTemplate()` di dalam
+ * `enqueueMessage()`. Tanpa ini ia rusak DUA arah sekaligus, dan keduanya
+ * terjadi sungguhan:
+ *
+ *   1. Variabel yang DIKENAL diganti nilainya. Petunjuk "Variabel yang bisa
+ *      dipakai: {nama_rs} {kontak_rs} ..." tampil sebagai nama dan nomor rumah
+ *      sakit -- staf lalu tidak pernah tahu apa yang boleh diketiknya.
+ *   2. Variabel yang TIDAK dikenal diganti string KOSONG, dan inilah yang paling
+ *      mahal: pesan "Variabel tidak dikenal: {nama_pasien}" berubah menjadi
+ *      "Variabel tidak dikenal: ." Kalimat yang ada justru untuk menyebutkan
+ *      kesalahannya menghapus kesalahannya sendiri.
+ *
+ * Yang kedua LOLOS dari uji unit mesin keadaan -- di sana yang diperiksa nilai
+ * balik fungsi murni, sebelum perenderan pernah terjadi. Ia baru terlihat lewat
+ * uji yang benar-benar menulis baris `outbox`.
+ *
+ * Pada formulir taruhannya lebih tinggi lagi: sebagian teks yang dilindungi di
+ * sana DIKETIK PASIEN dan diulang kembali di ringkasan penutup, jadi jawaban
+ * yang kebetulan berbentuk `{apa pun}` akan LENYAP dari ringkasan yang justru
+ * ada untuk membuktikan apa yang tercatat.
+ *
+ * Aman HANYA karena substitusi dijamin SATU LINTASAN: hasil substitusi tidak
+ * pernah diperiksa ulang, jadi `{nama_rs}` yang menghasilkan `{nama_rs}`
+ * berhenti di situ alih-alih berputar. Invarian itu dipatok `template.test.ts`.
+ */
+export function varsApaAdanya(teks: string): Record<string, string> {
+  const hasil: Record<string, string> = {};
+  for (const nama of extractVariables(teks)) hasil[nama] = `{${nama}}`;
+  return hasil;
+}
+
 /** Dipanggil saat template DISIMPAN, bukan saat dikirim (ARCHITECTURE §5.3). */
 export function findUnknownVariables(body: string, allowed: readonly string[] = TRIGGER_TEMPLATE_VARIABLES): string[] {
   const known = new Set<string>(allowed);

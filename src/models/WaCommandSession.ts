@@ -14,7 +14,22 @@ import { db } from '@/db/wakhanza';
  * Lihat migrations/045_perintah_wa.sql untuk ketiga jebakan yang membentuk
  * tabel ini (penyerahan ulang, sesi yang tak pernah habis, dua orang di satu
  * grup).
+ *
+ * Sejak migrations/051 ia menampung DUA macam percakapan, dibedakan `jenis`.
+ * Bukan penghematan: keunikan (chat_id, pengirim_id) memaksakan satu hal yang
+ * memang benar -- satu orang hanya bisa berada di satu percakapan. Dengan dua
+ * tabel, seseorang bisa punya wizard perintah DAN formulir hidup sekaligus, dan
+ * penangan pesan masuk harus memilih salah satunya untuk memiliki pesan
+ * berikutnya; pilihan apa pun salah separuh waktu, dan yang kalah menelan
+ * jawaban yang dimaksudkan untuk yang menang tanpa satu pun galat.
+ *
+ * Yang WAJIB menyertainya: tiap penangan MENYARING jenisnya sendiri. Tanpa itu
+ * `commandReply.ts` membuang sesi formulir sebagai "langkah tidak dikenal"
+ * (`isLangkah()`), dan hanya untuk alamat yang kebetulan juga berwenang -- jadi
+ * kerusakannya muncul sesekali dan tidak pernah pada pasien.
  */
+export type JenisSesi = 'perintah' | 'formulir';
+
 export class WaCommandSession extends Model<
   InferAttributes<WaCommandSession>,
   InferCreationAttributes<WaCommandSession>
@@ -22,6 +37,8 @@ export class WaCommandSession extends Model<
   declare id: CreationOptional<number>;
   declare chatId: string;
   declare pengirimId: string;
+  /** Percakapan macam apa yang sedang berjalan di baris ini. */
+  declare jenis: CreationOptional<JenisSesi>;
   /** Langkah wizard, mis. `tambah:kata_kunci`. Bentuknya milik core/waCommand.ts. */
   declare langkah: string;
   /** Jawaban yang sudah terkumpul + daftar id aturan yang sedang dibekukan sebagai pilihan. */
@@ -37,6 +54,7 @@ WaCommandSession.init(
     id: { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
     chatId: { type: DataTypes.STRING(64), allowNull: false, field: 'chat_id' },
     pengirimId: { type: DataTypes.STRING(64), allowNull: false, field: 'pengirim_id' },
+    jenis: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'perintah' },
     langkah: { type: DataTypes.STRING(32), allowNull: false },
     dataJson: { type: DataTypes.TEXT, allowNull: false, field: 'data_json' },
     lastWaId: { type: DataTypes.STRING(128), allowNull: true, field: 'last_wa_id' },

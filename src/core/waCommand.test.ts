@@ -32,6 +32,7 @@ const kemampuanDasar: KemampuanAlamat = {
   bolehTanyaDarurat: false,
   kataKunciStok: [],
   frasaDarurat: [],
+  formulir: { aktif: false, daftar: [], adaKhususPribadi: false },
 };
 
 const ctxKosong: KonteksPerintah = {
@@ -606,5 +607,81 @@ describe('/bantuan menerangkan keadaan, bukan cuma daftar perintah', () => {
   it('nama aturan berbentuk variabel selamat dari perenderan', () => {
     const teks = bantuan(ctxDengan([aturan({ id: 1, label: '{nama_rs}', keywords: ['halo'] })]));
     expect(renderTemplate(teks, varsBalasanApaAdanya(teks))).toContain('{nama_rs}');
+  });
+
+  /**
+   * Formulir (051) tidak dijaga daftar putih mana pun, jadi yang menentukan
+   * apakah bantuan boleh menyebutnya adalah sakelar utamanya dan `boleh_grup`
+   * per formulir -- bukan wewenang alamatnya.
+   */
+  describe('formulir', () => {
+    const formulir = (over: Partial<KemampuanAlamat['formulir']>): Partial<KemampuanAlamat> => ({
+      formulir: { aktif: true, daftar: [], adaKhususPribadi: false, ...over },
+    });
+
+    it('menyebut nama dan kata kunci formulir yang bisa diisi dari sini', () => {
+      const teks = bantuan(
+        ctxDengan([], false, formulir({ daftar: [{ nama: 'Permintaan obat', keywords: ['request obat', 'minta obat'] }] })),
+      );
+      expect(teks).toContain('Formulir yang bisa diisi dari sini');
+      expect(teks).toContain('Permintaan obat');
+      expect(teks).toContain('request obat, minta obat');
+      // Jalan keluarnya harus ikut disebut: percakapan bertahap yang tidak bisa
+      // dihentikan adalah percakapan yang menelan setiap pesan berikutnya.
+      expect(teks).toContain('batal');
+    });
+
+    /**
+     * Sakelarnya mati = tidak satu pun formulir menjawab di alamat MANA PUN,
+     * jadi ini bukan soal wewenang alamat ini dan tidak boleh disebut sebagai
+     * sesuatu yang "belum bisa dari sini". Diam adalah jawaban yang benar --
+     * dan itu juga yang menjaga pesan tetap pendek bagi rumah sakit yang tidak
+     * memakai fiturnya.
+     */
+    it('DIAM sama sekali saat fiturnya mati, walau ada formulir tersimpan', () => {
+      const teks = bantuan(
+        ctxDengan([], false, {
+          formulir: { aktif: false, daftar: [{ nama: 'Permintaan obat', keywords: ['request obat'] }], adaKhususPribadi: true },
+        }),
+      );
+      expect(teks).not.toContain('Formulir');
+      expect(teks).not.toContain('Permintaan obat');
+    });
+
+    it('diam saat menyala tapi memang belum ada formulirnya', () => {
+      expect(bantuan(ctxDengan([], false, formulir({})))).not.toContain('Formulir');
+    });
+
+    /**
+     * Di grup, daftar kosong punya DUA sebab yang menuntut kalimat berbeda.
+     * "Ada, tapi tidak dari sini" punya jalan keluar yang bisa ditempuh saat itu
+     * juga; mendiamkannya membuat orangnya menyimpulkan formulirnya tidak ada.
+     */
+    it('menyebut jalan keluarnya saat semua formulir khusus chat pribadi', () => {
+      const teks = bantuan(ctxDengan([], false, formulir({ adaKhususPribadi: true })));
+      expect(teks).toContain('tidak dari dalam grup');
+      expect(teks).toContain('chat pribadi');
+    });
+
+    it('menyebut adanya formulir lain yang khusus pribadi walau di sini ada juga', () => {
+      const teks = bantuan(
+        ctxDengan([], false, formulir({
+          daftar: [{ nama: 'Lapor alat rusak', keywords: ['lapor alat'] }],
+          adaKhususPribadi: true,
+        })),
+      );
+      expect(teks).toContain('Lapor alat rusak');
+      expect(teks).toContain('hanya bisa diisi dari chat pribadi');
+    });
+
+    /**
+     * Kata kunci datang dari DATABASE, sama seperti nama aturan. Kata kunci yang
+     * kebetulan berbentuk variabel harus selamat -- kalau tidak, bantuan
+     * menghapus justru bagian yang harus diketik orangnya.
+     */
+    it('kata kunci berbentuk variabel selamat dari perenderan', () => {
+      const teks = bantuan(ctxDengan([], false, formulir({ daftar: [{ nama: 'Uji', keywords: ['{nama_rs}'] }] })));
+      expect(renderTemplate(teks, varsBalasanApaAdanya(teks))).toContain('{nama_rs}');
+    });
   });
 });

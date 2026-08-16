@@ -6710,3 +6710,310 @@ Belum ada satu pun tindakan yang dicentang, jadi cabang "Dikecualikan" dan caban
 batas baris belum pernah dirender terhadap data produksi — keduanya terbukti lewat
 uji unit atas data Juli 2026 yang sebenarnya, termasuk cabang batas baris yang
 menuntut 45 jenis buatan karena produksi cuma punya 15.
+
+## FORMULIR LEWAT WHATSAPP (`migrations/051`)
+
+Seluruh bukti di bawah diambil 16 Agustus 2026 terhadap database `wakhanza`
+produksi di mesin ini.
+
+### Migrasi dan grant
+
+```
+[migrate] jalankan 051_formulir.sql ...
+[migrate] selesai  051_formulir.sql
+[migrate] 1 migrasi diterapkan
+```
+
+Kolom `jenis` terpasang dengan bawaan yang membuat seluruh baris lama benar tanpa
+disentuh:
+
+```
+{"Field":"jenis","Type":"varchar(16)","Null":"NO","Key":"","Default":"perintah","Extra":""}
+```
+
+Grant per-tabel terbukti **TIDAK diwarisi** — untuk kesepuluh kalinya di proyek
+ini. Diuji empiris sebagai `wakhanza_rw`, SEBELUM grant diterapkan:
+
+```
+wa_form:        SELECT ok · UPDATE ER_TABLEACCESS_DENIED_ERROR · DELETE ER_TABLEACCESS_DENIED_ERROR
+wa_form_field:  SELECT ok · UPDATE ER_TABLEACCESS_DENIED_ERROR · DELETE ER_TABLEACCESS_DENIED_ERROR
+wa_form_entry:  SELECT ok · UPDATE ER_TABLEACCESS_DENIED_ERROR · DELETE ER_TABLEACCESS_DENIED_ERROR
+```
+
+Sesudah `GRANT UPDATE, DELETE` lewat root, ketiganya `OK` untuk UPDATE maupun
+DELETE. `verify:db` melaporkan `wakhanza : tersambung, 31 tabel`.
+
+### Percakapan penuh lewat jalur produksi — 29 pemeriksaan, 0 gagal
+
+Dijalankan lewat `cobaFormulirWa()` yang SAMA dipakai `wa-client.ts`, bukan lewat
+fungsi murninya. Tujuannya JID grup yang **tidak ada**
+(`120363000000000000@g.us`), jadi tidak ada manusia yang menerima apa pun; kata
+kuncinya `ujiformulirlimasatu`, yang tidak mungkin terketik orang. Seluruh baris
+dibersihkan dan `formulir.enabled` dikembalikan ke `'0'` di blok `finally`.
+
+Yang terbukti, dikelompokkan:
+
+**Gerbang dan pelepasan**
+- sakelar mati → `ditangani: false, sebab: 'mati'`
+- pesan yang tidak cocok dilepas ke penanganan biasa (`ditangani: false`)
+
+**Percakapan**
+- `/ujiformulirlimasatu` memicu formulir — bentuk bergaris miring lewat kode yang sama
+- sesi tersimpan dengan `jenis = 'formulir'`
+- penyerahan ulang `waMessageId` yang sama → `sebab: 'diserahkan_ulang'`, langkah tidak maju
+- jawaban `"dua strip"` untuk pertanyaan bertipe angka ditolak, dan **`indeks` tetap 1** — jawaban salah tidak memajukan keadaan
+- `batal` mengakhiri pengisian, dan **tidak menyimpan apa pun** (jumlah entry tetap 1, bukan 2)
+- sesi dibuang sesudah selesai maupun sesudah batal
+
+**Pembekuan — dibuktikan melawan DATABASE, bukan hanya uji unit**
+- pertanyaan ke-4 DIHAPUS dari `wa_form_field` di tengah percakapan, lalu percakapannya tetap menanyakannya dan menyelesaikannya (`sebab: 'tersimpan'`)
+- `jawaban_json` memuat empat pasangan, dan pasangan keempat masih membawa pertanyaannya (`"Catatan tambahan"`) walau barisnya sudah tidak ada
+- `form_nama` dibekukan
+
+**Bentuk nilai yang tersimpan**
+- teks apa adanya (`"Paracetamol 500mg"`)
+- angka apa adanya (`"30"`) — tidak dinormalkan
+- pilihan tersimpan sebagai **ISI** (`"BPJS"`), bukan nomor yang diketik (`"2"`)
+- pertanyaan tak wajib yang dilewati tersimpan sebagai string kosong
+- `status` awal `baru`; `phone_e164` NULL untuk grup
+
+**Pipeline**
+- 5 baris `outbox` ber-`trigger_code = 'FORMULIR'`, seluruhnya ber-`chat_id` grup dan `phone_e164` NULL
+- setiap pesan membawa baris `Kode Pengiriman` — melewati `enqueueMessage()` yang sama, bukan `message.reply()`
+- pesan penutup mengulang isian yang tercatat (`Paracetamol 500mg`, `BPJS`) dan memuat kalimat penutup staf
+- `scheduled_at == event_at` pada seluruh baris → `BYPASS_QUIET_HOURS` menggigit
+
+Pembersihan diperiksa sesudahnya: `wa_form` 0, `wa_form_field` 0, `wa_form_entry`
+0, `outbox` ber-`FORMULIR` 0, sesi uji 0. Setelan akhir:
+
+```
+formulir.enabled                     0
+formulir.maks_per_nomor_per_hari     3
+formulir.sesi_timeout_menit          30
+formulir.simpan_hari                 90
+```
+
+### Uji unit yang dibuktikan MENGGIGIT
+
+`core/waFormulir.test.ts` — 24 uji. Dua di antaranya GAGAL pada versi pertama dan
+menemukan bug sungguhan: `normalizeInbound('-')` menghasilkan string kosong, jadi
+tanda `-` yang justru dianjurkan halaman ini tidak pernah cocok dengan daftar kata
+lewati. Diperbaiki dengan menjadikan string kosong anggota `KATA_LEWATI` — yang
+sekaligus menjaring pesan yang seluruhnya tanda baca atau emoji.
+
+Uji pembekuan menyunting objek formulirnya SESUDAH `mulaiFormulir()` (menghapus
+satu pertanyaan dan mengganti kalimat penutup) lalu menuntut percakapannya tidak
+bergeser sedikit pun.
+
+### Gerbang
+
+```
+tsc --noEmit                      bersih
+eslint .                          bersih
+npx jest                          61 suite, 1090 uji  (dari 1066)
+npm run test:int                  3 suite, 46 uji
+npm run verify:db                 lolos (sik tulis DITOLAK, audit_log DELETE/UPDATE DITOLAK)
+npm run verify:plans              lolos
+npm run build                     berhasil; rute /formulir terdaftar
+npm run dryrun:formulir           berjalan; "Belum ada satu pun formulir tersimpan"
+```
+
+`labels.test.ts` ikut lolos, yang membuktikan `FORMULIR` terdaftar di
+`TRIGGER_LABEL` — gerbang itu menjaring `export const TRIGGER_*` di
+`src/worker/*.ts`.
+
+### Yang BELUM terbukti
+
+- **Belum pernah dijalankan terhadap pesan WhatsApp sungguhan.** Seluruh bukti di
+  atas memanggil `cobaFormulirWa()` langsung dengan objek pesan yang disusun kode
+  uji. Itu batas yang sama yang pernah dibayar mahal dua kali di proyek ini (bug
+  `@lid`, dan `message.id._serialized` yang hilang pada pesan grup): **uji yang
+  membangun sendiri objek pesannya tidak pernah bisa membuktikan batas sistem yang
+  bentuk datanya ditentukan pihak luar.** Yang menolong di sini, dan sebabnya
+  risikonya jauh lebih kecil daripada dua kasus itu: pemetaan dari `message` ke
+  `PesanFormulirMasuk` di `wa-client.ts` memakai `kunciPesanMasuk()` dan
+  `resolvePhoneE164()` yang SAMA sudah dipakai jalur perintah dan balasan otomatis
+  yang terbukti berjalan.
+- **Jalur PERORANGAN belum diuji end-to-end**, hanya jalur grup — sengaja, karena
+  setiap nomor E.164 adalah nomor milik seseorang. Yang berbeda di jalur itu cuma
+  dua cabang: `phoneOverride` alih-alih `chatId` saat enqueue, dan kuota per nomor
+  yang memang dilewati untuk grup.
+- **Kuota per nomor per hari belum menggigit** terhadap data sungguhan, karena
+  jalur grup tidak punya nomor untuk dihitung.
+- **`wakhanza-worker` belum dimulai ulang.** Selama `formulir.enabled` masih `'0'`
+  perilaku kode lama dan baru identik, jadi tidak ada yang perlu dikejar hari ini.
+  Tapi **sebelum sakelarnya dinyalakan, worker WAJIB dimulai ulang** — kalau tidak,
+  sakelarnya menyala di dashboard sementara worker tidak pernah menjaring apa pun,
+  dan itu gagal DIAM. Pelajaran yang sama sudah dibayar di migrations/038.
+
+---
+
+## FORMULIR di `/bantuan` lewat WhatsApp
+
+Bukti di bawah diambil 16 Agustus 2026 terhadap database `wakhanza` produksi.
+
+**Keadaan yang berlaku saat verifikasi, dan ia mengubah caranya.** Berbeda dari
+sesi sebelumnya, `formulir.enabled` sudah bernilai `'1'` dan ada satu formulir
+sungguhan buatan staf berikut **tiga entry dari pasien**. Jadi sakelarnya
+**TIDAK disentuh sama sekali** — mematikannya sepersekian detik berarti pesan
+pasien yang kebetulan datang di sela itu tidak dijaring formulir apa pun, tanpa
+satu pun galat yang mengatakannya. Keadaan "sakelar mati" karena itu dipatok uji
+unit, bukan uji database.
+
+### Uji unit — 10 baru, dan keduanya dibuktikan MENGGIGIT
+
+```
+$ npx jest core/waCommand core/waFormulir
+PASS src/core/waCommand.test.ts
+PASS src/core/waFormulir.test.ts
+Tests:       89 passed, 89 total
+```
+
+Dirusak sengaja untuk membuktikan ujinya benar-benar menjaga sesuatu:
+
+| yang dirusak | uji yang gagal |
+|---|---|
+| `bagianFormulir()` kehilangan `if (!f.aktif) return null` | `DIAM sama sekali saat fiturnya mati, walau ada formulir tersimpan` |
+| `formulirYangMenjawab()` kehilangan penyaring kata kunci | `menggugurkan formulir tanpa kata kunci yang berarti`, `yang digugurkan di sini juga tidak pernah cocok di cocokFormulir` |
+
+```
+$ npx jest core/waCommand core/waFormulir      # dengan kedua kerusakan di atas
+  ● /bantuan … › formulir › DIAM sama sekali saat fiturnya mati, walau ada formulir tersimpan
+  ● formulirYangMenjawab › menggugurkan formulir tanpa kata kunci yang berarti
+  ● formulirYangMenjawab › yang digugurkan di sini juga tidak pernah cocok di cocokFormulir
+Tests:       3 failed, 86 passed, 89 total
+```
+
+### Uji terhadap database sungguhan — lewat `cobaPerintahWa()`, bukan fungsi murninya
+
+Yang belum teruji unit justru bagian yang menyentuh database
+(`bacaKemampuanFormulir()`), jadi skrip sementara menjalankan `/bantuan` lewat
+jalur produksi penuh lalu membaca `outbox.body` yang benar-benar dienqueue —
+dicari lewat kunci idempoten yang PERSIS, bukan "baris terakhir", karena worker
+sungguhan sedang berjalan dan bisa menyisipkan barisnya sendiri kapan saja.
+Tujuannya JID grup yang **tidak ada**, jadi tidak seorang pun menerima apa pun.
+
+```
+formulir.enabled: 1 (TIDAK disentuh) · wa_form sebelum: 1
+
+  OK    boleh_grup mati -> kata kuncinya TIDAK disebut di grup
+  OK    boleh_grup mati -> namanya TIDAK disebut di grup
+  OK    boleh_grup mati -> keberadaannya tetap diakui (adaKhususPribadi)
+  OK    bagian bantuan yang lain tetap utuh
+  OK    boleh_grup nyala -> menyebut nama formulirnya
+  OK    boleh_grup nyala -> menyebut kata kuncinya
+  OK    boleh_grup nyala -> menyebut jalan keluar batal
+  OK    boleh_grup nyala -> tidak lagi mengaku ada yang khusus pribadi
+  OK    formulir nonaktif -> tidak disebut
+  OK    formulir tanpa pertanyaan -> tidak disebut
+
+BERSIH: wa_form=1 (sebelum 1) · admin_uji=0 · outbox_uji=0 · formulir.enabled=1
+
+10 lolos, 0 gagal
+```
+
+**Percobaan pertamanya GAGAL 3 dari 11, dan sebabnya fixture — bukan produk.**
+Formulir ujinya dibuat dengan `kata_kunci` berupa string mentah, sementara
+`parseKeywords()` hanya menerima JSON (`serializeKeywords()` yang dipakai
+dashboard). Larik kata kuncinya jadi kosong, dan **penyaring kata kunci yang
+baru ditambahkan itulah yang menangkapnya** — formulirnya benar tidak disebut,
+karena ia memang tidak akan pernah dijaring pesan apa pun.
+
+### Bentuk yang benar-benar terkirim
+
+Potongan akhir `outbox.body` sungguhan, dengan konfigurasi RS apa adanya:
+
+```
+*Formulir yang bisa diisi dari sini* (1)
+
+• *Permintaan Obat*
+   ketik: request obat, permintaan obat
+
+_Pertanyaannya datang satu per satu. Ketik *batal* untuk berhenti._
+
+_Urutan prioritas dan mode pencocokan hanya bisa diatur di dashboard._
+
+Kode Pengiriman : 2026-08-16 15:04:03 KRH600
+```
+
+Baris kode pengiriman membuktikan bagian ini menempuh `enqueueMessage()` yang
+sama dengan setiap pesan keluar lain, bukan jalur pintas.
+
+### Pembersihan
+
+Skrip sementara dihapus. Seluruh `destroy` di dalamnya dipagari ke id formulir
+yang dibuatnya sendiri dan ke alamat grup palsu — tidak ada satu pun `where`
+yang bisa melebar ke formulir sungguhan buatan staf.
+
+```sql
+SELECT (SELECT COUNT(*) FROM wa_form) f, (SELECT COUNT(*) FROM wa_form_field) ff,
+       (SELECT COUNT(*) FROM wa_form_entry) fe,
+       (SELECT COUNT(*) FROM wa_command_admin WHERE chat_id LIKE '1203630000%') adm,
+       (SELECT COUNT(*) FROM outbox WHERE chat_id LIKE '1203630000%') ob,
+       (SELECT v FROM app_setting WHERE k='formulir.enabled') sw;
+```
+```
+f  ff  fe  adm  ob  sw
+1  2   3   0    0   1
+```
+
+Ketiga entry pasien dan satu formulir staf utuh; sakelarnya tetap seperti
+semula.
+
+### Pemasangan ke worker — dan restart kedua yang tersangkut
+
+Perubahan ini hidup di worker (`commandReply.ts`), jadi ia baru berlaku sesudah
+`wakhanza-worker` dimulai ulang. Sebelum restart, sesinya diperiksa dan sehat:
+
+```
+status  umur_denyut
+ready   14
+
+sesi_berjalan  0
+antre          0
+```
+
+**Yang TIDAK diperiksa: `uptime` 13 menit** — artinya sudah ada yang menyalakannya
+ulang tiga belas menit sebelumnya, sehingga restart ini adalah yang KEDUA dalam
+setengah jam. Itu persis kondisi yang sudah didokumentasikan menyebabkan
+penautan tersangkut. Angkanya ada di layar `pm2 list` yang sama dan terbaca
+sebagai "sehat" alih-alih "baru saja dinyalakan ulang".
+
+Dua percobaan berturut-turut tersangkut, dan **seluruh pagarnya bekerja
+sebagaimana tertulis**:
+
+```
+{"alasan":"pesan shutdown PM2","exitCode":0,"msg":"wakhanza-worker berhenti..."}
+{"msg":"sesi WhatsApp ditutup rapi"}                 <- proses lama bersih
+{"msg":"wakhanza-worker memulai..."}
+{"status":null,"fase":"menautkan","diamDetik":0}     <- status basi ditolak dibaca
+{"status":null,"fase":"menautkan","diamDetik":60}
+{"status":null,"fase":"menautkan","diamDetik":120}
+{"kind":"session_init_stuck","msg":"peringatan terkirim ke webhook"}
+{"alasan":"penautan sesi tidak selesai","exitCode":1,"msg":"wakhanza-worker berhenti..."}
+{"message":"Protocol error (Runtime.callFunctionOn): Target closed",
+ "msg":"main() gagal karena worker sedang berhenti -- kode keluar shutdown() dipertahankan"}
+```
+
+**State sesi TIDAK rusak, dan itu dibuktikan bukan diduga.** Dua hal: proses
+pertama berhenti lewat `shutdown()` dengan `exitCode:0` dan `"sesi WhatsApp
+ditutup rapi"` — jalur yang justru ada supaya Chromium tidak mati di tengah
+menulis state; dan galat yang muncul `Runtime.callFunctionOn): Target closed`,
+**bukan** `timed out`. Yang pertama memang akibat wajar `shutdown()` menutup
+Chromium di bawah `initWaClient()` yang masih ditunggu; yang kedua adalah tanda
+state rusak, dan nol kali muncul.
+
+Perlu dicatat untuk diagnosis berikutnya: sejak `BATAS_INIT_MS` (180 dtk) ada,
+ia SELALU mendahului `protocolTimeout` puppeteer (300 dtk), jadi tanda
+`timed out` itu **tidak bisa lagi muncul** — pembedaannya sekarang harus lewat
+cara proses sebelumnya berhenti, bukan lewat galat ini.
+
+```
+Chromium sesi tersisa setelah pm2 stop: 0
+outbox pending/sending selama gangguan: 0 baris
+```
+
+Nol antrean tertahan: pemicunya kelas watermark/pindai, jadi kejadian selama
+gangguan diambil kembali saat worker pulih. Pemulihannya **jeda lalu satu
+start**, bukan restart berulang — penautan ulang yang terlalu sering justru
+memperparah pelambatan dari sisi WhatsApp.

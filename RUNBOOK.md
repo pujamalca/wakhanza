@@ -144,6 +144,42 @@ Tombol merah **Keluar sesi** di halaman yang sama memutus tautan WhatsApp dan **
 
 **Jangan menautkan ulang berulang-ulang.** Penautan yang terlalu sering membuat WhatsApp memperlambat sinkronisasi, sehingga sesinya justru makin sering tersangkut. Kalau gagal, tunggu 15 menit sebelum mencoba lagi.
 
+### 4b. Kalau QR-nya TIDAK PERNAH MUNCUL
+
+Gejalanya khas, dan berbeda dari "sesi terputus": status di dashboard tersangkut
+di **menautkan** (bukan menunggu QR), worker menyala lalu mati sendiri kira-kira
+tiap tiga menit, dan di ponsel perangkat tertautnya masih terlihat ada. Yang
+terjadi: sistem mencoba memakai tautan lama yang sudah tidak bisa dipakai, jadi
+ia tidak pernah sampai ke langkah menampilkan QR.
+
+**Perlu ponsel nomor RS di tangan sebelum memulai** — begitu langkah 2 dikerjakan,
+notifikasi berhenti total sampai QR dipindai.
+
+1. Hentikan worker:
+   ```
+   pm2 stop wakhanza-worker
+   ```
+   lalu pastikan Chromium-nya bersih dengan perintah di bagian 2 runbook ini.
+2. **PINDAHKAN** folder sesinya — jangan hapus. Dari PowerShell, di folder aplikasi:
+   ```
+   Rename-Item .wwebjs_auth ".wwebjs_auth.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+   ```
+   Dipindahkan supaya masih bisa dikembalikan kalau ternyata bukan itu sebabnya.
+3. Nyalakan lagi:
+   ```
+   pm2 start wakhanza-worker
+   ```
+4. Buka `/koneksi`, tunggu QR muncul (biasanya di bawah 5 detik), lalu pindai
+   dengan ponsel nomor RS.
+5. Setelah status jadi **siap**, jalankan sekali `npm run harden:permissions`.
+
+**Folder `.wwebjs_auth.bak-*` berisi kredensial WhatsApp.** Jangan disalin ke mana
+pun, jangan dilampirkan ke tiket. Hapus yang lama setelah sesi baru terbukti
+jalan beberapa hari.
+
+Kalau ini terjadi **lebih dari sekali seminggu**, catat tanggalnya dan laporkan —
+itu bukan hal yang wajar dan sebabnya perlu ditelusuri, bukan diulang terus.
+
 ---
 
 ## 5. Cadangan dan pemulihan

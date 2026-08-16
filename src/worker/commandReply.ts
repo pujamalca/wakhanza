@@ -22,13 +22,16 @@ import {
   type HasilPerintah,
   type KeadaanWizard,
   type KemampuanAlamat,
+  type KemampuanFormulir,
   type KonteksPerintah,
   type RingkasanAturan,
 } from '@/core/waCommand';
 import { matchRule } from '@/core/autoReply';
 import { parseStokKeywords } from '@/core/stokObat';
 import { parseFrasaDarurat } from '@/core/stokDarurat';
+import { formulirYangMenjawab } from '@/core/waFormulir';
 import { izinTanyaStok, izinTanyaDarurat, type AsalPertanyaan } from './stokReply';
+import { bacaFormulirAktif } from './formulirReply';
 import { AUTOREPLY_TEMPLATE_VARIABLES, renderTemplate } from '@/core/template';
 import { buildIdempotencyKey } from '@/core/idempotency';
 import { loadAutoReplyContext, enqueueMessage } from './pipeline';
@@ -65,6 +68,18 @@ import { logger, safeError, maskPhone } from '@/lib/logger';
  * mulai sendiri).
  */
 export const TRIGGER_WA_PERINTAH = 'WA_PERINTAH';
+
+/**
+ * `wa_command_session` menampung DUA macam percakapan sejak migrations/051
+ * (wizard perintah ini, dan pengisian formulir). Menyaring jenisnya sendiri
+ * bukan kerapian melainkan syarat: `bacaSesi()` di bawah MEMBUANG sesi yang
+ * langkahnya tidak dikenal `isLangkah()`, jadi tanpa penyaring ini ia akan
+ * menghapus sesi FORMULIR milik seorang admin pada pesan berikutnya. Pasiennya
+ * sendiri tidak pernah terkena -- ia tidak lolos daftar putih di bawah -- jadi
+ * kerusakannya muncul sesekali, hanya pada admin, dan tidak pernah pada jalur
+ * yang paling sering diuji.
+ */
+const JENIS_SESI = 'perintah';
 
 export interface PesanPerintahMasuk {
   /** Alamat obrolan: `628xxx@c.us` atau `120363xxx@g.us`. */
@@ -137,14 +152,16 @@ async function bacaKemampuan(pesan: PesanPerintahMasuk): Promise<KemampuanAlamat
     chatId: pesan.chatId,
     phoneE164: pesan.phoneE164,
   };
-  const [balasanOtomatisAktif, stok, bolehTanyaDarurat, ketat, longgar, frasa] = await Promise.all([
-    getSettingBool('autoreply.enabled', false),
-    izinTanyaStok(asal),
-    izinTanyaDarurat(asal),
-    getSetting('farmasi.stok_keywords', 'stok,harga'),
-    getSetting('farmasi.stok_keywords_ketersediaan', ''),
-    getSetting('farmasi.darurat_keywords', ''),
-  ]);
+  const [balasanOtomatisAktif, stok, bolehTanyaDarurat, ketat, longgar, frasa, formulir] =
+    await Promise.all([
+      getSettingBool('autoreply.enabled', false),
+      izinTanyaStok(asal),
+      izinTanyaDarurat(asal),
+      getSetting('farmasi.stok_keywords', 'stok,harga'),
+      getSetting('farmasi.stok_keywords_ketersediaan', ''),
+      getSetting('farmasi.darurat_keywords', ''),
+      bacaKemampuanFormulir(pesan),
+    ]);
   return {
     balasanOtomatisAktif,
     bolehTanyaStok: stok.boleh,
@@ -154,6 +171,39 @@ async function bacaKemampuan(pesan: PesanPerintahMasuk): Promise<KemampuanAlamat
     // yang MENJARING, bukan golongan mana yang boleh gugur diam-diam.
     kataKunciStok: [...parseStokKeywords(ketat ?? ''), ...parseStokKeywords(longgar ?? '')],
     frasaDarurat: parseFrasaDarurat(frasa ?? ''),
+    formulir,
+  };
+}
+
+/**
+ * Formulir (051) yang benar-benar akan menjawab dari alamat ini.
+ *
+ * Sakelarnya diperiksa PALING DULU dan mengembalikan tanpa satu query pun:
+ * selama `formulir.enabled` mati tidak ada satu pun formulir yang menjawab di
+ * mana pun, jadi membaca tabelnya cuma ongkos yang dibayar setiap perintah oleh
+ * rumah sakit yang justru tidak memakai fiturnya.
+ *
+ * Query KEDUA hanya untuk grup, dan hanya karena satu pembedaan yang tidak bisa
+ * dijawab dari hasil pertama: daftar kosong di sebuah grup bisa berarti "belum
+ * ada formulir sama sekali" atau "ada, tapi semuanya khusus chat pribadi", dan
+ * keduanya menuntut kalimat yang berbeda. `bacaFormulirAktif()` menyaring
+ * `bolehGrup` di dalam query-nya, jadi satu-satunya cara mengetahuinya adalah
+ * membaca sekali lagi tanpa penyaring itu. Alamat perorangan -- yang jauh lebih
+ * banyak -- tetap satu query.
+ */
+async function bacaKemampuanFormulir(pesan: PesanPerintahMasuk): Promise<KemampuanFormulir> {
+  if (!(await getSettingBool('formulir.enabled', false))) {
+    return { aktif: false, daftar: [], adaKhususPribadi: false };
+  }
+
+  const dariGrup = pesan.jenis === 'grup';
+  const disini = formulirYangMenjawab(await bacaFormulirAktif(dariGrup));
+  const semua = dariGrup ? formulirYangMenjawab(await bacaFormulirAktif(false)) : disini;
+
+  return {
+    aktif: true,
+    daftar: disini.map((f) => ({ nama: f.nama, keywords: f.keywords })),
+    adaKhususPribadi: semua.length > disini.length,
   };
 }
 
@@ -183,7 +233,7 @@ async function bacaKonteks(pesan: PesanPerintahMasuk): Promise<KonteksPerintah> 
  */
 async function bacaSesi(pesan: PesanPerintahMasuk): Promise<WaCommandSession | null> {
   const sesi = await WaCommandSession.findOne({
-    where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId },
+    where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId, jenis: JENIS_SESI },
   });
   if (!sesi) return null;
 
@@ -216,11 +266,22 @@ function bacaData(sesi: WaCommandSession): DataWizard {
 
 async function simpanSesi(pesan: PesanPerintahMasuk, keadaan: KeadaanWizard): Promise<void> {
   const sekarang = new Date();
+  /**
+   * `where` SENGAJA tanpa `jenis`, sementara `jenis` ada di `defaults` dan di
+   * pembaruannya. Kunci uniknya (chat_id, pengirim_id) tanpa jenis, jadi `where`
+   * yang menyertakan `jenis` akan gagal menemukan sesi FORMULIR milik orang yang
+   * sama lalu mencoba menyisipkan baris kedua -- dan menabrak kunci unik itu.
+   *
+   * Dengan bentuk ini, perintah baru di tengah pengisian formulir MENGGANTIKAN
+   * formulirnya, yaitu perilaku yang sama yang sudah berlaku antar perintah:
+   * orangnya sedang berpindah pikiran.
+   */
   const [sesi, baru] = await WaCommandSession.findOrCreate({
     where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId },
     defaults: {
       chatId: pesan.chatId,
       pengirimId: pesan.pengirimId,
+      jenis: JENIS_SESI,
       langkah: keadaan.langkah,
       dataJson: JSON.stringify(keadaan.data),
       lastWaId: pesan.waMessageId,
@@ -230,6 +291,7 @@ async function simpanSesi(pesan: PesanPerintahMasuk, keadaan: KeadaanWizard): Pr
   });
   if (!baru) {
     await sesi.update({
+      jenis: JENIS_SESI,
       langkah: keadaan.langkah,
       dataJson: JSON.stringify(keadaan.data),
       lastWaId: pesan.waMessageId,
@@ -238,6 +300,16 @@ async function simpanSesi(pesan: PesanPerintahMasuk, keadaan: KeadaanWizard): Pr
   }
 }
 
+/**
+ * SENGAJA tanpa penyaring `jenis`, berbeda dari `bacaSesi()` di atas.
+ *
+ * Perintah yang selesai mengakhiri percakapan APA PUN yang sedang berjalan untuk
+ * alamat itu, termasuk pengisian formulir. Itu bukan kelonggaran melainkan
+ * perilaku yang sama yang sudah berlaku antar perintah sejak 045: orang yang
+ * mengetik `/bantuan` di tengah sesuatu sedang berpindah pikiran, dan
+ * meninggalkan sesi lamanya hidup berarti pesan berikutnya ditelan percakapan
+ * yang sudah ia tinggalkan.
+ */
 async function hapusSesi(pesan: PesanPerintahMasuk): Promise<void> {
   await WaCommandSession.destroy({
     where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId },
@@ -352,7 +424,7 @@ export async function cobaPerintahWa(pesan: PesanPerintahMasuk): Promise<HasilPe
 
   const perintah = parsePerintah(pesan.teks);
   const sesiAda = await WaCommandSession.count({
-    where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId },
+    where: { chatId: pesan.chatId, pengirimId: pesan.pengirimId, jenis: JENIS_SESI },
   });
   // Bukan perintah DAN tidak ada percakapan berjalan -- lalu lintas biasa.
   // Diperiksa dengan hitungan murah lebih dulu supaya setiap pesan masuk yang

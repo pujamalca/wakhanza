@@ -9,6 +9,7 @@ import { logger, safeError, maskPhone } from '@/lib/logger';
 import { handleInboundMessageSafely } from './autoReply';
 import { cobaBalasPersediaanDariGrup } from './stokReply';
 import { cobaPerintahWaSafely } from './commandReply';
+import { cobaFormulirWaSafely } from './formulirReply';
 import { isOptOutRequest, optOutTriggerCodes } from '@/core/optOut';
 import {
   isIndividualAddress,
@@ -507,8 +508,34 @@ export async function initWaClient(): Promise<Client> {
         if (perintah.ditangani) {
           dibalas = true;
         } else {
-          const hasil = await cobaBalasPersediaanDariGrup(message);
-          dibalas = hasil.ditangani;
+          /**
+           * FORMULIR (051) di grup: HANYA untuk formulir yang `boleh_grup`-nya
+           * dicentang staf, dan penyaringan itu dikerjakan di dalam --
+           * formulir yang tidak boleh diisi dari grup tidak pernah ikut
+           * dicocokkan, jadi pesannya jatuh utuh ke cabang persediaan di
+           * bawahnya seolah fitur ini tidak ada.
+           *
+           * Diperiksa SEBELUM cabang persediaan dengan alasan yang sama persis
+           * yang menempatkan perintah di atasnya: cabang itu selalu menjawab
+           * begitu kata kuncinya kena, jadi jawaban yang memuat kata
+           * "stok"/"harga" ditelan jadi pencarian katalog dan langkah
+           * formulirnya tidak pernah maju.
+           */
+          const formulir = await cobaFormulirWaSafely({
+            chatId: message.from,
+            pengirimId: message.author ?? message.from,
+            waMessageId: kunciPesanMasuk(message),
+            teks: message.body ?? '',
+            jenis: 'grup',
+            phoneE164: null,
+          });
+
+          if (formulir.ditangani) {
+            dibalas = true;
+          } else {
+            const hasil = await cobaBalasPersediaanDariGrup(message);
+            dibalas = hasil.ditangani;
+          }
         }
       } catch (err) {
         // Kegagalan menjawab satu grup tidak boleh menjatuhkan pencatatan
@@ -600,6 +627,37 @@ export async function initWaClient(): Promise<Client> {
       phoneE164,
     });
     if (perintah.ditangani) {
+      await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164, dibalas: true });
+      return;
+    }
+
+    /**
+     * FORMULIR lewat WhatsApp (051). Ketiga posisinya perlu, dan yang ketiga
+     * yang paling menentukan:
+     *
+     * - Sesudah permintaan berhenti, seperti semua yang lain: kata kunci yang
+     *   ditulis staf tidak boleh bisa menyandera permintaan berhenti.
+     * - Sesudah perintah (045), karena garis miring adalah niat yang tidak
+     *   ambigu. Pasien biasa tidak terkena apa pun -- ia tidak pernah lolos
+     *   daftar putih `wa_command_admin`, jadi pesannya jatuh ke sini seolah
+     *   fitur itu tidak ada.
+     * - SEBELUM `handleInboundMessage`, karena cabang persediaan di dalamnya
+     *   selalu menjawab begitu kata kuncinya kena. Jawaban pasien atas "obat apa
+     *   yang dibutuhkan?" hampir pasti memuat kata yang dijaring cabang itu, dan
+     *   tanpa urutan ini ia ditelan jadi pencarian katalog -- pasien menerima
+     *   daftar harga di tengah formulir, dan langkahnya tidak pernah maju.
+     *
+     * Diam sepenuhnya selama `formulir.enabled` masih '0'.
+     */
+    const formulir = await cobaFormulirWaSafely({
+      chatId: message.from,
+      pengirimId: message.from,
+      waMessageId: kunciPesanMasuk(message),
+      teks: message.body ?? '',
+      jenis: 'perorangan',
+      phoneE164,
+    });
+    if (formulir.ditangani) {
       await catatPesanMasuk(message, { jenis: 'perorangan', phoneE164, dibalas: true });
       return;
     }

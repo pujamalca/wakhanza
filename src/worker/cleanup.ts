@@ -16,6 +16,7 @@ import { normalizePhone } from '@/core/phone';
 import { logger, safeError } from '@/lib/logger';
 import { daftarBerkasMedia, hapusBerkasLampiran } from '@/lib/mediaStorage';
 import { pangkasSesiPerintah } from './commandReply';
+import { pangkasEntryFormulir } from './formulirReply';
 
 const RETENTION_DAYS = 90;
 
@@ -111,6 +112,23 @@ async function cleanupOldRecords(): Promise<void> {
    */
   const deletedSesiPerintah = await pangkasSesiPerintah(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
+  /**
+   * Jawaban formulir (051), masa simpannya SENDIRI (`formulir.simpan_hari`,
+   * bawaan 90) dan bukan `retention.days` bersama.
+   *
+   * Alasannya sama dengan `inbox.simpan_hari`: isinya diketik PASIEN dan bisa
+   * memuat keluhan, tabel ini bukan rekam medis, dan ia ikut tercadangkan. Yang
+   * berbeda dari `inbound_message` (30 hari) adalah gunanya -- ini daftar
+   * pekerjaan yang harus ditindaklanjuti, dan permintaan yang tertunda beberapa
+   * pekan masih harus bisa ditemukan staf.
+   *
+   * Batasnya dibaca di dalam `pangkasEntryFormulir()`, bukan dari `cutoff` di
+   * atas: dua tempat yang menghitung batas yang sama adalah dua yang bisa
+   * menyimpang, dan yang menyimpang di sini membuang catatan pasien lebih awal
+   * daripada yang dijanjikan halamannya.
+   */
+  const deletedFormulir = await pangkasEntryFormulir();
+
   logger.info(
     {
       deletedOutbox,
@@ -120,9 +138,10 @@ async function cleanupOldRecords(): Promise<void> {
       deletedSessionEvents,
       deletedPantau,
       deletedSesiPerintah,
+      deletedFormulir,
       hariInbox,
     },
-    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message, wa_session_event, penjualan_pantau & wa_command_session lama dihapus',
+    'pembersihan berkala: outbox, send_log, auto_reply_log, inbound_message, wa_session_event, penjualan_pantau, wa_command_session & wa_form_entry lama dihapus',
   );
 
   await cleanupOrphanMedia();

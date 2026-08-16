@@ -39,6 +39,18 @@ const NAV_GROUPS: { label: string; items: MenuItem[] }[] = [
       // berdampingan: keduanya menjawab "apa yang lewat nomor ini", dan satu
       // gangguan sering hanya terlihat dari salah satu arahnya saja.
       { href: '/pesan-masuk', label: 'Pesan masuk', icon: 'chat', adminOnly: true },
+      /**
+       * Di grup MASUK, bukan "Kirim pesan", dan itu keputusan bukan kebetulan.
+       *
+       * Sembilan menu di grup satunya semuanya menjawab "pesan apa yang KELUAR
+       * dari nomor RS", dan formulir memang mengirim pertanyaan -- tapi yang
+       * dikerjakan staf di halamannya bukan menyusun pesan keluar melainkan
+       * MENINDAKLANJUTI apa yang masuk. Tab bawaannya pun daftar permintaan,
+       * bukan definisi formulirnya. Ditaruh di sebelah Pesan masuk, ia duduk
+       * tepat di samping satu-satunya halaman lain yang menjawab pertanyaan yang
+       * sama: apa yang dikirimkan pasien kepada kita hari ini.
+       */
+      { href: '/formulir', label: 'Formulir', icon: 'formulir', adminOnly: true },
     ],
   },
   {

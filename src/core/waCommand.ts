@@ -14,7 +14,7 @@
  */
 
 import { matchRule, normalizeKeyword, type MatchMode, type MatchableRule } from './autoReply';
-import { extractVariables, findUnknownVariables } from './template';
+import { findUnknownVariables } from './template';
 
 // ---------------------------------------------------------------------------
 // Perintah
@@ -186,6 +186,47 @@ export interface KemampuanAlamat {
   kataKunciStok: readonly string[];
   /** Frasa yang menjaring permintaan rekap gudang. */
   frasaDarurat: readonly string[];
+  /** Formulir (051) yang bisa diisi dari alamat ini. */
+  formulir: KemampuanFormulir;
+}
+
+/**
+ * Formulir yang bisa diisi DARI ALAMAT INI.
+ *
+ * Gerbangnya sama sekali berbeda dari kedua kemampuan di atasnya: formulir
+ * TIDAK dijaga daftar putih -- siapa pun boleh mengisinya, karena formulir yang
+ * cuma bisa diisi orang terdaftar bukan formulir pasien. Yang menggantikannya
+ * dua hal yang tetap membuat jawabannya per-alamat: sakelar utama
+ * `formulir.enabled`, dan `wa_form.boleh_grup` per formulir.
+ *
+ * Karena itu bantuan tidak boleh menyebut sebuah formulir hanya karena ia ada di
+ * dashboard. Di dalam grup, formulir pasien yang wajar dibatasi ke chat pribadi
+ * tidak akan menjawab apa pun -- dan menyuruh orang mengetiknya menghasilkan
+ * persis kegagalan yang membuat SELURUH bagian ini per-alamat.
+ *
+ * Bentuknya struktural, bukan `RingkasanFormulir` dari `core/waFormulir.ts`:
+ * berkas ini tidak perlu tahu apa-apa tentang mesin keadaan pengisiannya, dan
+ * pemanggil yang menyusunnya (`worker/commandReply.ts`) memang cuma memetakan
+ * dua kolom. Pola `core/broadcastVars.ts`.
+ */
+export interface KemampuanFormulir {
+  /**
+   * `formulir.enabled`. Mati = tidak satu pun formulir menjawab, di alamat mana
+   * pun -- jadi bantuan diam sama sekali soal formulir alih-alih menyebutnya
+   * sebagai sesuatu yang "belum bisa dari sini". Bandingkan
+   * `balasanOtomatisAktif`, yang JUSTRU disebut saat mati: di sana yang mati
+   * adalah subjek seluruh pesan ini.
+   */
+  aktif: boolean;
+  /** Yang benar-benar menjawab dari sini. Sudah tersaring `formulirYangMenjawab()`. */
+  daftar: readonly { nama: string; keywords: readonly string[] }[];
+  /**
+   * Ada formulir yang menjawab dari chat pribadi tapi TIDAK dari sini karena
+   * alamat ini grup. Dibedakan dari daftar kosong: yang satu berarti "belum ada
+   * formulir sama sekali", yang satu "ada, tapi bukan dari sini" -- dan hanya
+   * yang kedua punya jalan keluar yang bisa ditempuh orangnya saat itu juga.
+   */
+  adaKhususPribadi: boolean;
 }
 
 export interface KonteksPerintah {
@@ -314,36 +355,14 @@ function petunjukVariabel(ctx: KonteksPerintah): string {
 }
 
 /**
- * Membuat perenderan template menjadi operasi IDENTITAS untuk sebuah balasan
- * wizard: tiap `{variabel}` yang muncul di dalamnya dipetakan ke bentuk
- * literalnya sendiri.
- *
- * Ada karena balasan wizard BUKAN template, tapi tetap melewati
- * `renderTemplate()` di dalam `enqueueMessage`. Tanpa ini ia rusak DUA arah
- * sekaligus, dan keduanya terjadi sungguhan:
- *
- *   1. Variabel yang DIKENAL diganti nilainya. Petunjuk "Variabel yang bisa
- *      dipakai: {nama_rs} {kontak_rs} ..." tampil sebagai nama dan nomor rumah
- *      sakit -- staf lalu tidak pernah tahu apa yang boleh diketiknya.
- *   2. Variabel yang TIDAK dikenal diganti string KOSONG, dan inilah yang
- *      paling mahal: pesan "Variabel tidak dikenal: {nama_pasien}" berubah
- *      menjadi "Variabel tidak dikenal: ." Kalimat yang ada justru untuk
- *      menyebutkan kesalahannya menghapus kesalahannya sendiri, dan staf tidak
- *      punya cara mengetahui variabel mana yang harus dibetulkan.
- *
- * Yang kedua LOLOS dari uji unit mesin keadaan -- di sana yang diperiksa nilai
- * balik fungsi murni, sebelum perenderan pernah terjadi. Ia baru terlihat lewat
- * uji end-to-end yang benar-benar menulis baris `outbox`.
- *
- * Aman HANYA karena substitusi dijamin SATU LINTASAN: hasil substitusi tidak
- * pernah diperiksa ulang, jadi `{nama_rs}` yang menghasilkan `{nama_rs}`
- * berhenti di situ alih-alih berputar. Invarian itu dipatok `template.test.ts`.
+ * Naik ke `core/template.ts` begitu pemakainya jadi tiga (wizard perintah,
+ * balasan manual `/pesan-masuk`, dan formulir 051) -- ia memang tentang
+ * `renderTemplate()`, bukan tentang wizard. DIRE-EXPORT dengan nama lamanya
+ * supaya nol impor yang sudah ada berubah; pola yang sama dipakai saat
+ * `bacaJamRekap` dan kawan-kawannya pindah dari `penjualanRekap.ts` ke
+ * `rekapJadwal.ts` (migrations/042).
  */
-export function varsBalasanApaAdanya(balasan: string): Record<string, string> {
-  const hasil: Record<string, string> = {};
-  for (const nama of extractVariables(balasan)) hasil[nama] = `{${nama}}`;
-  return hasil;
-}
+export { varsApaAdanya as varsBalasanApaAdanya } from './template';
 
 /** Semua langkah berakhir dengan kalimat yang sama supaya jalan keluarnya selalu terlihat. */
 const JALAN_KELUAR = '\n\nKetik */batal* untuk berhenti.';
@@ -360,6 +379,44 @@ const DAFTAR_PERINTAH = [
   '',
   'Boleh disingkat: /tambah /daftar /ubah /hapus /uji',
 ].join('\n');
+
+/**
+ * Bagian formulir pada `/bantuan`, atau null saat tidak ada yang BENAR untuk
+ * dikatakan.
+ *
+ * Tiga keadaan, dan ketiganya menuntut kalimat berbeda -- menyatukannya
+ * mengirim sebagian pembaca ke arah yang salah:
+ *
+ *   * fiturnya mati                      -> diam (lihat `KemampuanFormulir.aktif`)
+ *   * menyala, ada yang menjawab di sini -> sebut nama dan kata kuncinya
+ *   * menyala, semuanya khusus pribadi   -> sebut jalan keluarnya, bukan diam
+ *
+ * Kata kuncinya dicetak APA ADANYA, dan itu aman lewat jalan yang sama dengan
+ * nama aturan di `barisAturan()`: balasan ini melewati `renderTemplate()` di
+ * dalam `enqueueMessage`, dan `varsBalasanApaAdanya()` membuat perenderannya
+ * jadi operasi identitas. Tanpa itu, kata kunci yang memuat `{apa pun}` akan
+ * lenyap dari bantuan -- yaitu bantuan yang menghapus justru bagian yang harus
+ * diketik orangnya.
+ */
+function bagianFormulir(f: KemampuanFormulir): string | null {
+  if (!f.aktif) return null;
+
+  if (f.daftar.length === 0) {
+    return f.adaKhususPribadi
+      ? '*Formulir*\n\nRumah sakit punya formulir yang bisa diisi lewat WhatsApp, tapi tidak dari dalam grup. Kirim dari chat pribadi ke nomor ini.'
+      : null;
+  }
+
+  const baris = f.daftar.map((x) => `• *${x.nama}*\n   ketik: ${x.keywords.join(', ')}`);
+  const ekor = f.adaKhususPribadi
+    ? '\n\n(ada formulir lain yang hanya bisa diisi dari chat pribadi)'
+    : '';
+  return [
+    `*Formulir yang bisa diisi dari sini* (${f.daftar.length})`,
+    baris.join('\n') + ekor,
+    '_Pertanyaannya datang satu per satu. Ketik *batal* untuk berhenti._',
+  ].join('\n\n');
+}
 
 /**
  * `/bantuan` (juga `/help`, `/perintah`) -- bukan sekadar daftar perintah.
@@ -445,6 +502,17 @@ export function susunBantuan(ctx: KonteksPerintah): string {
         // rusak -- padahal wewenangnya memang daftar yang lain.
         '*Yang belum bisa dari alamat ini*\n\nMenanyakan stok obat dan rekap gudang punya daftar wewenangnya sendiri. Kalau perlu, tambahkan alamat ini di dashboard → Farmasi → Tujuan, lalu centang "Boleh tanya".',
   );
+
+  /**
+   * Bagian TERSENDIRI, bukan butir di dalam daftar di atasnya, dan itu bukan
+   * kerapian: kalimat penutup bagian itu menyebut daftar wewenang Farmasi
+   * sebagai jalan keluarnya, sementara formulir tidak dijaga daftar wewenang
+   * apa pun. Digabung, orang yang tidak melihat formulirnya akan dikirim
+   * mencentang "Boleh tanya" -- setelan yang tidak ada hubungannya, dan yang
+   * sesudah dicentang tetap tidak memunculkan satu pun formulir.
+   */
+  const formulir = bagianFormulir(kemampuan.formulir);
+  if (formulir) bagian.push(formulir);
 
   bagian.push('_Urutan prioritas dan mode pencocokan hanya bisa diatur di dashboard._');
 

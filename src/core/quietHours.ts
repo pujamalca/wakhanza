@@ -231,6 +231,25 @@ const BYPASS_QUIET_HOURS = new Set([
    * berlaku sekaligus (ada yang menunggu, DAN penerimanya staf).
    */
   'WA_PERINTAH',
+  /**
+   * FORMULIR (051): alasannya sama dengan WA_PERINTAH tepat di atasnya, dan di
+   * sini ia lebih keras lagi karena penerimanya PASIEN, bukan staf.
+   *
+   * Yang membenarkannya tetap satu-satunya alasan yang sah untuk pesan ke
+   * pasien: ADA ORANG YANG MENUNGGU JAWABAN ATAS PESANNYA SENDIRI, dan bukan
+   * sekadar satu jawaban melainkan pertanyaan berikutnya dari percakapan yang ia
+   * mulai barusan. Ditahan sampai 07.00, "Pertanyaan 2 dari 4" tiba sembilan jam
+   * kemudian -- saat sesinya sendiri sudah lama kedaluwarsa
+   * (`formulir.sesi_timeout_menit`, bawaan 30), sehingga jawabannya tidak akan
+   * dikenali sebagai jawaban apa pun. Fiturnya tidak sekadar lambat di jam
+   * tenang; ia mustahil diselesaikan.
+   *
+   * Yang membatasi penyalahgunaannya bukan jam tenang melainkan bahwa ia
+   * MUSTAHIL berbunyi tanpa pasiennya sendiri yang mengetik lebih dulu -- sama
+   * seperti AUTO_REPLY. Jam tenang melindungi pasien dari pesan yang TIDAK ia
+   * minta; ini kebalikannya.
+   */
+  'FORMULIR',
 ]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */

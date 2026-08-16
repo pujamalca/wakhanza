@@ -109,6 +109,15 @@ export const TRIGGER_LABEL: Record<string, string> = {
   // menyusun aturan, jadi baris ini di Antrean/Log tidak boleh terbaca sebagai
   // pemberitahuan pasien yang gagal sampai.
   WA_PERINTAH: 'Perintah lewat WhatsApp',
+  /**
+   * Pengisian formulir oleh pasien (051). Labelnya menyebut "formulir" dan bukan
+   * "balasan", karena satu pengisian menghasilkan BEBERAPA baris berurutan di
+   * Antrean -- satu per pertanyaan. Terbaca sebagai balasan, deretan itu tampak
+   * seperti sistem yang mengirim empat pesan untuk satu kejadian, yaitu persis
+   * pola beruntun yang F5.2 ada untuk mencegah; terbaca sebagai formulir, ia
+   * jelas satu percakapan.
+   */
+  FORMULIR: 'Formulir pasien',
   // Dua-duanya BUKAN pesan ke pasien. Labelnya menyebut "apotek" secara
   // eksplisit supaya baris di halaman Antrean dan Log tidak terbaca sebagai
   // pemberitahuan yang gagal sampai ke pasien -- penerimanya memang staf.
