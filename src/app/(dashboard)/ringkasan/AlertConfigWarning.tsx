@@ -5,7 +5,7 @@ import { LinkButton, IconAlertTriangle } from '@/components/ui';
  * (`worker/alert.ts`) sudah terpasang -- jeda per jenis, batas waktu keras,
  * tombol uji -- dan tidak satu pun berfungsi bila `alert.webhook_url` kosong.
  * `alert.webhook_url` KOSONG = tidak ada peringatan yang dikirim (disengaja,
- * lihat CLAUDE.md "Peringatan gangguan"), dan pengaman satu-satunya yang
+ * lihat FITUR.md "Peringatan gangguan"), dan pengaman satu-satunya yang
  * tersisa mengandalkan seseorang membuka halaman ini. Panel `SystemStatus` di
  * atas tidak menjawab pertanyaan ini -- ia bisa hijau selama sesi masih hidup,
  * padahal justru saat sesi itu MATI-lah peringatan ini dibutuhkan.

@@ -44,6 +44,8 @@ uploads/
 .tmp-*.mts
 .tmp-*.ts
 .tmp-*.mjs
+.tmp-*.md
+.tmp-*.py
 
 # OS
 Thumbs.db

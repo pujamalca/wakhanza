@@ -12,7 +12,7 @@ import { logger, safeError } from '@/lib/logger';
 /**
  * Dipanggil periodik dari worker (index.ts). Ini bukan pemicu sisip/pindai
  * dari `sik` (ARCHITECTURE §4) -- ini kelas ketiga (BROADCAST, lihat
- * CLAUDE.md) yang dijalankan otomatis alih-alih diklik staf. Segmen dan
+ * FITUR.md) yang dijalankan otomatis alih-alih diklik staf. Segmen dan
  * pengiriman memakai fungsi produksi yang SAMA PERSIS dengan broadcast
  * manual (fetchPatientSegment, loadBroadcastContext, enqueueMessage) --
  * satu-satunya beda adalah apa yang MEMICU pemanggilannya.

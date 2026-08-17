@@ -5,7 +5,7 @@
  * Sampai ini ada, status `sent` di `outbox` cuma berarti "WhatsApp menerima
  * titipannya" -- bukan "sampai ke penerima", apalagi "dibaca". Bedanya bukan
  * teoretis: kiriman ke JID grup yang SAMA SEKALI TIDAK ADA pun dijawab tanpa
- * galat dan berakhir `sent` (lihat CLAUDE.md, "Kode grup yang salah TETAP
+ * galat dan berakhir `sent` (lihat FITUR.md, "Kode grup yang salah TETAP
  * berstatus sent"). Selama itu satu-satunya sinyal yang ada, pertanyaan yang
  * paling sering diajukan -- "pasiennya benar-benar dapat, tidak?" -- tidak bisa
  * dijawab sama sekali.

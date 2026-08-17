@@ -479,7 +479,7 @@ async function main(): Promise<void> {
   // memindai penuh booking_registrasi tiap 60 detik = 1.440x/hari untuk
   // keuntungan yang tidak terasa siapa pun.
   void loop('poller:booking', runBookingCycle, scanIntervalMs);
-  // Kelas ketiga (BROADCAST terjadwal/berulang, CLAUDE.md) -- interval sama
+  // Kelas ketiga (BROADCAST terjadwal/berulang, FITUR.md) -- interval sama
   // seperti kelas pindai, karena sama-sama scan tabel penuh (broadcast_schedule
   // jauh lebih kecil dari booking_registrasi, jadi ini longgar, bukan ketat).
   void loop('broadcast-schedule', runDueBroadcastSchedules, scanIntervalMs);
