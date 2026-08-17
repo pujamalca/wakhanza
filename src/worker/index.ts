@@ -1,7 +1,7 @@
 import { sik } from '@/db/sik';
 import { db } from '@/db/wakhanza';
 import { assertSikReadOnly, assertAuditLogAppendOnly, assertRequiredSikColumnsExist } from '@/db/guards';
-import { getSettingNumber } from '@/models';
+import { getSettingNumber, WaSession } from '@/models';
 import { logger, safeError } from '@/lib/logger';
 import { runQueueRegCycle } from './poller';
 import { runResultReadyCycle } from './pollerResultReady';
@@ -28,7 +28,14 @@ import { runPemesananCycle } from './pemesananRunner';
 import { runAckWatchdog } from './ackWatchdog';
 import { startScheduler } from './scheduler';
 import { dispatchTick, recoverInterruptedSends } from './dispatcher';
-import { initWaClient, getWaSessionStatus, updateHeartbeat, getClient, checkHealth } from './wa-client';
+import {
+  initWaClient,
+  getWaSessionStatus,
+  updateHeartbeat,
+  getClient,
+  checkHealth,
+  bersihkanDirektoriSesi,
+} from './wa-client';
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
 import { sendAlert } from './alert';
@@ -346,6 +353,51 @@ async function sessionWatchdog(): Promise<void> {
   await shutdown('sesi tidak mencapai ready', 1);
 }
 
+/**
+ * Menghapus direktori sesi yang dititipkan `logout` (054), bila ada.
+ *
+ * TIDAK PERNAH melempar. Kegagalannya tidak boleh menjatuhkan worker: yang
+ * hilang cuma pembersihan yang bisa dicoba lagi pada start berikutnya,
+ * sementara worker yang gagal menyala menghentikan seluruh notifikasi.
+ */
+async function kerjakanHapusSesiTertunda(): Promise<void> {
+  try {
+    const row = await WaSession.findByPk(1);
+    if (!row?.hapusSesiSaatMulai) return;
+
+    logger.warn('direktori sesi dititipkan untuk dihapus, dikerjakan sebelum Chromium menyala');
+    const berhasil = await bersihkanDirektoriSesi();
+
+    if (berhasil) {
+      await WaSession.update(
+        {
+          hapusSesiSaatMulai: false,
+          // Dikosongkan: kalimat "akan dihapus otomatis" sudah tidak benar lagi
+          // begitu ia benar-benar terhapus, dan keterangan basi di halaman
+          // Koneksi terbaca sebagai gangguan yang masih berlangsung.
+          lastError: null,
+        },
+        { where: { id: 1 } },
+      );
+      logger.info('direktori sesi tertunda berhasil dihapus, sesi akan dimulai dari nol');
+      return;
+    }
+
+    // Bendera SENGAJA dibiarkan menyala: start berikutnya mencoba lagi. Yang
+    // tidak boleh terjadi adalah bendera padam sementara direktorinya masih ada.
+    await WaSession.update(
+      {
+        lastError:
+          'Berkas sesi lama masih belum bisa dihapus walau worker baru menyala. Biasanya ada pemindai virus yang sedang membacanya — worker akan mencoba lagi tiap kali menyala.',
+      },
+      { where: { id: 1 } },
+    );
+    logger.error('direktori sesi tertunda TETAP gagal dihapus, bendera dibiarkan menyala');
+  } catch (err) {
+    logger.error(safeError(err), 'gagal mengerjakan penghapusan sesi tertunda');
+  }
+}
+
 async function main(): Promise<void> {
   logger.info('wakhanza-worker memulai...');
 
@@ -448,6 +500,24 @@ async function main(): Promise<void> {
     },
     5_000,
   );
+
+  /**
+   * Direktori sesi yang dititipkan `logout` untuk dihapus (054) -- dikerjakan
+   * DI SINI, dan tempatnya menentukan seluruh gunanya.
+   *
+   * Ini satu-satunya momen yang dijamin tidak ada pemegang handle: sesudah
+   * baris di bawah, Chromium meluncur dan mengunci direktori itu lagi. Karena
+   * itu ia harus di atas `initWaClient()`, bukan di dekat penanganan logout --
+   * di sana penghapusannya sudah dicoba sampai ~45 detik dan gagal justru
+   * karena prosesnya sendiri masih hidup.
+   *
+   * Bendera dipadamkan berdasarkan hasilnya, bukan selalu: kalau kali ini pun
+   * gagal, ia tetap menyala supaya start berikutnya mencoba lagi. Yang tidak
+   * boleh terjadi adalah bendera yang padam sementara direktorinya masih ada --
+   * itu mengembalikan keadaan yang justru sedang diperbaiki, diam-diam.
+   */
+  await kerjakanHapusSesiTertunda();
+
 
   initMulaiAt = Date.now();
   await initWaClient();

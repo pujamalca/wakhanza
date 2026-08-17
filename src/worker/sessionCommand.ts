@@ -248,13 +248,34 @@ export async function processSessionCommand(fase: FaseSesi = 'siap'): Promise<Ha
       await catatTransisiStatus({ status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null });
 
       if (direktoriTerkunci && !(await bersihkanDirektoriSesi())) {
-        // Keterangan, BUKAN laporan kegagalan logout: perangkatnya memang
-        // sudah lepas. Statusnya di atas tetap `qr_pending` dan tidak diubah
-        // lagi di sini.
+        /**
+         * DITITIPKAN ke start berikutnya, bukan dilaporkan sebagai pekerjaan
+         * rumah untuk manusia (054).
+         *
+         * Kalimat yang dulu ditulis di sini -- "Hentikan worker, hapus folder
+         * .wwebjs_auth\session, lalu jalankan worker lagi" -- BENAR dan tidak
+         * bisa dikerjakan orang yang membacanya: ia muncul di dashboard,
+         * sementara jalan keluarnya menuntut shell server plus PM2. Pesan galat
+         * yang jalan keluarnya di luar jangkauan pembacanya adalah kegagalan
+         * rancangan, bukan keterangan.
+         *
+         * Mengulang lebih gigih juga bukan jawabannya: selama proses ini hidup,
+         * sebagian handle memang tidak akan pernah dilepas. Yang menentukan
+         * bukan lamanya menunggu melainkan KAPAN -- dan ada satu momen yang
+         * dijamin bersih, yaitu saat worker MULAI sebelum Chromium meluncur.
+         *
+         * Jalur ke sana sudah ada: cabang ini mengembalikan `'minta-restart'`
+         * di bawah. Yang hilang cuma niatnya bertahan melewati restart itu, dan
+         * itulah yang dititipkan bendera ini.
+         *
+         * Statusnya di atas tetap `qr_pending` dan tidak diubah lagi di sini --
+         * perangkatnya memang sudah lepas.
+         */
         await WaSession.update(
           {
+            hapusSesiSaatMulai: true,
             lastError:
-              'Perangkat sudah dilepas dari WhatsApp, tapi berkas sesi lama tidak bisa dihapus (masih dikunci Windows). Hentikan worker, hapus folder .wwebjs_auth\\session, lalu jalankan worker lagi.',
+              'Perangkat sudah dilepas dari WhatsApp. Berkas sesi lama masih dikunci Windows, jadi akan dihapus otomatis saat worker menyala ulang beberapa detik lagi — tidak ada yang perlu dikerjakan.',
           },
           { where: { id: 1 } },
         );

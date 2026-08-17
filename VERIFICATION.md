@@ -7801,3 +7801,54 @@ keluarSesi.bisa dibalik ke true saat penautan tersangkut
 
 **Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 63 suite / 1143 uji,
 `npm run build` lolos, penanda perubahan ditemukan di `.next/server`.
+
+---
+
+## Menyelesaikan "Keluar sesi" sampai tuntas dari dashboard (`migrations/054`)
+
+Keluhan: pesan galat menyuruh membuka terminal server.
+
+```
+Perangkat sudah dilepas dari WhatsApp, tapi berkas sesi lama tidak bisa dihapus
+(masih dikunci Windows). Hentikan worker, hapus folder .wwebjs_auth\session,
+lalu jalankan worker lagi.
+```
+
+Kalimat itu BENAR dan tidak bisa dikerjakan orang yang membacanya — ia muncul di
+dashboard, sementara jalan keluarnya menuntut shell server plus PM2.
+
+### Kolom dan bawaannya
+
+```
+[1] kolom: {"COLUMN_NAME":"hapus_sesi_saat_mulai","COLUMN_TYPE":"tinyint(1)","COLUMN_DEFAULT":"0"}
+[2] model membaca: hapusSesiSaatMulai=false (tipe boolean)
+    status=ready command=none
+    OK  bawaannya padam — sesi hidup TIDAK akan terhapus saat restart
+```
+
+Bawaan 0 diperiksa khusus karena arah salahnya tidak simetris: bendera yang
+keliru menyala menghapus sesi sehat lalu menuntut pindai QR ulang (butuh ponsel
+nomor RS di tangan), sementara yang keliru padam cuma mengembalikan keadaan
+sebelumnya.
+
+### Kenapa penghapusannya di `main()`, bukan di dekat logout
+
+Bukan pilihan gaya. `bersihkanDirektoriSesi()` sudah mengulang sampai ~45 detik
+dan tetap gagal, karena selama proses ini hidup sebagian handle Chromium/LevelDB
+memang tidak akan dilepas. Yang menentukan bukan lamanya menunggu melainkan
+KAPAN — dan satu-satunya momen yang dijamin bersih adalah saat worker MULAI,
+sebelum Chromium meluncur.
+
+Jalurnya sudah ada sejak awal: cabang `logout` mengembalikan `'minta-restart'`.
+Yang hilang cuma niat "direktori ini masih harus dihapus" bertahan melewati
+restart itu — dan satu-satunya tempat ia dicatat dulu adalah `last_error`, yang
+berupa kalimat untuk manusia.
+
+### Bendera dipadamkan menurut HASIL, bukan selalu
+
+Kalau penghapusan pada start berikutnya pun gagal, benderanya dibiarkan menyala
+supaya start sesudahnya mencoba lagi. Bendera padam sementara direktorinya masih
+ada berarti mengembalikan keadaan yang sedang diperbaiki, diam-diam.
+
+**Gerbang**: `tsc --noEmit` 0, `eslint` 0, `npm test` 63 suite / 1143 uji,
+`npm run build` lolos, migrasi `054` diterapkan ke produksi.

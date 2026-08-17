@@ -1,0 +1,66 @@
+-- 054_hapus_sesi_tertunda.sql
+-- Menyelesaikan "Keluar sesi" SAMPAI TUNTAS dari dashboard, tanpa menyuruh
+-- siapa pun membuka terminal server.
+--
+-- ===========================================================================
+-- Keadaan yang ditutupnya
+-- ===========================================================================
+--
+-- `client.logout()` mengerjakan empat langkah, dan yang gagal di Windows hanya
+-- yang keempat: menghapus direktori sesi, yang berkasnya masih dipegang
+-- Chromium/LevelDB (EPERM). `bersihkanDirektoriSesi()` sudah mengulang sampai
+-- ~45 detik, dan itu cukup untuk sebagian besar kasus -- tapi tidak semuanya.
+--
+-- Saat ia menyerah, `wa_session.last_error` diisi kalimat yang menyuruh:
+--
+--   "Hentikan worker, hapus folder .wwebjs_auth\session, lalu jalankan lagi."
+--
+-- Kalimat itu BENAR dan tidak bisa dikerjakan orang yang membacanya. Ia muncul
+-- di dashboard, dibaca petugas atau admin RS, dan menuntut akses shell ke
+-- server plus PM2 -- yaitu tepat yang tidak dimiliki pembacanya. Pesan galat
+-- yang jalan keluarnya ada di luar jangkauan pembacanya adalah kegagalan
+-- rancangan, bukan keterangan.
+--
+-- ===========================================================================
+-- Kenapa jawabannya SEBUAH BENDERA, bukan penghapusan yang lebih gigih
+-- ===========================================================================
+--
+-- Mengulang lebih lama tidak menyelesaikan apa pun: selama proses ini masih
+-- hidup, sebagian handle memang tidak akan pernah dilepas. Yang menentukan
+-- bukan lamanya menunggu melainkan SIAPA yang menghapus dan KAPAN.
+--
+-- Ada satu momen yang dijamin bersih, dan ia sudah ada di jalur ini:
+-- **saat worker baru MULAI, sebelum Chromium diluncurkan.** Pada detik itu
+-- tidak ada satu pun proses yang memegang direktori sesi.
+--
+-- Dan jalur ke sana pun sudah ada -- cabang `logout` di `sessionCommand.ts`
+-- sudah mengembalikan `'minta-restart'`, jadi worker memang menyalakan ulang
+-- dirinya sesudah logout. Yang HILANG cuma satu hal: niat "direktori ini masih
+-- harus dihapus" tidak bertahan melewati restart itu, karena satu-satunya
+-- tempat ia dicatat adalah `last_error` yang berupa kalimat untuk manusia.
+--
+-- Bendera ini yang membuatnya bertahan. Ia sengaja di `wa_session`, bukan
+-- berkas penanda di disk: berkas penanda tinggal di dekat direktori yang justru
+-- sedang bermasalah handle-nya, dan koordinasi antara dashboard dan worker di
+-- proyek ini memang selalu lewat tabel (ARCHITECTURE §1).
+--
+-- ===========================================================================
+-- Bawaan 0, dan artinya harus tetap "tidak ada yang perlu dihapus"
+-- ===========================================================================
+--
+-- Baris `wa_session` cuma satu dan sudah ada. Bawaan 0 membuatnya benar tanpa
+-- disentuh -- dan yang lebih penting, membuat arah salahnya AMAN: bendera yang
+-- keliru menyala menghapus sesi yang sehat lalu menuntut pindai QR ulang
+-- (menuntut ponsel nomor RS di tangan), sementara bendera yang keliru padam
+-- cuma mengembalikan keadaan hari ini. Karena itu ia dinyalakan HANYA di satu
+-- tempat -- sesudah `bersihkanDirektoriSesi()` benar-benar menyerah -- dan
+-- dipadamkan segera sesudah dikerjakan, sebelum Chromium menyala.
+--
+-- Grant: `wa_session` sudah punya UPDATE per-tabel sejak awal, jadi TIDAK ada
+-- grant baru yang perlu dijalankan untuk migrasi ini.
+
+-- `IF NOT EXISTS` karena DDL MariaDB TIDAK transaksional: migrasi yang gagal di
+-- pernyataan berikutnya meninggalkan kolom ini terpasang sementara
+-- `schema_migrations` belum mencatat apa pun (pelajaran migrations/046).
+ALTER TABLE wa_session
+  ADD COLUMN IF NOT EXISTS hapus_sesi_saat_mulai TINYINT(1) NOT NULL DEFAULT 0 AFTER command;

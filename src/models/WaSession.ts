@@ -17,6 +17,12 @@ export class WaSession extends Model<InferAttributes<WaSession>, InferCreationAt
   declare phoneNumber: string | null;
   declare heartbeatAt: Date | null;
   declare command: CreationOptional<WaSessionCommand>;
+  /**
+   * 054: direktori sesi masih harus dihapus, dan hanya bisa dihapus saat worker
+   * MULAI (sebelum Chromium meluncur). Dinyalakan hanya sesudah
+   * `bersihkanDirektoriSesi()` menyerah; dipadamkan segera sesudah dikerjakan.
+   */
+  declare hapusSesiSaatMulai: CreationOptional<boolean>;
   declare lastError: string | null;
 }
 
@@ -36,6 +42,12 @@ WaSession.init(
       type: DataTypes.ENUM('none', 'reconnect', 'logout', 'sync_groups'),
       allowNull: false,
       defaultValue: 'none',
+    },
+    hapusSesiSaatMulai: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'hapus_sesi_saat_mulai',
     },
     lastError: { type: DataTypes.TEXT, allowNull: true, field: 'last_error' },
   },
