@@ -7101,3 +7101,143 @@ keterangan tidak kembali dititipkan ke atribut `title`.
 Skrip verifikasinya sementara (`scripts/_verif-antrean*.ts`) dan **dihapus di
 alur yang sama**; `git status` sesudahnya cuma menyisakan kedua berkas yang
 memang diubah.
+
+---
+
+## Penautan konfirmasi terkirim untuk alamat PERORANGAN (`core/tautPesanKeluar.ts`)
+
+Cacat ditemukan lewat audit, bukan lewat keluhan: `outbox.wa_message_id` terisi
+untuk grup tapi tidak pernah untuk nomor. Yang mengubahnya dari "kadang gagal"
+menjadi satu baris kode adalah pemecahan menurut BENTUK ALAMAT — bukan menurut
+waktu atau pemicu.
+
+### Keadaan sebelum perbaikan, 30 hari
+
+```
+bentuk                 terkirim  tertaut  persen
+grup  @g.us                 755      447    59.2
+petugas @c.us                86        0     0.0
+pasien (nomor saja)          28        0     0.0
+```
+
+**Nol dari 114 baris beralamat perorangan.** Angka gabungan 53% menyembunyikan
+dua populasi berlawanan; grup sendiri justru sehat, dan pindahnya bersih:
+
+```
+tgl         n   tertaut
+2026-08-03  17        0
+2026-08-04  83        0
+...
+2026-08-10  92       92     <- sejak sini
+2026-08-15  56       56
+2026-08-17   3        3
+```
+
+447 dari 453 sejak 10 Agustus = **98,7%**. Yang sebelum itu mendahului fiturnya.
+
+### Sebab, dibaca dari log produksi
+
+Pendengar `message_create` sudah membawa diagnostiknya sendiri. Empat pola:
+
+```
+tujuan            kandidat  artinya
+<grup>@g.us         0  manusia mengetik di grup (5-40 huruf)
+****@broadcast           0  status WhatsApp
+<id-a>@lid          0  manusia mengetik dari HP nomor RS
+<id-b>@lid          1  <- CACATNYA
+```
+
+`kandidat: 1` yang menentukan: isi pesan cocok, jendela cocok, `wa_message_id`
+kosong — yang gagal hanya perbandingan alamat. WhatsApp memantulkan `to`
+percakapan perorangan sebagai `<id>@lid`, yang sengaja tidak memuat nomor
+telepon, sehingga `${phoneE164}@c.us === tujuan` tidak pernah benar. Grup tidak
+punya bentuk LID, jadi ia lolos. Cacat yang sama sudah pernah dibayar di arah
+MASUK.
+
+Hitungan akhiran di seluruh log worker: `@g.us` 870, `@lid` 354, `@c.us` 127 —
+LID memang sudah jadi bentuk utama percakapan perorangan di sesi ini.
+
+### Pengaman pengganti, dan buktinya kuat
+
+Alamat LID tidak memuat apa pun yang bisa dibandingkan, jadi pengaman keduanya
+berganti bentuk menjadi KETUNGGALAN. Yang menopangnya diukur, bukan diandaikan:
+
+```
+baris 30 hari : 888
+isi berbeda   : 888
+pasangan beridentik teks dalam jarak 30 menit satu sama lain : 0
+```
+
+Kode pengiriman unik per baris (`core/uniqueCode.ts`) yang menjaminnya.
+
+### Uji unit — 13, dan MENGGIGIT
+
+```
+$ npx jest src/core/tautPesanKeluar
+Tests: 13 passed, 13 total
+```
+
+Cabang LID dirusak sengaja (`if (true) return { baris: null, sebab: 'tak-cocok' }`):
+
+```
+× menautkan baris pasien walau nomornya tidak ada di alamat pantulan
+× menautkan tujuan petugas ber-@c.us yang dipantulkan sebagai @lid
+× MENOLAK bila ada lebih dari satu kandidat perorangan
+× memilih SATU baris perorangan walau ada grup lain di daftar kandidat
+Tests: 4 failed, 9 passed, 13 total
+```
+
+Sembilan yang TETAP lolos adalah uji grup dan kecocokan persis — itu yang
+membuktikan perbaikannya MENAMBAH, bukan menulis ulang yang sudah bekerja.
+Dikembalikan sesudahnya, 13/13 lolos, penanda sabotase 0 kemunculan.
+
+### Putar ulang melawan baris produksi sungguhan
+
+Tidak mengirim apa pun: 114 baris yang benar-benar gagal diambil dari `outbox`,
+daftar kandidatnya dibangun lewat lapisan model yang SAMA dipakai
+`catatIdPesanKeluar()`, lalu dicocokkan terhadap alamat `@lid`.
+
+```
+Baris perorangan yang gagal tertaut (30 hari): 114
+  akan tertaut BENAR : 114
+  ambigu (ditolak)   : 0
+  tanpa kandidat     : 0
+  tak cocok          : 0
+
+Pagar silang: alamat grup jatuh ke baris pasien pada 0 dari 200 percobaan
+```
+
+Pagar silang itu yang paling penting: pada mode `pasien_dan_tujuan`, salinan ke
+grup dan pesan ke pasien bisa berisi teks yang sama persis, dan menautkannya
+silang berarti konfirmasi milik grup dilaporkan sebagai bukti pasien menerima.
+
+**Jebakan yang menggigit skrip verifikasinya sendiri, bukan produknya**:
+percobaan pertama melaporkan `akan tertaut BENAR: 0`. Sebabnya `created_at <=
+:saat` dengan `Date` JS lewat SQL MENTAH — `kandidat TANPA saringan waktu = 1`
+sementara dengan saringan `0`. Pelajaran yang sudah tercatat soal `Date` +
+Sequelize + SQL mentah, dan ia berlaku untuk skrip pemeriksa juga. Diulang lewat
+`Outbox.findAll` + `Op`, persis seperti produksi.
+
+### Level log ikut dibetulkan
+
+`tanpa-kandidat` turun dari `warn` ke `debug`. Nomor rumah sakit juga dipakai
+MANUSIA — tiap pesan yang diketik petugas, tiap balasan di grup, dan tiap status
+menghasilkan `message_create` yang memang tidak punya baris `outbox`. Terukur,
+mayoritas peringatan lama adalah itu. Aturan yang sama sudah berlaku di
+`catatAck()`.
+
+### Pemasangan
+
+Empat pemeriksaan sebelum restart: `status: ready`, denyut 6 detik, antrean
+`pending`/`sending` **kosong**, uptime **12 jam**, nol sesi percakapan berjalan.
+
+```
+$ pm2 stop wakhanza-worker
+Chromium sisa pemegang sesi: 0
+$ pm2 start wakhanza-worker
+... "WhatsApp terautentikasi, menunggu ready"
+... "WhatsApp siap"      <- 3,5 detik sesudahnya, satu pid, tanpa loop penautan
+```
+
+**Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 62 suite / 1113 uji,
+`npm run build` lolos.

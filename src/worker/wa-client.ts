@@ -24,6 +24,7 @@ import {
 } from '@/core/waAddress';
 import { catatPesanMasuk } from './inboundLog';
 import { ackBolehMenimpa, isTingkatAck, labelAck } from '@/core/waAck';
+import { pilihBarisTertaut } from '@/core/tautPesanKeluar';
 import { resolveMediaPath } from '@/lib/mediaStorage';
 
 /**
@@ -750,11 +751,14 @@ export async function initWaClient(): Promise<Client> {
  * diturunkan dari kunci idempotennya (`core/uniqueCode.ts`). Dua baris `outbox`
  * karena itu tidak pernah berisi teks yang identik.
  *
- * Tujuannya ikut diperiksa sebagai pengaman kedua, dan bentuknya berbeda untuk
- * dua jenis baris: baris bertujuan grup/petugas menyimpan alamat lengkap di
- * `chat_id`, sementara baris pasien hanya menyimpan nomornya dan alamatnya baru
- * dirakit dispatcher. Karena itu keduanya dibandingkan dengan cara masing-masing
- * alih-alih satu kolom.
+ * Tujuannya ikut diperiksa sebagai pengaman kedua, dan aturannya tinggal di
+ * `core/tautPesanKeluar.ts` -- bukan di sini. Bentuk pertamanya satu baris
+ * `find()` di tempat ini, dan itu ternyata membuang SETIAP percakapan
+ * perorangan: WhatsApp memantulkan `to` sebagai `<id>@lid`, yang sengaja tidak
+ * memuat nomor telepon. Terukur 0 dari 114 baris beralamat perorangan pernah
+ * tertaut sementara grup mencapai 98,7%. Baca modul itu sebelum menyentuh
+ * pencocokannya; ia memuat pengukurannya dan kenapa pengaman keduanya berganti
+ * bentuk alih-alih dihapus.
  *
  * TIDAK menyaring `status`: event ini bisa menyala SEBELUM dispatcher sempat
  * menuliskan `sent`, jadi menuntut status tertentu berarti kehilangan penautan
@@ -789,10 +793,10 @@ async function catatIdPesanKeluar(pesan: Message): Promise<void> {
       limit: 10,
     });
 
-    const cocok = kandidat.find((r) => (r.chatId ? r.chatId === tujuan : `${r.phoneE164}@c.us` === tujuan));
-    if (!cocok) {
+    const hasil = pilihBarisTertaut(kandidat, tujuan);
+    if (!hasil.baris) {
       /**
-       * `warn`, dan sengaja MEMBAWA sebabnya.
+       * Sebabnya WAJIB ikut, dan LEVELNYA berbeda menurut sebab itu.
        *
        * Penautan yang gagal bergejala persis sama dengan penautan yang tidak
        * pernah dicoba: kolom konfirmasi kosong, tanpa galat. Percobaan pertama
@@ -800,18 +804,36 @@ async function catatIdPesanKeluar(pesan: Message): Promise<void> {
        * cara membedakan "event tidak menyala", "id tidak terbaca", dan "tidak
        * ada baris yang cocok" dari luar.
        *
+       * `tanpa-kandidat` sengaja DIAM (debug, bukan warn), dan itu bukan
+       * melemahkan pengawasan melainkan mengembalikan artinya: nomor rumah
+       * sakit juga dipakai MANUSIA -- tiap pesan yang diketik petugas dari HP,
+       * tiap balasan di grup, dan tiap status yang diunggah menghasilkan
+       * `message_create`-nya sendiri yang memang tidak punya baris `outbox`.
+       * Terukur di log produksi, mayoritas peringatan lama adalah itu, dan
+       * peringatan yang muncul puluhan kali sehari untuk keadaan normal
+       * menenggelamkan yang sungguhan. Aturan yang sama sudah berlaku di
+       * `catatAck()` dan pada pemisahan level log pesan masuk bukan-perorangan.
+       *
        * Yang dicatat bentuk dan jumlahnya, TIDAK pernah isi pesannya (§9.7);
        * tujuannya disamarkan seperti di tempat lain.
        */
-      logger.warn(
-        { tujuan: jejakId(tujuan), kandidat: kandidat.length, panjangTeks: body.length },
-        'pesan keluar tidak bisa ditautkan ke baris outbox -- konfirmasi terkirim tidak akan tercatat',
-      );
+      const jejak = { tujuan: jejakId(tujuan), kandidat: kandidat.length, panjangTeks: body.length, sebab: hasil.sebab };
+      if (hasil.sebab === 'tanpa-kandidat') {
+        logger.debug(jejak, 'pesan keluar tanpa baris outbox -- diketik manusia dari nomor ini, bukan kiriman sistem');
+      } else {
+        logger.warn(
+          jejak,
+          'pesan keluar tidak bisa ditautkan ke baris outbox -- konfirmasi terkirim tidak akan tercatat',
+        );
+      }
       return;
     }
 
-    await cocok.update({ waMessageId: id });
-    logger.info({ outboxId: cocok.id, triggerCode: cocok.triggerCode }, 'id pesan keluar tertaut ke baris outbox');
+    await hasil.baris.update({ waMessageId: id });
+    logger.info(
+      { outboxId: hasil.baris.id, triggerCode: hasil.baris.triggerCode },
+      'id pesan keluar tertaut ke baris outbox',
+    );
   } catch (err) {
     // Tidak pernah melempar: dipanggil dari pendengar event, dan kegagalan
     // menautkan satu id tidak boleh berakibat apa pun pada pengiriman.
