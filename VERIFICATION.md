@@ -7331,3 +7331,138 @@ tertutup**. Yang TERSISA sebagai mode kegagalan nyata di mesin ini adalah
 kerapuhan penautan ulang sesi WhatsApp — yang menuntut akses fisik ke ponsel
 nomor RS dan sama sekali bukan urusan PM2. Kalau kaskade muncul lagi, tersangka
 pertamanya sesuatu yang belum tercatat, bukan kedua ini.
+
+---
+
+## Fase 5 dimulai: QUEUE_REG ke pasien, kuota lima orang sehari
+
+17 Agustus 2026. Sampai hari itu **tidak satu pun pasien pernah menerima pesan
+dari sistem ini** — keempat template aktif bermode `tujuan` (hanya grup staf),
+delapan sisanya `is_active = 0`, dan `batas_pasien_harian` masih `0` di kedua
+belas baris meski `migrations/036` dibuat persis untuk memulai bertahap.
+
+### Temuan yang menghentikan langkah pertama
+
+Body `QUEUE_REG` yang tersimpan:
+
+```
+Ada Pasien Dok, Nama : {nama_pasien}
+
+Cara Bayar :  {cara_bayar}
+Antrian hari ini adalah : {no_antrian}.
+No. RM: : {no_rm}.
+```
+
+Menyapa **DOKTER**, dan **tanpa frasa berhenti**. Memindahkan `tujuan_mode`
+tanpa menyentuh isinya akan mengirim pesan yang memberitahu pasien bahwa ada
+pasien — dibuktikan lewat `poll:dryrun` sebelum apa pun diubah:
+
+```
+- RM 001604 -> 628****597 [auto]
+    "Ada Pasien Dok, Nama : <NAMA PASIEN>
+     Cara Bayar :  UMUM
+     Antrian hari ini adalah : 001. ..."
+```
+
+Ia **satu-satunya** dari keenam template pasien yang begitu; kelima lainnya
+sudah bersuara pasien, jadi yang ini jelas ditulis ulang waktu dipakai
+grup-saja:
+
+```
+BILLING_READY  : Bpk/Ibu {nama_pasien}, tagihan Anda di {nama_rs} telah terbit...
+BOOK_REMIND    : Pengingat: Bpk/Ibu {nama_pasien} memiliki jadwal periksa besok...
+KONTROL_TERBIT : Yth. {nama_pasien}, surat kontrol Anda di {nama_rs} sudah dibuat...
+LAB_RESULT     : Bpk/Ibu {nama_pasien}, hasil pemeriksaan {jenis_layanan} Anda...
+```
+
+Ditulis ulang mengikuti bentuk `KONTROL_TERBIT`, dengan frasa berhenti yang
+SAMA PERSIS — suara RS-nya sendiri, bukan karangan baru.
+
+### Pagar yang diperiksa SEBELUM menyalakan
+
+| | terukur |
+|---|---|
+| variabel kosong dari 685 pendaftaran 30 hari | `nama_poli` **0**, `nama_dokter` **0**, `no_antrian` **0** |
+| identitas RS (`{nama_rs}`/`{kontak_rs}`, dari tabel `setting` Khanza) | keduanya terisi |
+| variabel tak dikenal di body baru (`findUnknownVariables`) | 0 |
+| poli sensitif pada 200 kandidat | 0 |
+| tanpa nomor terpakai | **37 / 200 (18,5%)** |
+| daftar tolak | 0 baris |
+| jam tenang | 23:00–00:00 — jendela satu jam, tidak menggigit jam praktik |
+
+Nol variabel kosong itu yang menutup kegagalan label menggantung (`Poli : `)
+yang sudah dibayar dua kali di proyek ini.
+
+### Dry-run sesudah penulisan ulang
+
+```
+Yth. <NAMA PASIEN>, pendaftaran Anda di <NAMA RS> sudah tercatat.
+
+No. antrian : 001
+Poli : Poliklinik Umum
+Dokter : <NAMA DOKTER>
+Cara bayar : UMUM
+No. RM : 001604
+
+Mohon menunggu panggilan sesuai nomor antrian. Informasi: <KONTAK RS>
+
+Balas "Berhenti Kirim Otomatis" untuk berhenti menerima pemberitahuan otomatis.
+
+Kode Pengiriman : 2026-08-17 08:57:06 <KODE>
+```
+
+### Penyalaan, bertahap dan berpagar
+
+Isi pesan + `batas_pasien_harian = 5` ditulis LEBIH DULU — keduanya inert
+selama mode masih `tujuan`, jadi tidak menyentuh satu pun pasien. Baru
+sesudah dry-run di atas, `tujuan_mode` dipindahkan, dengan tiga pemeriksaan
+pra-terbang yang membatalkan bila salah satunya gagal: batas harus 5, tujuan
+grup aktif harus ada, dan body harus memuat frasa berhenti.
+
+Keduanya lewat `Template.update` + `logAudit` yang SAMA dipakai halaman
+`/template`, jadi jejak auditnya identik dengan suntingan lewat dashboard.
+
+Mode `pasien_dan_tujuan`, **bukan** `pasien`: grup Pendaftaran tetap menerima
+salinan penuh, sehingga staf bisa membandingkan apa yang diterima pasien
+dengan apa yang mereka lihat sendiri.
+
+### Hasil SUNGGUHAN, dalam menit-menit pertama
+
+```
+tujuan   status             n  tertaut
+grup     sent               4        4
+grup     pending            1        0
+PASIEN   sent               1        1
+PASIEN   failed_permanent   1        0
+
+kuota pasien terpakai hari ini: 2 / 5
+```
+
+Per baris:
+
+```
+id 57041  sent              attempts 1  ack_level 2  galat -
+id 57043  failed_permanent  attempts 1  ack_level -  "nomor tidak terdaftar di WhatsApp"
+```
+
+**`ack_level = 2` (`ACK_DEVICE`) pada 57041** — pesan pasien pertama yang
+pernah dikirim sistem ini terbukti SAMPAI KE HP penerimanya. Itu sekaligus
+bukti ujung-ke-ujung untuk perbaikan penautan konfirmasi di seksi sebelumnya,
+yang sebelum ini hanya bisa dibuktikan lewat putar-ulang karena tidak ada satu
+pun tujuan perorangan yang bisa diuji tanpa mengirimi orang sungguhan.
+
+**57043 bukan cacat**: `getNumberId()` menolak nomor yang tidak ada di WhatsApp
+SEBELUM mengirim, menandainya `failed_permanent` (mencoba ulang tidak akan
+menolong), dan ia muncul di panel "perlu ditinjau" `/antrean`. Itu satu dari
+18,5% nomor tak terpakai yang sudah terukur di atas, muncul persis sebagaimana
+rancangannya.
+
+### Menariknya kembali
+
+```sql
+UPDATE template SET tujuan_mode = 'tujuan' WHERE trigger_code = 'QUEUE_REG';
+```
+
+Satu baris, tanpa restart worker — `tujuan_mode` dan `batas_pasien_harian`
+dibaca ulang tiap siklus. Yang TIDAK ikut tertarik: pesan yang telanjur
+terkirim.

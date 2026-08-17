@@ -18,12 +18,41 @@ sensitif §F4.3, jam kirim H-1) dan dasar hukum persetujuan pasien (PRD §9 poin
 
 Angka-angka ini **diukur, bukan diingat**, dan yang paling penting yang pertama.
 
-**Tidak satu pun pasien menerima pesan.** Keempat baris `template` yang aktif
-(`QUEUE_REG`, `BOOK_REMIND`, `KONTROL_TERBIT`, `KONTROL_ULANG`) seluruhnya
-bermode `tujuan_mode = 'tujuan'` — hanya ke grup staf. Delapan sisanya
-`is_active = 0`. Jadi tujuan yang tertulis di PRD §3 belum berjalan satu baris
-pun, dan `template.batas_pasien_harian` yang dibuat `migrations/036` persis
-untuk memulai bertahap masih `0` di kedua belas baris — belum pernah dipakai.
+**Fase 5 DIMULAI 17 Agustus 2026, lewat satu pemicu dan kuota lima orang sehari.**
+Sampai hari itu tidak satu pun pasien pernah menerima pesan: keempat baris
+`template` yang aktif seluruhnya bermode `tujuan` (hanya ke grup staf), delapan
+sisanya `is_active = 0`, dan `template.batas_pasien_harian` yang dibuat
+`migrations/036` persis untuk memulai bertahap masih `0` di kedua belas baris —
+belum pernah dipakai sekali pun.
+
+Sekarang `QUEUE_REG` bermode **`pasien_dan_tujuan`** dengan
+**`batas_pasien_harian = 5`**. Grup Pendaftaran TETAP menerima salinan penuh
+(itu sebabnya modenya bukan `pasien`), jadi staf bisa membandingkan apa yang
+diterima pasien dengan apa yang mereka lihat sendiri. Sisanya belum disentuh:
+`BOOK_REMIND`, `KONTROL_TERBIT`, `KONTROL_ULANG` masih `tujuan`.
+
+**Isi pesannya WAJIB ditulis ulang lebih dulu, dan itu temuan yang nyaris
+menggigit.** Body `QUEUE_REG` berbunyi `Ada Pasien Dok, Nama : {nama_pasien}` —
+menyapa DOKTER, tanpa frasa berhenti. Ia satu-satunya dari keenam template
+pasien yang begitu; kelima lainnya sudah bersuara pasien (`Bpk/Ibu
+{nama_pasien}, ...`), jelas karena yang ini ditulis ulang waktu dipakai
+grup-saja. Memindahkan modenya tanpa menyentuh isinya akan mengirim pesan yang
+memberitahu pasien bahwa ada pasien. Sekarang ia mengikuti bentuk
+`KONTROL_TERBIT` dan diakhiri frasa berhenti yang sama persis.
+
+**Menariknya kembali satu baris**, dan pesan yang telanjur terkirim tidak ikut
+tertarik:
+
+```sql
+UPDATE template SET tujuan_mode = 'tujuan' WHERE trigger_code = 'QUEUE_REG';
+```
+
+Tidak perlu restart worker — `tujuan_mode` dan `batas_pasien_harian` dibaca
+ulang tiap siklus. Kelengkapan variabelnya diukur sebelum dinyalakan: dari 685
+pendaftaran 30 hari, **0** yang `nama_poli`, `nama_dokter`, atau `no_antrian`-nya
+kosong, jadi tidak ada label menggantung. Yang TIDAK bisa dihilangkan: **37 dari
+200** kandidat tidak punya nomor yang terpakai (18,5%) — mereka masuk `outbox`
+sebagai `skipped_no_contact`, terlihat di `/antrean`, bukan hilang diam-diam.
 
 | | |
 |---|---|
@@ -44,7 +73,11 @@ pipeline. Aman diabaikan; jangan bingung dengan data pasien sungguhan.
 
 ### Yang masih terbuka dan sudah terukur
 
-- **Pemicu pasien belum menyala** — lihat di atas. Keputusan RS, bukan teknis.
+- **Pemicu pasien baru menyala SEBAGIAN** — `QUEUE_REG` saja, kuota 5/hari,
+  sejak 17 Agustus 2026. Menaikkan kuotanya atau menyalakan pemicu berikutnya
+  keputusan RS, bukan teknis; yang WAJIB diperiksa lebih dulu tiap kali adalah
+  apakah isi template pemicu itu memang bersuara pasien dan berakhiran frasa
+  berhenti — `QUEUE_REG` ternyata tidak, dan itu baru ketahuan saat dibaca.
 - **`resume_pasien` COUNT(\*) = 0** dan surat kontrol praktis kosong di
   produksi, jadi dua angka di rekap bulanan administrasi akan selalu nol.
 - **`npm run audit` tidak akan pernah 0** tanpa perubahan yang memutus:
