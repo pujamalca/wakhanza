@@ -7241,3 +7241,93 @@ $ pm2 start wakhanza-worker
 
 **Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 62 suite / 1113 uji,
 `npm run build` lolos.
+
+---
+
+## Diagnosis restart worker: kedua tersangka yang tercatat sudah gugur
+
+Dikerjakan 17 Agustus 2026 karena `wa_session_event` — tabel yang dibuat
+9 Agustus persis untuk menjawab "berapa jam gateway mati bulan lalu" — belum
+pernah sekali pun ditanya.
+
+### Yang dijawab tabel itu
+
+```
+transisi 14 hari
+  authenticating -> ready          61
+  ready -> authenticating          58
+  qr_pending -> authenticating     16
+  authenticating -> qr_pending      6
+  ready -> qr_pending               3
+  qr_pending -> disconnected        2
+  disconnected -> authenticating    2
+
+waktu di luar `ready` : 447 menit dari 14 hari = 97,8% uptime
+selang >= 10 menit    : 7
+  paling panjang      : 312 menit, 16 Agustus 08:07 UTC
+```
+
+**Nol `ready -> disconnected`** — WhatsApp tidak pernah memutus sendiri; yang
+berulang selalu berangkat dari `ready -> authenticating`. Selang 312 menit itu
+melewati `qr_pending`, artinya QR benar-benar dipindai ulang: insiden penautan
+16 Agustus yang sudah tercatat, bukan mode kegagalan baru.
+
+### Tersangka 1: versi PM2 tidak sama — GUGUR
+
+```
+$ pm2 --version
+7.0.1
+$ pm2 report | grep version
+pm2d version : 7.0.1
+node version : 22.22.0
+```
+
+Daemon dan CLI **sama**. Dokumentasi lama menyatakan `in-memory 5.2.2` vs
+`local 7.0.1` dan menjadikannya kecurigaan utama kaskade restart; itu sudah
+tidak berlaku, dan menelusurinya lagi buang waktu.
+
+### Tersangka 2: `stop_exit_codes` absen dari proses berjalan — GUGUR
+
+```
+stop_exit_codes        = 75
+restart_delay          = 5000
+kill_timeout           = 20000
+shutdown_with_message  = True
+max_memory_restart     = 838860800
+exec_mode              = fork_mode
+instances              = 1
+autorestart            = True
+unstable_restarts      = 0
+restart_time           = 35
+```
+
+Seluruh setelan daur hidup hadir. `unstable_restarts = 0` adalah penghitung
+PM2 sendiri untuk loop restart — nolnya berarti tidak ada kaskade berjalan.
+
+**Jebakan pengukurannya, dan ia sempat menghasilkan kesimpulan yang keliru**:
+percobaan pertama memakai `pm2 prettylist` + regex dan melaporkan `<TIDAK ADA>`
+untuk KESEMBILAN kunci — termasuk `exec_mode` dan `instances`, yang jelas ada
+karena `pm2 list` menampilkan `fork`. Keluaran prettylist bukan JSON sah.
+Diulang lewat `pm2 jlist` disalurkan ke berkas lalu diurai Python.
+
+**Pagar yang menyertainya**: `pm2 jlist` memuat SELURUH env proses termasuk
+kredensial database. Berkasnya gitignored dan dibuang di alur yang sama; yang
+dicetak hanya daftar kunci terpilih, tidak pernah keluarannya utuh.
+
+### Keadaan sesudah restart pemasangan perbaikan ack
+
+```
+$ pm2 stop wakhanza-worker      -> berhenti rapi
+Chromium sisa pemegang sesi: 0
+$ pm2 start wakhanza-worker
+"WhatsApp terautentikasi, menunggu ready"
+"WhatsApp siap"                 -> 3,5 detik, satu pid, tanpa loop penautan
+```
+
+### Kesimpulan
+
+Kedua mekanisme yang didokumentasikan sebagai penyebab kaskade **sudah
+tertutup**. Yang TERSISA sebagai mode kegagalan nyata di mesin ini adalah
+kerapuhan penautan ulang sesi WhatsApp — yang menuntut akses fisik ke ponsel
+nomor RS dan sama sekali bukan urusan PM2. Kalau kaskade muncul lagi, tersangka
+pertamanya sesuatu yang belum tercatat, bukan kedua ini.
