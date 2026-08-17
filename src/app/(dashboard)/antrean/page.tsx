@@ -4,6 +4,7 @@ import { ACK_ERROR, labelAck, sudahSampai } from '@/core/waAck';
 import { normalizePhone } from '@/core/phone';
 import { bacaHalaman, hitungPaginasi, hrefHalaman, UKURAN_HALAMAN } from '@/core/pagination';
 import { resendOutboxAction } from './actions';
+import { LihatPesan, type RincianPesan } from './LihatPesan';
 import {
   PageHeader,
   FilterChip,
@@ -64,6 +65,43 @@ function buildSearchWhere(q: string): WhereOptions {
   if (telepon.ok) alternatif.push({ phoneE164: telepon.value });
 
   return { [Op.or]: alternatif };
+}
+
+/**
+ * Dirakit di SERVER lalu diserahkan sebagai string yang sudah jadi, bukan
+ * sebagai `Date` dan kode mentah.
+ *
+ * Dua sebabnya. `toLocaleString('id-ID')` di komponen klien dijalankan mesin
+ * PETUGAS, jadi hasilnya bisa berbeda dari yang dirender server untuk baris
+ * yang sama di tabel yang sama -- selain memicu ketidakcocokan hidrasi.
+ * Kedua, pelabelan (`triggerLabel`, `outboxStatusLabel`, `labelAck`) sudah jadi
+ * satu penurunan bersama di `components/ui/labels.ts`; menyerahkan kode mentah
+ * berarti komponen klien memutuskan sendiri lagi, dan yang menyimpang adalah
+ * yang paling jarang dilihat.
+ */
+function rincianDari(row: Outbox): RincianPesan {
+  const grup = !!row.chatId;
+  return {
+    jenis: triggerLabel(row.triggerCode),
+    kodePemicu: row.triggerCode,
+    noRkmMedis: row.noRkmMedis,
+    tujuan: row.chatId ?? row.phoneE164,
+    tujuanGrup: grup,
+    status: outboxStatusLabel(row.status),
+    ack: row.status === 'sent' ? labelAck(row.ackLevel, grup) : null,
+    kejadian: row.eventAt.toLocaleString('id-ID'),
+    dijadwalkan: row.scheduledAt.toLocaleString('id-ID'),
+    // Sengaja tidak menyebut SEBABNYA. Jam tenang memang satu-satunya yang
+    // memundurkan `scheduled_at` saat enqueue, tapi tombol "Kirim ulang" juga
+    // menulisnya ke waktu sekarang -- jadi menuduh jam tenang di sini akan
+    // keliru justru pada baris yang paling sering dibuka orang.
+    dimundurkan: row.scheduledAt.getTime() - row.eventAt.getTime() > 1000,
+    terkirim: row.sentAt ? row.sentAt.toLocaleString('id-ID') : null,
+    percobaan: row.attempts,
+    lampiran: row.mediaName,
+    galat: row.lastError,
+    isi: row.body,
+  };
 }
 
 export default async function AntreanPage({
@@ -175,8 +213,15 @@ export default async function AntreanPage({
                 </td>
                 <td className={`${cellClass} tabular-nums`}>{row.noRkmMedis ?? '-'}</td>
                 <td className={`${cellClass} hidden tabular-nums md:table-cell`}>{row.phoneE164 ?? '-'}</td>
-                <td className={`${cellClass} hidden max-w-xs truncate lg:table-cell`} title={row.body}>
-                  {row.body}
+                {/* `line-clamp-2` + `whitespace-pre-line`, BUKAN `truncate`:
+                    883 dari 885 baris produksi berbaris banyak, dan `truncate`
+                    meratakannya jadi satu baris terpotong sehingga yang
+                    terlihat bukan awal pesannya melainkan awal kalimat pertama
+                    yang disambung kalimat kedua. Atribut `title` dibuang --
+                    isinya sudah pindah ke tombol Lihat, dan tooltip bawaan
+                    peramban tidak pernah muncul di layar sentuh. */}
+                <td className={`${cellClass} hidden max-w-xs align-top lg:table-cell`}>
+                  <span className="line-clamp-2 whitespace-pre-line text-muted-foreground">{row.body}</span>
                 </td>
                 {/* Konfirmasi ditempelkan ke sel Status, BUKAN jadi kolom
                     kesembilan. Tabel ini sudah menyembunyikan empat kolom di
@@ -214,18 +259,24 @@ export default async function AntreanPage({
                   {row.sentAt ? row.sentAt.toLocaleString('id-ID') : '-'}
                 </td>
                 <td className={cellClass}>
-                  {RESENDABLE.includes(row.status) && (
-                    <form
-                      action={async () => {
-                        'use server';
-                        await resendOutboxAction(row.id);
-                      }}
-                    >
-                      <Button type="submit" variant="secondary" size="xs">
-                        Kirim ulang
-                      </Button>
-                    </form>
-                  )}
+                  <div className="flex items-center justify-end gap-1">
+                    {/* Tidak ikut disembunyikan di layar sempit: di bawah 1024
+                        px kolom "Isi" hilang, jadi tombol ini satu-satunya
+                        jalan menuju isi pesannya. */}
+                    <LihatPesan rincian={rincianDari(row)} />
+                    {RESENDABLE.includes(row.status) && (
+                      <form
+                        action={async () => {
+                          'use server';
+                          await resendOutboxAction(row.id);
+                        }}
+                      >
+                        <Button type="submit" variant="secondary" size="xs">
+                          Kirim ulang
+                        </Button>
+                      </form>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

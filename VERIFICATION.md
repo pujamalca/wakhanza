@@ -7017,3 +7017,87 @@ Nol antrean tertahan: pemicunya kelas watermark/pindai, jadi kejadian selama
 gangguan diambil kembali saat worker pulih. Pemulihannya **jeda lalu satu
 start**, bukan restart berulang — penautan ulang yang terlalu sering justru
 memperparah pelambatan dari sisi WhatsApp.
+
+## Isi pesan di `/antrean`: yang ditampilkan dulu tidak pernah cukup untuk apa pun
+
+**Angka yang membuka masalahnya** — diukur atas seluruh `outbox` produksi,
+bukan atas contoh yang dipilih:
+
+```
+mysql> SELECT COUNT(*) baris, MIN(CHAR_LENGTH(body)) min_len,
+              ROUND(AVG(CHAR_LENGTH(body))) rata, MAX(CHAR_LENGTH(body)) max_len,
+              SUM(CHAR_LENGTH(body) > 40) lebih_40,
+              SUM(body LIKE '%\n%') berbaris_banyak,
+              SUM(last_error IS NOT NULL AND last_error <> '') ada_galat
+       FROM outbox;
+
+baris  min_len  rata  max_len  lebih_40  berbaris_banyak  ada_galat
+885    40       258   9485     884       883              13
+```
+
+884 dari 885 lebih panjang daripada yang muat di `max-w-xs`, dan **883
+berbaris banyak** sementara `truncate` meratakannya jadi satu baris. Yang
+terpanjang bukan anomali melainkan fitur yang memang ada:
+
+```
+trigger_code           n    rata  maks
+AUTO_REPLY             30   995   9485      <- balasan rekap darurat stok
+FARMASI_STOK_DARURAT   1    9118  9118
+WA_PERINTAH            12   573   1760
+FARMASI_PENGADAAN      13   787   1550
+```
+
+**Verifikasi render lewat instance PM2 yang SEDANG BERJALAN** (`npm run build`
+-> `pm2 restart wakhanza-web` -> port 3100), sesi dimint langsung dengan
+`AUTH_SECRET` alih-alih membuat akun admin sementara — yang perlu dibuktikan
+cuma RENDER-nya, dan skrip ujinya tidak menekan satu tombol pun sehingga tidak
+ada baris `audit_log` yang lahir atas nama siapa pun:
+
+```
+[1] GET /antrean -> HTTP 200, mendarat di http://127.0.0.1:3100/antrean
+[2] 50 baris, 50 tombol "Lihat" yang benar-benar terlihat
+[3] sel bertitle panjang (tooltip lama): tidak ada
+[4] <dialog> di DOM sebelum diklik: 0
+[5] dialog terbuka: judul="Perintah lewat WhatsApp", isi 1760 huruf,
+    pre-wrap=true, berbaris banyak=true, tombol salin=true
+[6] fakta pengiriman yang ikut: Jenis pesan | Tujuan (grup/petugas) | No. RM |
+    Status | Waktu kejadian | Dijadwalkan | Terkirim | Percobaan kirim
+[7] Esc menutup dan dialog dilepas dari DOM
+
+SEMUA LOLOS
+```
+
+Baris [2] diperiksa lewat `getBoundingClientRect()`, bukan sekadar ada di DOM —
+tombol yang dirender di dalam sel tersembunyi tetap terhitung oleh selektor
+biasa (pelajaran tombol di dalam `<dialog>` tertutup, migrations/021). Baris
+[4] dan [7] membuktikan dialognya benar-benar dipasang-dan-dilepas, bukan 50
+dialog menganggur.
+
+**Sebab kegagalan, yang sebelumnya tidak ada di halaman ini sama sekali** —
+diperiksa terhadap baris `failed_permanent` sungguhan:
+
+```
+[8]  kotak "Kenapa gagal" ada: true
+[9]  sebabnya terbaca: "Cannot read properties of undefined (reading 'getChat')"
+[10] Percobaan kirim: 3
+```
+
+Galat itu persis celah `window.WWebJS` yang sudah didokumentasikan (§ "`ready`
+TIDAK berarti halamannya bisa mengirim") — tersimpan di `last_error` sejak
+awal, dan sampai sekarang tidak pernah bisa dilihat siapa pun dari dashboard.
+
+**Utilitas Tailwind-nya benar-benar dihasilkan** (bukan kelas yang tidak pernah
+jadi CSS):
+
+```
+$ grep -o "\-webkit-line-clamp:2" .next/static/chunks/*.css
+-webkit-line-clamp:2
+```
+
+**Gerbang yang lain**: `tsc --noEmit` 0 galat, `eslint .` 0 galat,
+`npx jest components/ui` 17 lolos — termasuk `petunjuk.test.ts`, yang menjaga
+keterangan tidak kembali dititipkan ke atribut `title`.
+
+Skrip verifikasinya sementara (`scripts/_verif-antrean*.ts`) dan **dihapus di
+alur yang sama**; `git status` sesudahnya cuma menyisakan kedua berkas yang
+memang diubah.

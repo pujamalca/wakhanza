@@ -1822,6 +1822,29 @@ Kotaknya menerima **tiga** bentuk masukan sekaligus (di-OR), karena penelepon ha
 
 Nol hasil diberi kalimatnya sendiri yang menyebut masa simpan 90 hari. Tanpa itu, "tidak ditemukan" terbaca sebagai "pesannya tidak pernah dibuat", padahal sebab yang jauh lebih sering adalah pesannya sudah dipangkas.
 
+### Isi pesan di `/antrean`: yang ditampilkan dulu tidak pernah cukup untuk apa pun
+
+Sel "Isi" dipotong `truncate` pada `max-w-xs` dan selebihnya dititipkan ke atribut `title`. Diukur atas 885 baris produksi, **keduanya tidak menampilkan apa pun yang berguna** — dan angkanya bukan kasus pinggiran melainkan hampir seluruh tabel:
+
+| | |
+|---|---|
+| lebih panjang daripada yang muat | **884 dari 885** |
+| **berbaris banyak** | **883 dari 885** |
+| rata-rata / terpanjang | 258 / **9.485** huruf (rekap darurat stok, 208 barang) |
+
+Baris kedua yang paling menentukan, dan yang paling gampang terlewat saat cuma melihat angka panjangnya: `truncate` **meratakan pesan berbaris banyak jadi satu baris**. Jadi yang hilang bukan sekadar ekornya melainkan susunan pesan yang benar-benar diterima pasien — kalimat pertama tersambung ke kalimat kedua, dan yang terbaca staf bukan awal pesannya.
+
+**Tooltip bawaan peramban bukan penggantinya, dan ketiga sebabnya berdiri sendiri-sendiri**: ia tidak pernah muncul di layar sentuh (tablet loket), hilang begitu halaman digulir, dan isinya tidak bisa diseleksi — padahal yang paling sering dibutuhkan saat menjawab telepon justru MENYALIN kalimatnya. Ditambah satu yang khas tabel ini: kolom "Isi" `hidden lg:table-cell`, jadi di bawah 1024 px isi pesan tidak terlihat **sama sekali**. Karena itu tombol **Lihat** tidak ikut disembunyikan — di layar sempit ia satu-satunya jalan menuju isi pesannya.
+
+Empat hal yang menempel:
+
+- **Dialog dipasang HANYA saat dibuka** (`{buka && <Modal open>}`, pola `RuleModal` di `/balasan-otomatis`). Satu halaman memuat 50 baris, dan satu `<dialog>` per baris berarti lima puluh dialog menganggur di DOM. Diverifikasi: nol `<dialog>` sebelum diklik, dan Esc melepasnya kembali.
+- **Isinya dirender APA ADANYA, BUKAN lewat `WaPreview`.** Godaannya nyata — perender itu ada dan menampilkan `*tebal*` sebagaimana dilihat pasien — tapi ia juga menandai `{variabel}` sebagai "diganti nilai ini saat dikirim". Pada baris `outbox` variabelnya SUDAH diganti, jadi keterangan itu berbohong tentang pesan yang sudah terlanjur terkirim. Teks mentah juga persis yang dicari kotak pencarian di atasnya (`body LIKE`), sehingga yang terbaca staf sama dengan yang bisa dicarinya kembali.
+- **`last_error` sebelumnya TIDAK ADA di halaman ini sama sekali.** Statusnya terbaca "Gagal permanen" tanpa satu pun tempat yang menyebutkan kenapa — dan sebabnya sudah tersimpan sejak awal, cuma tidak pernah ditampilkan. Terbukti pada baris produksi: `Cannot read properties of undefined (reading 'getChat')`, yaitu persis celah `window.WWebJS` yang sudah didokumentasikan di § "`ready` TIDAK berarti halamannya bisa mengirim". Ditaruh paling atas di dalam dialog karena pada baris yang gagal ia satu-satunya yang benar-benar dicari orang.
+- **`scheduled_at` ikut ditampilkan, tapi SEBABNYA sengaja tidak disebut.** Jam tenang memang satu-satunya yang memundurkannya saat enqueue, tapi tombol "Kirim ulang" juga menulisnya ke waktu sekarang — jadi menuduh jam tenang akan keliru justru pada baris yang paling sering dibuka orang. Yang ditulis cuma "dimundurkan dari waktu kejadian", berikut kedua waktunya berdampingan.
+
+**Dirakit di SERVER lalu diserahkan sebagai string jadi**, bukan sebagai `Date` dan kode mentah: `toLocaleString('id-ID')` di komponen klien dijalankan mesin PETUGAS (hasil bisa berbeda dari baris lain di tabel yang sama, selain memicu ketidakcocokan hidrasi), dan pelabelan sudah jadi satu penurunan bersama di `components/ui/labels.ts` — menyerahkan kode mentah berarti komponen klien memutuskan sendiri lagi.
+
 ### Daftar panjang = TABEL, penyuntingan = MODAL
 
 `/template` dan `/balasan-otomatis` sempat berupa grid kartu yang tiap kartunya berisi form terbuka. Itu salah untuk pekerjaannya dan diganti tabel: kartu menjawab "seperti apa satu template", tabel menjawab **"apa saja yang ada, urutannya bagaimana, mana yang aktif"** -- dan yang kedua itulah yang ditanyakan staf saat membuka halaman. Empat aturan memakan ~1300px sebagai kartu, ~180px sebagai tabel. Yang lebih buruk dari tingginya: semua form terbuka sekaligus berarti tidak ada keadaan "sedang mengubah", sehingga tujuh tombol Simpan tampak sama-sama aktif dan tidak jelas mana yang sedang disunting.
