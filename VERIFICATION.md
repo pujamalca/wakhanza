@@ -7606,3 +7606,26 @@ juga tidak menampilkan seluruh proses.
 
 **Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 62 suite / 1122 uji,
 `npm run build` lolos, penanda perubahan ditemukan di `.next/server`.
+
+### Balasan SUNGGUHAN yang tercatat, 40 menit sesudah pemasangan
+
+Bukan putar ulang dan bukan baris uji — dua pesan yang benar-benar diketik
+petugas dari ponsel nomor rumah sakit:
+
+```
+id=610  perorangan  280925****@lid    3 huruf  tipe=chat  13:59 WIB
+id=613  grup        120363****@g.us  39 huruf  tipe=chat  14:18 WIB
+```
+
+Keduanya mendarat di percakapan yang memang punya riwayat masuk — jadi
+penggabungan lewat `chat_id` terbukti pada kedua bentuk alamat sekaligus:
+
+```
+120363****@g.us   masuk 203, keluar 1
+280925****@lid    masuk  20, keluar 1
+```
+
+Yang membuat ini bukti penuh: sebelum perbaikan, KEDUA baris ini tidak akan ada
+di mana pun. Sisi keluar `280925****@lid` khususnya — alamat LID adalah bentuk
+yang dulu 0 dari 114 kali gagal ditautkan, dan sekarang justru bentuk itu yang
+menyimpan balasan pertama.
