@@ -103,10 +103,37 @@ pipeline. Aman diabaikan; jangan bingung dengan data pasien sungguhan.
 - **`npm run audit` tidak akan pernah 0** tanpa perubahan yang memutus:
   11 kerentanan, seluruhnya rantai `sequelize` → `uuid`, dan perbaikannya
   memundurkan `sequelize` ke mayor 3. Didokumentasikan sengaja di TECH_STACK.
-- **Memori Chromium melebihi `max_memory_restart`** dan PM2 buta terhadapnya
-  (ia hanya mengukur proses Node yang dilacaknya, bukan keturunannya). Belum
-  jadi insiden karena `sessionWatchdog()` menangkap gejala sampingnya lebih
-  dulu — tapi itu jaring pengaman ortogonal, bukan perbaikan.
+- **Memori Chromium melebihi `max_memory_restart` dan PM2 buta terhadapnya**
+  (ia hanya mengukur proses Node yang dilacaknya, bukan keturunannya). Kalimat
+  di tempat ini dulu berbunyi "belum jadi insiden"; **itu terbukti keliru pada
+  17 Agustus 2026**, dan cara ia menjadi insiden penting diketahui karena
+  gejalanya sama sekali tidak menyebut memori.
+
+  Sesi mati **enam jam** (13.41–19.55) tersangkut `authenticating`. Yang terlihat
+  di log cuma `Execution context was destroyed, most likely because of a
+  navigation` dari `Client.inject()` — balapan di dalam whatsapp-web.js, tempat
+  `framenavigated` menjalankan ulang `inject()` tanpa penjaga tumpang tindih.
+  `ready` dipancarkan di ujung `inject()`, jadi injeksi yang mati di tengah
+  berarti `ready` tidak pernah datang. **`Runtime.callFunctionOn timed out`
+  NOL kemunculan**, jadi ini BUKAN kelas "state sesi rusak" dan mengosongkan
+  `.wwebjs_auth` bukan obatnya.
+
+  Yang menyembuhkannya: **Chromium segar**. Terukur, bukan dikira —
+  `4384 MB / 33 proses` sebelum, `1155 MB / 10 proses` sesudah, dan penautan
+  yang tadi gagal berjam-jam selesai **di bawah 20 detik**. Chromium yang
+  membengkak membuat navigasi halaman lambat, dan balapan `inject()` vs
+  navigasi jadi hampir selalu kalah.
+
+  **Pemulihannya `pm2 stop` lalu `pm2 start` — bukan `pm2 restart`**, dan
+  bedanya bukan gaya: `stop` menutup Chromium lewat `shutdown()` sampai tuntas
+  (dibuktikan: 0 proses tersisa untuk dimatikan paksa sesudahnya), sementara
+  `restart` melahirkan pengganti sebelum yang lama benar-benar melepas
+  direktori sesi. Penyaring `CommandLine -like "*wwebjs_auth*"` tetap WAJIB
+  kalau ada yang perlu dimatikan paksa — di mesin ini ada 16 proses
+  `chrome.exe` lain milik pemakai.
+
+  **Yang harus diperiksa saat sesi tersangkut menautkan: ukuran Chromium**,
+  bukan cuma status dan denyut. Ia tidak muncul di `pm2 list` sama sekali.
 
 ## Apa itu wakhanza
 

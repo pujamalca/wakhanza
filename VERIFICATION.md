@@ -7720,3 +7720,84 @@ terhadap data sungguhan, bukan cuma data karangan uji unit.
 
 **Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 63 suite / 1138 uji,
 `npm run build` lolos.
+
+---
+
+## Memori Chromium melebihi `max_memory_restart` dan PM2 buta terhadapnya
+
+Insiden 17 Agustus 2026: sesi mati enam jam (13.41–19.55), tersangkut
+`authenticating`. Staf mencoba menunggu, "Sambung ulang", dan "Keluar sesi" —
+ketiganya tidak berespons.
+
+### Yang menggugurkan tersangka yang sudah terdokumentasi
+
+```
+$ grep -c "Runtime.callFunctionOn timed out" logs/*.log
+0
+```
+
+Nol kemunculan, jadi ini BUKAN kelas "state sesi rusak" — mengosongkan
+`.wwebjs_auth` dan pindai QR ulang bukan obatnya, dan menempuhnya akan
+menghabiskan akses ke ponsel nomor RS untuk sesuatu yang bukan sebabnya.
+
+Chromium juga BUKAN yatim, walau jumlah prosesnya mencurigakan:
+
+```
+induk pid=19736  anak=1   HIDUP node      <- worker
+induk pid=21420  anak=29  HIDUP chrome    <- satu pohon Chromium yang sah
+```
+
+### Galat sebenarnya, dari pm2-worker.error
+
+```
+Error: Execution context was destroyed, most likely because of a navigation.
+    at async Client.getWWebVersion (Client.js:1310)
+    at async Client.inject          (Client.js:142)
+    at async                        (Client.js:503)
+```
+
+`Client.js:495` menjelaskan mekanismenya:
+
+```js
+this.pupPage.on('framenavigated', async (frame) => { ... await this.inject(); });
+```
+
+Tiap navigasi menjalankan ulang `inject()` tanpa penjaga tumpang tindih.
+`ready` dipancarkan di ujung `inject()`, jadi injeksi yang mati di tengah
+berarti `ready` tidak pernah datang.
+
+**`webVersionCache` BUKAN obatnya**, dan sumbernya yang membuktikan:
+
+```js
+async getWWebVersion() {
+    return await this.pupPage.evaluate(() => window.Debug.VERSION);
+}
+```
+
+Ia membaca dari halaman hidup dan tidak menyentuh cache versi sama sekali.
+
+### Yang menyembuhkannya, terukur
+
+```
+sebelum : 4384 MB / 33 proses Chromium
+sesudah : 1155 MB / 10 proses Chromium
+penautan: gagal berjam-jam  ->  ready < 20 detik
+```
+
+`pm2 stop` menutup Chromium sampai tuntas lewat `shutdown()` — dibuktikan: 0
+proses tersisa untuk dimatikan paksa sesudahnya, sementara 16 proses
+`chrome.exe` milik pemakai tidak tersentuh.
+
+### Kenapa ketiga jalan keluar diam
+
+Dipatok `tindakanKoneksi()` di `core/koneksiDiagnosa.ts`, 5 uji, dan pagar
+kunci-matinya dibuktikan MENGGIGIT:
+
+```
+keluarSesi.bisa dibalik ke true saat penautan tersangkut
+  × penautan tersangkut: keluar sesi DIMATIKAN, karena ia menuntut halaman yang belum jadi
+  Tests: 1 failed, 12 passed
+```
+
+**Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 63 suite / 1143 uji,
+`npm run build` lolos, penanda perubahan ditemukan di `.next/server`.
