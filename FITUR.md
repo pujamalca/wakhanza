@@ -777,6 +777,46 @@ Kedua bagiannya bergerak berlawanan dari 045: yang ditulis lebih ringan (kesalah
 
 `npm run dryrun:formulir` memainkan seluruh percakapan apa adanya tanpa mengirim atau menulis apa pun, dan **keluar dengan kode 1 bila ada formulir AKTIF yang tidak akan pernah menjawab** (tanpa pertanyaan, tanpa kata kunci, penutup kosong, atau tipe `pilihan` berpilihan kurang dari dua). Yang nonaktif tidak menggagalkan -- formulir yang masih disusun staf memang belum lengkap, dan pemeriksaan yang berbunyi setiap hari berhenti dibaca.
 
+### Tujuan formulir, dan saringan tanggal (`migrations/053`)
+
+Dua kekurangan yang dilaporkan bersamaan, dan yang kedua jauh lebih kecil daripada yang pertama.
+
+**Sampai 053, formulir yang tersimpan tidak memberi tahu siapa pun.** Seluruh jalurnya lengkap kecuali ujungnya: pasien mengetik kata kunci, dituntun sampai selesai, menerima kalimat penutup -- lalu barisnya diam di `wa_form_entry` sampai ada yang kebetulan membuka `/formulir`.
+
+Yang membuat itu bukan sekadar ketidaknyamanan adalah kalimat penutupnya sendiri. `actions.ts` **MEWAJIBKAN** pesan penutup diisi, persis supaya pasien tahu apa yang terjadi berikutnya -- dan bunyinya hampir selalu "petugas akan menghubungi Anda". Jadi sistem menjanjikan tindak lanjut yang tidak dikabarkan kepada seorang pun. Formulir yang paling berguna (permintaan obat, lapor kerusakan alat) justru yang paling terluka: gunanya seluruhnya terletak pada CEPATNYA sampai ke orang yang bertugas.
+
+**Tabel SENDIRI, bukan menumpang `template_target`.** Tabel itu berkunci `trigger_code`, sementara tujuan di sini melekat pada sebuah FORMULIR; menumpangnya menuntut nilai palsu seperti `FORMULIR:7`. Persis bentuk yang sudah ditolak `migrations/018` saat pertanyaan yang sama muncul antara `template_target` dan `farmasi_target` -- dan taruhannya nyata, karena `trigger_code` dipakai `Template.findByPk()` serta seluruh penyaring `/antrean` dan `/log`, jadi nilai yang bukan kode pemicu akan muncul di tempat yang menganggapnya kode pemicu. Bentuk kolomnya tetap dibuat kembar dengan kedua tabel tujuan yang sudah ada, divalidasi `core/farmasiTarget.ts` yang sama: tiga tabel dengan tiga bentuk berbeda adalah tiga tempat yang bisa menyimpang.
+
+**Rinciannya per formulir, bawaan `ringkas`, dan arah jatuhnya adalah keputusan keamanan.** Isi jawaban adalah teks yang diketik pasien -- bisa memuat keluhan -- dan tujuannya grup yang keanggotaannya diatur di luar sistem ini.
+
+| | Yang beredar |
+|---|---|
+| `ringkas` | nama formulir, waktu, berapa pertanyaan terisi. **Tanpa** isi jawaban, **tanpa** nomor |
+| `lengkap` | seluruh pasangan pertanyaan-jawaban + nomor penanya |
+
+`bacaRincian()` menjatuhkan nilai tak dikenal ke `ringkas`, bukan `lengkap`, dan itu bukan kehati-hatian yang malas: kesalahan ke arah `ringkas` diperbaiki dengan membuka dashboard sekali, sementara pesan yang telanjur masuk grup tidak bisa ditarik dari ponsel anggotanya. Dipatok uji yang dibuktikan MENGGIGIT -- arahnya dibalik, ujinya gagal.
+
+**Nomornya SEMUA atau TIDAK SAMA SEKALI, sengaja tanpa penyamaran.** Nomor bertopeng tidak menolong siapa pun: staf tetap tidak bisa menghubunginya, sementara awalan dan empat digit terakhirnya tetap beredar. Ia cuma terlihat seperti kehati-hatian. **`no_rkm_medis` TIDAK PERNAH ikut, di kedua mode** -- ia bukan tulisan pasien melainkan hasil penautan yang dikerjakan sistem ini, dan menyiarkan pasangan nomor-telepon-ke-nomor-rekam-medis ke grup memberi pembacanya kemampuan yang tidak ia miliki sebelum pesan itu masuk. Strukturnya yang menjaga: `IsiPemberitahuan` tidak punya medan itu sama sekali, jadi menambahkannya adalah galat kompilasi, bukan sekadar uji yang gagal.
+
+**`FORMULIR_MASUK` kode pemicu SENDIRI**, tidak menumpang `FORMULIR`, dan ketiga akibatnya berlawanan arah sehingga menumpang berarti salah pada ketiganya: penerimanya beda jenis (grup vs pasien, dan `/antrean` harus bisa membedakannya), `kuotaGrupHabis()` menghitung per `trigger_code`+`chat_id` sehingga pengabaran memakan jatah percakapan formulir grup itu, dan kunci idempotennya berangkat dari hal berbeda (`wa_form_entry.id` vs `waMessageId`).
+
+**WAJIB di `BYPASS_QUIET_HOURS`, dan ini syarat bukan kenyamanan.** Pasangannya `FORMULIR` sudah ada di sana, jadi pasien yang mengisi pukul 23.00 menerima kalimat penutupnya seketika. Tanpa baris ini, janji "petugas akan menghubungi" diucapkan pukul 23.00 sementara satu-satunya pihak yang bisa menepatinya baru diberi tahu pukul 07.00 -- sistem berbohong kepada pasien selama delapan jam, setiap malam, tanpa satu pun galat.
+
+**Sakelarnya adalah daftar tujuannya sendiri**, bukan `app_setting` baru. Tanpa satu pun tujuan aktif, tidak ada pesan yang berangkat -- yaitu perilaku 051 apa adanya, jadi migrasi ini tidak mengubah apa pun sampai seorang admin memasang tujuan pertamanya. Sakelar kedua di atasnya cuma akan jadi sesuatu yang bisa lupa dinyalakan, dengan gejala "sudah dipasang tapi tidak ada yang sampai".
+
+**Pagar "tujuan aktif terakhir" milik `template_target` SENGAJA tidak ditiru.** Di sana ia perlu karena mode `tujuan` sudah mencoret pasien sebagai penerima, sehingga membuang tujuan terakhir membuat pemicunya berhenti mengirim ke mana pun tanpa satu baris `outbox` pun sebagai jejak. Di sini tidak ada yang setara: jawabannya selalu tersimpan dan selalu terlihat di tab Masuk, dengan atau tanpa tujuan.
+
+**"Kirim uji" mengirim JAWABAN SUNGGUHAN yang terakhir masuk**, lewat `susunPemberitahuanFormulir()` yang sama dipakai worker, dalam mode rincian yang sedang berlaku. Kalimat contoh akan membuktikan lebih sedikit daripada yang dikira orang yang menekannya: yang benar-benar ingin dijawab admin ada dua -- "apakah kode grupnya benar" DAN "seberapa banyak yang akan beredar di sana" -- dan yang kedua hanya terjawab kalau yang dikirim persis bentuk yang nanti dikirim otomatis. Formulir yang belum punya jawaban mengirim kalimat yang MENGATAKAN ITU, bukan contoh karangan.
+
+**Penanda tujuan ditaruh di bawah nama formulir, bukan sebagai kolom ketujuh.** Tabelnya sudah punya enam, dan kolom ketujuh akan tersembunyi di bawah `lg` persis seperti yang sudah terjadi pada centang tujuan di `/farmasi` -- keterangan yang sengaja ditambahkan berakhir tak pernah terlihat justru di layar yang paling banyak dipakai.
+
+**Saringan tanggalnya FORM GET biasa**, bentuk yang sama dengan `/administrasi`: bisa dibagikan sebagai tautan, tombol maju/mundur peramban bekerja, dan tidak ada state klien yang bisa berbeda dari yang ditampilkan. Tiga hal yang menempel:
+
+- **`tab` dan `status` ikut sebagai input tersembunyi**, dan rentangnya ikut ke setiap tautan chip. Tanpa itu, menekan "Selesai" diam-diam melepas rentang yang baru disetel -- yang terlihat cuma daftar yang tiba-tiba lebih panjang, tanpa satu pun keterangan bahwa saringannya hilang.
+- **Jumlah tiap chip dihitung DI DALAM rentang, tapi tanpa saringan statusnya sendiri.** Ikut menyaring status membuat kelima chip berbunyi sama; tidak ikut menyaring rentang membuat chip berbunyi "Baru (12)" di atas tabel kosong, dan staf menyimpulkan halamannya rusak.
+- **Batasnya jam dinding, bukan tengah malam UTC.** `new Date('2026-08-17')` diuraikan JavaScript sebagai tengah malam UTC = 07.00 WIB, jadi rentang "17 Agustus" akan membuang tujuh jam pertama harinya dan menyeret tujuh jam pertama tanggal 18 ke dalamnya. Konstruktor per-komponen selalu berarti tengah malam waktu server. `sampai` berakhir 23:59:59.999, bukan tengah malamnya -- batas eksklusif akan membuang seluruh jawaban pada hari terakhir rentang yang baru saja dipilih staf sendiri.
+- **Ada tombol "Semua tanggal" terpisah** karena mengosongkan `<input type="date">` lalu menekan Terapkan TIDAK bekerja di sebagian peramban, dan staf berakhir terkunci di rentang yang tidak bisa dilepasnya.
+
 ### PENGINGAT KONTROL non-BPJS (`migrations/032`) -- padanan BPJS_KONTROL dari sisi Khanza sendiri
 
 Pemicu pasien ke-11, dan satu-satunya yang lahir dari **menu Khanza yang namanya nyaris sama dengan menu lain**. Khanza punya DUA:

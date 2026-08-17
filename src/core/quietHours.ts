@@ -250,6 +250,30 @@ const BYPASS_QUIET_HOURS = new Set([
    * minta; ini kebalikannya.
    */
   'FORMULIR',
+  /**
+   * FORMULIR_MASUK (053): pemberitahuan ke grup/petugas yang menindaklanjuti
+   * sebuah formulir. Penerimanya STAF, alasan yang sama dengan kedua pemicu
+   * farmasi di atas -- jam tenang melindungi orang yang sedang tidur di rumah,
+   * bukan unit yang justru menunggu pekerjaan masuk.
+   *
+   * Yang membuatnya bukan sekadar kenyamanan melainkan SYARAT: pasangannya
+   * `FORMULIR` sudah ada di daftar ini, jadi pasien yang mengisi formulir pukul
+   * 23.00 menerima kalimat penutupnya seketika -- kalimat yang oleh
+   * `actions.ts` DIWAJIBKAN berbunyi apa yang terjadi berikutnya, biasanya
+   * "petugas akan menghubungi Anda". Tanpa baris ini, janji itu diucapkan pukul
+   * 23.00 sementara satu-satunya pihak yang bisa menepatinya baru diberi tahu
+   * pukul 07.00. Sistem berbohong kepada pasien selama delapan jam, setiap
+   * malam, tanpa satu pun galat.
+   *
+   * Akibat keduanya sama dengan FARMASI_PENYERAHAN: seluruh permintaan semalam
+   * menumpuk lalu berangkat serentak pagi hari sebagai belasan pesan sekaligus
+   * -- persis pola beruntun yang memicu deteksi spam WhatsApp.
+   *
+   * Yang membatasi penyalahgunaannya bukan jam tenang melainkan bahwa ia
+   * mustahil berbunyi tanpa ada orang yang menyelesaikan seluruh formulir lebih
+   * dulu, ditambah `formulir.maks_per_nomor_per_hari`.
+   */
+  'FORMULIR_MASUK',
 ]);
 
 /** Dipakai saat ENQUEUE untuk menentukan scheduled_at outbox. */

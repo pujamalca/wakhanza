@@ -118,6 +118,7 @@ export const TRIGGER_LABEL: Record<string, string> = {
    * jelas satu percakapan.
    */
   FORMULIR: 'Formulir pasien',
+  FORMULIR_MASUK: 'Formulir — kabar ke tujuan',
   // Dua-duanya BUKAN pesan ke pasien. Labelnya menyebut "apotek" secara
   // eksplisit supaya baris di halaman Antrean dan Log tidak terbaca sebagai
   // pemberitahuan yang gagal sampai ke pasien -- penerimanya memang staf.

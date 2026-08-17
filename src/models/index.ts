@@ -19,6 +19,7 @@ export { WaCommandSession, type JenisSesi } from './WaCommandSession';
 export { WaForm } from './WaForm';
 export { WaFormField } from './WaFormField';
 export { WaFormEntry, parseJawaban, type StatusEntry, type JawabanTersimpan } from './WaFormEntry';
+export { WaFormTarget } from './WaFormTarget';
 export { FarmasiTarget } from './FarmasiTarget';
 export { BpjsTarget } from './BpjsTarget';
 export { ErmTarget } from './ErmTarget';

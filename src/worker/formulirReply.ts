@@ -6,10 +6,12 @@ import {
   WaForm,
   WaFormEntry,
   WaFormField,
+  WaFormTarget,
   parseKeywords,
   getSettingBool,
   getSettingNumber,
 } from '@/models';
+import { bacaRincian, susunPemberitahuanFormulir } from '@/core/waFormulirTujuan';
 import {
   cocokFormulir,
   mulaiFormulir,
@@ -22,7 +24,7 @@ import {
 } from '@/core/waFormulir';
 import { varsApaAdanya } from '@/core/template';
 import type { MatchMode } from '@/core/autoReply';
-import { buildIdempotencyKey } from '@/core/idempotency';
+import { buildIdempotencyKey, turunkanKunciTujuan } from '@/core/idempotency';
 import { loadAutoReplyContext, enqueueMessage } from './pipeline';
 import { logger, safeError, maskPhone } from '@/lib/logger';
 
@@ -55,6 +57,33 @@ import { logger, safeError, maskPhone } from '@/lib/logger';
  *     lalu pertanyaan sungguhan didiamkan tanpa satu pun galat.
  */
 export const TRIGGER_FORMULIR = 'FORMULIR';
+
+/**
+ * Pemberitahuan ke TUJUAN sebuah formulir (053) -- grup/petugas yang
+ * menindaklanjuti, bukan pasien.
+ *
+ * Kode SENDIRI, tidak menumpang `FORMULIR` di atasnya, dan ketiga akibatnya
+ * berlawanan arah sehingga menumpang berarti salah pada ketiganya sekaligus:
+ *
+ *   * **Penerimanya berbeda jenis.** `FORMULIR` pergi ke pasien; yang ini ke
+ *     alamat yang dipasang admin. Satu kode berarti halaman Antrean dan Log
+ *     tidak bisa lagi membedakan "balasan ke pasien" dari "salinan ke grup",
+ *     dan itu justru pembedaan yang paling perlu terbaca saat menelusuri ke
+ *     mana sebuah pesan pergi.
+ *   * **Kuota grup dihitung per `trigger_code` + `chat_id`** (`kuotaGrupHabis()`
+ *     di `stokReply.ts`). Menumpang berarti pemberitahuan ke sebuah grup
+ *     memakan jatah percakapan formulir grup itu -- alasan yang sama persis
+ *     yang membuat `FORMULIR` dulu tidak menumpang `AUTO_REPLY`.
+ *   * **Kunci idempotennya berangkat dari hal yang berbeda.** `FORMULIR`
+ *     berkunci pada `waMessageId` (satu langkah percakapan); yang ini pada
+ *     `wa_form_entry.id` (satu permintaan yang selesai). Berbagi kode berarti
+ *     kedua ruang kunci itu bertumpuk di kolom `uq_idem` yang sama.
+ *
+ * SENGAJA tidak di `OPT_OUT_TRIGGERS`: yang bisa meminta berhenti adalah
+ * pasien, dan pasien bukan penerima pesan ini. Permintaan berhentinya tetap
+ * menghentikan `FORMULIR` yang memang ditujukan kepadanya.
+ */
+export const TRIGGER_FORMULIR_MASUK = 'FORMULIR_MASUK';
 
 /** Sesi formulir memakai tabel wizard yang sama, dibedakan kolom `jenis`. */
 const JENIS_SESI = 'formulir';
@@ -478,6 +507,112 @@ async function simpanEntry(
     { asal: jejak(pesan), formulir: simpan.nama, entryId: baris.id, tertaut: noRkmMedis !== null },
     'formulir tersimpan',
   );
+
+  await kabarkanKeTujuan(baris, pesan, simpan.jawaban);
+}
+
+/**
+ * Mengabarkan satu jawaban yang baru tersimpan ke tujuan formulirnya (053).
+ *
+ * ==========================================================================
+ * Dipanggil SESUDAH barisnya tersimpan, dan urutan itu mengikat
+ * ==========================================================================
+ *
+ * Kalau pengabaran gagal, yang terjadi adalah permintaan yang tercatat rapi di
+ * dashboard tapi tidak dikabarkan -- keadaan yang sama persis dengan sebelum
+ * 053 ada, dan yang bisa ditemukan siapa pun yang membuka `/formulir`. Urutan
+ * sebaliknya menghasilkan grup yang dikabari tentang permintaan yang tidak
+ * pernah tersimpan, lalu mencarinya di dashboard dan tidak menemukan apa pun.
+ *
+ * TIDAK PERNAH melempar, dengan alasan yang lebih keras daripada di
+ * `catatPesanMasuk()`: yang memanggilnya sudah menulis `wa_form_entry` DAN
+ * sudah akan mengirim kalimat penutup ke pasien. Galat yang lolos dari sini
+ * membatalkan keduanya di mata pemanggil, sehingga pasien yang permintaannya
+ * SUDAH tersimpan menerima galat alih-alih kalimat penutupnya.
+ *
+ * Tanpa satu pun tujuan aktif, fungsi ini tidak mengirim apa pun -- yaitu
+ * perilaku 051 apa adanya. Daftar tujuannya sendiri yang jadi sakelar; lihat
+ * (3) di migrations/053.
+ */
+async function kabarkanKeTujuan(
+  baris: WaFormEntry,
+  pesan: PesanFormulirMasuk,
+  jawaban: readonly { pertanyaan: string; jawaban: string }[],
+): Promise<void> {
+  try {
+    const tujuan = await WaFormTarget.findAll({
+      where: { formId: baris.formId, isActive: true },
+      order: [['id', 'ASC']],
+    });
+    if (tujuan.length === 0) return;
+
+    const form = await WaForm.findByPk(baris.formId, { attributes: ['tujuanRincian'] });
+    /**
+     * Formulir yang sudah DIHAPUS sementara tujuannya masih ada: jatuh ke
+     * `ringkas` lewat `bacaRincian(undefined)`, bukan dilewati. Barisnya tetap
+     * layak dikabarkan -- nama formulir dan seluruh pertanyaannya sudah
+     * dibekukan ke dalamnya, jadi yang hilang cuma setelan rinciannya.
+     */
+    const rincian = bacaRincian(form?.tujuanRincian);
+
+    const teks = susunPemberitahuanFormulir(
+      {
+        formNama: baris.formNama,
+        waktu: baris.createdAt,
+        phoneE164: baris.phoneE164,
+        dariGrup: pesan.jenis === 'grup',
+        jawaban,
+      },
+      rincian,
+    );
+
+    /**
+     * Berkunci pada `wa_form_entry.id`, bukan `waMessageId`: yang dikabarkan
+     * adalah satu PERMINTAAN YANG SELESAI, dan id barisnya satu-satunya
+     * penanda yang tetap benar sekalipun pesan terakhirnya diserahkan ulang
+     * whatsapp-web.js sesudah sesi dipulihkan.
+     */
+    const kunci = buildIdempotencyKey(TRIGGER_FORMULIR_MASUK, baris.id);
+    const ctx = { ...(await loadAutoReplyContext(teks)), triggerCode: TRIGGER_FORMULIR_MASUK };
+
+    for (const t of tujuan) {
+      await enqueueMessage(
+        {
+          // Alamat tujuan WAJIB masuk kunci -- tanpa itu seluruh tujuan berbagi
+          // satu kunci dan hanya yang pertama yang lolos `uq_idem`, tanpa satu
+          // pun galat karena INSERT-nya memang `ignoreDuplicates`.
+          idempotencyKey: turunkanKunciTujuan(kunci, t.chatId),
+          /**
+           * null, walau `baris.noRkmMedis` ada di tangan. Mengisinya menautkan
+           * baris `outbox` yang isinya SENGAJA tanpa no. RM (lihat
+           * `core/waFormulirTujuan.ts`) kepada seorang pasien di halaman
+           * Antrean/Log -- tautan yang tidak pernah diminta siapa pun dan yang
+           * membatalkan separuh gunanya pagar di sana.
+           */
+          noRkmMedis: null,
+          rawPhone: null,
+          chatId: t.chatId,
+          eventAt: new Date(),
+          // Teks yang diketik PASIEN ikut di dalamnya. Tanpa varsApaAdanya,
+          // `{kontak_rs}` yang diketik pasien akan diganti nomor rumah sakit,
+          // dan `{apa pun}` yang tak dikenal diganti string kosong -- jawabannya
+          // lenyap dari pesan yang seharusnya membuktikan apa yang tercatat.
+          vars: varsApaAdanya(teks),
+        },
+        ctx,
+      );
+    }
+
+    logger.info(
+      { formulir: baris.formNama, entryId: baris.id, tujuan: tujuan.length, rincian },
+      'jawaban formulir dikabarkan ke tujuan',
+    );
+  } catch (err) {
+    logger.error(
+      { asal: jejak(pesan), entryId: baris.id, ...safeError(err) },
+      'gagal mengabarkan jawaban formulir ke tujuan -- barisnya tetap tersimpan dan terlihat di dashboard',
+    );
+  }
 }
 
 /**

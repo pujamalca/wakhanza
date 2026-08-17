@@ -576,7 +576,7 @@ Hasil nyata di database ini: 8.118 pasien, 4.834 (59,5%) terpakai -- **angka yan
 
 ## Yang masih perlu keputusan rumah sakit (bukan teknis)
 
-Dua puluh lima keputusan, dan **tidak satu pun boleh diambil sepihak oleh siapa
+Dua puluh enam keputusan, dan **tidak satu pun boleh diambil sepihak oleh siapa
 pun yang menulis kode** — semuanya menentukan data siapa mengalir ke mana, atau
 mengirim pesan sungguhan ke pihak ketiga sungguhan. Kode sudah membatasi diri
 sejauh yang bisa dilakukan kode; sisanya kebijakan.
@@ -616,6 +616,7 @@ apa yang ditolak, dan jalan tengah apa yang tersedia. Tabel ini indeksnya.
 | BALASAN OTOMATIS: siapa bertanggung jawab atas isinya | `autoreply.enabled` | MENYALA |
 | PERINTAH WA: siapa boleh menulis aturan, dari alamat apa | `wa_command_admin` | menyala; aturan baru lahir nonaktif |
 | FORMULIR: apa yang boleh diminta pasien tuliskan | `formulir.enabled` | MENYALA |
+| FORMULIR: ke grup mana jawabannya dikabarkan, dan apakah ISI jawaban ikut | `wa_form_target` + `wa_form.tujuan_rincian` | belum ada satu tujuan pun; bawaan `ringkas` |
 
 ## Yang sengaja ditolak — jangan diusulkan ulang tanpa alasan baru
 

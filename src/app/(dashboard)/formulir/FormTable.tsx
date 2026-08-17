@@ -19,7 +19,9 @@ import {
   cellClass,
 } from '@/components/ui';
 import { MAKS_PERTANYAAN, type TipeField } from '@/core/waFormulir';
+import type { RincianTujuan } from '@/core/waFormulirTujuan';
 import { createFormAction, updateFormAction, deleteFormAction, toggleFormAction } from './actions';
+import { TujuanFormulirModal, type TujuanFormRow, type GrupRow } from './TujuanFormulirModal';
 
 export interface FieldRow {
   label: string;
@@ -41,14 +43,26 @@ export interface FormRow {
   bolehGrup: boolean;
   fields: FieldRow[];
   jumlahMasuk: number;
+  /** 053: ke mana jawabannya dikabarkan, dan seberapa rinci. */
+  tujuanRincian: RincianTujuan;
+  tujuan: TujuanFormRow[];
 }
 
 const FIELD_BARU: FieldRow = { label: '', tipe: 'teks', wajib: true, pilihan: [], maksPanjang: 0 };
 
-export function FormTable({ forms }: { forms: FormRow[] }) {
+export function FormTable({
+  forms,
+  grup,
+  waSiap,
+}: {
+  forms: FormRow[];
+  grup: GrupRow[];
+  waSiap: boolean;
+}) {
   const [editing, setEditing] = useState<FormRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<FormRow | null>(null);
+  const [tujuanUntuk, setTujuanUntuk] = useState<FormRow | null>(null);
   const [pendingDelete, startDelete] = useTransition();
   const [pendingToggle, startToggle] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -106,11 +120,36 @@ export function FormTable({ forms }: { forms: FormRow[] }) {
               {forms.map((f) => (
                 <tr key={f.id} className={rowClass}>
                   <td className={`${cellClass} tabular-nums text-muted-foreground`}>{f.priority}</td>
+                  {/*
+                    Penanda tujuan ditaruh DI BAWAH NAMA, bukan sebagai kolom
+                    ketujuh. Kolom ketujuh akan tersembunyi di bawah `lg` persis
+                    seperti yang terjadi pada centang tujuan di `/farmasi`,
+                    sehingga keterangan yang sengaja ditambahkan berakhir tak
+                    pernah terlihat justru di layar yang paling banyak dipakai.
+                  */}
                   <td className={cellClass}>
                     <div className="font-medium">{f.nama}</div>
                     {f.bolehGrup && (
-                      <span className="text-caption text-muted-foreground">boleh diisi dari grup</span>
+                      <span className="block text-caption text-muted-foreground">boleh diisi dari grup</span>
                     )}
+                    {(() => {
+                      const aktif = f.tujuan.filter((t) => t.isActive).length;
+                      if (aktif === 0) {
+                        return (
+                          <span className="block text-caption text-muted-foreground">
+                            tanpa tujuan — tidak ada yang dikabari
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="block text-caption text-muted-foreground">
+                          {aktif} tujuan ·{' '}
+                          <span className={f.tujuanRincian === 'lengkap' ? 'text-warning' : undefined}>
+                            {f.tujuanRincian === 'lengkap' ? 'jawaban ikut' : 'ringkas'}
+                          </span>
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className={`${cellClass} hidden md:table-cell`}>
                     <span className="font-mono text-caption">{f.kataKunci.join(', ')}</span>
@@ -143,6 +182,9 @@ export function FormTable({ forms }: { forms: FormRow[] }) {
                       >
                         {f.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                       </Button>
+                      <Button variant="ghost" size="xs" onClick={() => setTujuanUntuk(f)}>
+                        Tujuan
+                      </Button>
                       <Button variant="ghost" size="xs" onClick={() => setEditing(f)}>
                         Ubah
                       </Button>
@@ -160,6 +202,19 @@ export function FormTable({ forms }: { forms: FormRow[] }) {
 
       {creating && <FormModal form={null} onClose={() => setCreating(false)} />}
       {editing && <FormModal form={editing} onClose={() => setEditing(null)} />}
+
+      {tujuanUntuk && (
+        <TujuanFormulirModal
+          key={tujuanUntuk.id}
+          formId={tujuanUntuk.id}
+          formNama={tujuanUntuk.nama}
+          rincianAwal={tujuanUntuk.tujuanRincian}
+          targets={tujuanUntuk.tujuan}
+          grup={grup}
+          waSiap={waSiap}
+          onClose={() => setTujuanUntuk(null)}
+        />
+      )}
 
       <ConfirmDialog
         open={deleting !== null}

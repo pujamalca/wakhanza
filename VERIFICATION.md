@@ -7629,3 +7629,94 @@ Yang membuat ini bukti penuh: sebelum perbaikan, KEDUA baris ini tidak akan ada
 di mana pun. Sisi keluar `280925****@lid` khususnya — alamat LID adalah bentuk
 yang dulu 0 dari 114 kali gagal ditautkan, dan sekarang justru bentuk itu yang
 menyimpan balasan pertama.
+
+---
+
+## Tujuan formulir, dan saringan tanggal (`migrations/053`)
+
+Keluhan: "di formulir ini harusnya bisa saya tentukan ke tujuan untuk tanya apa
+saja jawaban masuk, bisa juga memilih dari tanggal - tanggal."
+
+### Uji unit — 16, dan KETIGA pagarnya MENGGIGIT
+
+```
+$ npx jest src/core/waFormulirTujuan
+Tests: 16 passed, 16 total
+```
+
+Tiap pagar dirusak sengaja, satu per satu, lalu dikembalikan:
+
+```
+ringkas dibuat ikut membawa nomor + isi jawaban
+  x TIDAK memuat satu pun teks jawaban pasien
+  x TIDAK memuat nomor telepon, bahkan tidak sepotong pun
+  Tests: 2 failed, 14 passed
+
+bacaRincian dijatuhkan ke 'lengkap' alih-alih 'ringkas'
+  x menjatuhkan nilai tak dikenal ke ringkas, bukan lengkap
+  Tests: 1 failed, 15 passed
+```
+
+`no_rkm_medis` TIDAK dipatok uji saja melainkan STRUKTUR: `IsiPemberitahuan`
+tidak punya medan itu, jadi menambahkannya galat kompilasi. Ujinya tetap ada
+(membentuk objeknya seperti baris `wa_form_entry`, yang memang membawa kolom itu
+tepat di sebelah `phoneE164`) karena itulah bentuk yang ada di tangan pemanggil.
+
+### Grant per-tabel: DIBUKTIKAN tidak diwarisi, untuk kesekian kalinya
+
+Lewat kolam koneksi aplikasi, bukan akun lain yang kebetulan lebih berhak:
+
+```
+[2] hak akses lewat wakhanza_rw
+   OK    INSERT
+   GAGAL UPDATE: UPDATE command denied to user 'wakhanza_rw'@'localhost' for table 'wa_form_target'
+   GAGAL DELETE: DELETE command denied to user 'wakhanza_rw'@'localhost' for table 'wa_form_target'
+```
+
+Persis seperti yang tertulis di ARCHITECTURE §9.5: INSERT lolos lewat grant
+skema-lebar, UPDATE/DELETE tidak. Diterapkan lewat akun berhak grant.
+
+### Melawan database produksi, tanpa mengirim apa pun
+
+```
+[1] wa_form 1 | wa_form_entry 3 | wa_form_target 1
+   #2 "Permintaan Obat" aktif=true rincian="ringkas" -> bacaRincian=ringkas
+[2] OK  baris yang rincian-nya tak terbaca: 0
+[3] penyusun pesan atas jawaban SUNGGUHAN
+   OK  ringkas TIDAK memuat nomor
+   OK  ringkas TIDAK memuat isi jawaban
+   OK  no. RM tidak muncul di KEDUA mode
+[4] OK  rentang tahun 2000 menyaring habis: 0
+   OK  rentang seabad = seluruhnya: 3/3
+```
+
+Baris `wa_form` yang sudah ada mewarisi `ringkas` dari bawaan kolomnya — jadi
+migrasi ini tidak mengubah apa pun yang sedang berjalan, dan tidak ada satu pun
+jawaban yang mulai beredar sebagai efek sampingnya.
+
+### Jebakan tengah malam UTC: TERUKUR 7 jam, bukan diperkirakan
+
+```
+new Date('2026-08-17') -> Mon Aug 17 2026 07:00:00
+per-komponen           -> Mon Aug 17 2026 00:00:00
+OK  selisihnya 7 jam
+```
+
+Tanpa konstruktor per-komponen, rentang "17 Agustus" membuang tujuh jam pertama
+harinya dan menyeret tujuh jam pertama tanggal 18 ke dalamnya.
+
+### Bentuk pesannya diperiksa terhadap ketiga entry sungguhan
+
+Tanpa mencetak isi pasien:
+
+```
+entry #4: 2 pasang | baris pesan lengkap: 8 | jawaban 19h, 11h
+entry #3: 2 pasang | baris pesan lengkap: 8 | jawaban 14h, 0h
+entry #2: 2 pasang | baris pesan lengkap: 8 | jawaban 22h, 11h
+```
+
+Entry #3 punya jawaban sepanjang NOL huruf, jadi jalur `(dilewati)` teruji
+terhadap data sungguhan, bukan cuma data karangan uji unit.
+
+**Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 63 suite / 1138 uji,
+`npm run build` lolos.

@@ -22,6 +22,13 @@ export class WaForm extends Model<InferAttributes<WaForm>, InferCreationAttribut
   declare isActive: CreationOptional<boolean>;
   /** Formulir ini boleh diisi dari dalam grup WhatsApp. Bawaan tidak. */
   declare bolehGrup: CreationOptional<boolean>;
+  /**
+   * Seberapa rinci jawaban dikabarkan ke `wa_form_target` (053): `ringkas` atau
+   * `lengkap`. Selalu dibaca lewat `bacaRincian()` di `core/waFormulirTujuan.ts`,
+   * jangan dibandingkan langsung -- nilai yang belum termigrasi harus jatuh ke
+   * `ringkas`, bukan menyiarkan seluruh jawaban pasien ke grup.
+   */
+  declare tujuanRincian: CreationOptional<string>;
   declare createdBy: string;
   declare updatedBy: string | null;
   declare createdAt: CreationOptional<Date>;
@@ -39,6 +46,12 @@ WaForm.init(
     pesanPenutup: { type: DataTypes.TEXT, allowNull: false, field: 'pesan_penutup' },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_active' },
     bolehGrup: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'boleh_grup' },
+    tujuanRincian: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: 'ringkas',
+      field: 'tujuan_rincian',
+    },
     createdBy: { type: DataTypes.STRING(64), allowNull: false, field: 'created_by' },
     updatedBy: { type: DataTypes.STRING(64), allowNull: true, field: 'updated_by' },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
