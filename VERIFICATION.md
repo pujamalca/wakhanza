@@ -7466,3 +7466,143 @@ UPDATE template SET tujuan_mode = 'tujuan' WHERE trigger_code = 'QUEUE_REG';
 Satu baris, tanpa restart worker — `tujuan_mode` dan `batas_pasien_harian`
 dibaca ulang tiap siklus. Yang TIDAK ikut tertarik: pesan yang telanjur
 terkirim.
+
+---
+
+## `inbound_message` memuat DUA arah, dan setiap pembacanya wajib menyaring
+
+Keluhan: "di pesan masuk yang terbaca hanya chat dari orang lain, balasannya
+tidak tersimpan."
+
+### Akar masalah, dipisah menurut BENTUK bukan menurut gejala
+
+```
+outbox.trigger_code = 'BALAS_MANUAL'  ->  0 baris, SELAMANYA
+outbox.trigger_code = 'AUTO_REPLY'    -> 32 baris
+pesan masuk 7 hari  : perorangan 191, grup 153, 49 percakapan
+```
+
+Tombol balas di dashboard **tidak pernah ditekan sekali pun** sejak ada. Jadi
+sisi keluar percakapan kosong bukan karena tidak ada balasan.
+
+Log worker menjawab ke mana perginya. 4 hari (14-17 Agustus), pesan keluar yang
+tidak punya baris `outbox`:
+
+```
+@lid        10   balasan ke satu nomor, diketik manusia   -> HILANG
+@g.us        9   diketik manusia di grup                  -> HILANG
+@broadcast  15   unggah status WhatsApp, bukan percakapan
+```
+
+Pendengar `message_create` SUDAH menerima semuanya; barisnya berakhir di
+`logger.debug` lalu `return`. Diskriminatornya pun sudah ada —
+`sebab: 'tanpa-kandidat'` dari `pilihBarisTertaut()`.
+
+### Pagar yang membuat penggabungannya sah
+
+Diukur SEBELUM ditulis, dan seandainya jawabannya lain rancangannya gugur:
+
+```
+chat_id pesan masuk 7 hari
+  lid  / perorangan : 191   (186 punya nomor terpetakan)
+  g.us / grup       : 153
+```
+
+Perorangan seluruhnya `@lid`, dan `message.to` pantulan pesan keluar juga
+`@lid` — identitas LID stabil per orang, jadi keduanya bergabung lewat
+`ix_chat (chat_id, created_at)` yang sudah ada. Kalau tidak sama, balasannya
+tersimpan lalu mendarat di percakapan orang lain.
+
+### Uji unit — 28, dan KETIGA pagarnya MENGGIGIT
+
+```
+$ npx jest src/core/tautPesanKeluar src/core/percakapan
+Tests: 28 passed, 28 total
+```
+
+Tiap pagar dirusak sengaja, satu per satu, lalu dikembalikan:
+
+```
+pagar sebab dilepas  (`if (sebab !== 'tanpa-kandidat')` -> void)
+  × TIDAK mencatat bila kandidat outbox ADA tapi penautannya gagal
+  Tests: 1 failed, 18 passed
+
+pagar alamat dilepas (`return true`)
+  × TIDAK mencatat unggahan status
+  × TIDAK mencatat saluran maupun alamat yang belum dikenal
+  Tests: 2 failed, 17 passed
+
+arah dipaksa 'masuk' di gabungPercakapan()
+  × menempatkan balasan yang diketik dari ponsel di sisi KELUAR
+  × balasan manual tidak membawa status maupun konfirmasi milik outbox
+  Tests: 2 failed, 7 passed
+```
+
+Yang TETAP lolos tiap kali adalah uji lama — perbaikannya MENAMBAH, bukan
+menulis ulang yang sudah bekerja.
+
+### Putar ulang melawan percakapan produksi sungguhan
+
+Tanpa mengirim apa pun: `catatPesanKeluarManual()` yang SAMA dipakai pendengar
+dipanggil atas percakapan `@lid` yang benar-benar ada, lalu ketiga sisi bacanya
+diperiksa dan barisnya dihapus lagi.
+
+```
+[1] pagar layak/tidak
+   OK  lid / tanpa-kandidat -> true
+   OK  lid / tak-cocok      -> false
+   OK  broadcast / tanpa-kandidat -> false
+[2] menulis baris keluar
+   OK  arah=keluar jenis=perorangan chat cocok=true teks=true
+[3] sisi baca
+   OK  muncul di percakapan       : 1
+   OK  TIDAK di daftar Pesan masuk: 0
+   OK  TIDAK di "Belum dibalas"   : 0
+[4] pagar isi-sudah-ada-di-outbox
+   OK  isi yang sama dengan baris outbox DITOLAK
+[5] baris uji dihapus: 1
+```
+
+Baris [4] tidak ikut terhapus karena memang tidak pernah ditulis — itulah
+buktinya pagar ketiga bekerja. Ia yang menutup pesan tertahan jam tenang:
+masuk antrean 22:00, berangkat 07:00, sembilan jam di luar jendela penautan 30
+menit, dan tanpa pagar itu gelembungnya muncul dua kali.
+
+### Pemasangan, dan satu penautan yang tersangkut
+
+Empat pemeriksaan pra-terbang: `status: ready`, denyut 4 dtk, antrean
+`pending`/`sending` **0**, uptime **5 jam**.
+
+```
+13:38  pm2 restart wakhanza-worker wakhanza-web  -> satu pid masing-masing
+13:38  proses lama: "sesi WhatsApp ditutup rapi"  (state sesi utuh)
+13:38  fase=menautkan status=None                 (watchdog menolak status basi)
+13:41  BATAS_INIT_MS jatuh pada detik ke-180, keluar lewat shutdown()
+13:41  perintah sambung ulang dari /koneksi       -> restart lagi
+13:41  authenticating -> ready                    (8 detik)
+```
+
+Bukan mode kegagalan baru: seluruh pagar bekerja sebagaimana tertulis, dan
+sesinya pulih sendiri. `wa_session` sesudahnya `status: ready`,
+`command: none`, denyut 11 dtk.
+
+Sumber perintah sambung ulang dilacak sampai tuntas: satu-satunya penulis
+`command = 'reconnect'` adalah tombol di `/koneksi` dan `/api/koneksi/command`
+— tidak ada jalur otomatis, jadi itu tekanan manusia, bukan kaskade.
+
+### Temuan sampingan: `npx pm2` BUKAN `pm2`
+
+```
+$ npx pm2 list
+>>>> In-memory PM2 is out-of-date, do: $ pm2 update
+In memory PM2 version: 7.0.1
+Local PM2 version: 5.2.2
+```
+
+Kebalikan dari yang pernah tercatat sebagai tersangka kaskade restart. `npx`
+mengambil salinan 5.2.2 di `node_modules`; `pm2` polos adalah global 7.0.1 —
+sama dengan daemonnya. Kemungkinan besar inilah asal-usul dugaan itu. `npx pm2`
+juga tidak menampilkan seluruh proses.
+
+**Gerbang**: `tsc --noEmit` 0, `eslint .` 0, `npm test` 62 suite / 1122 uji,
+`npm run build` lolos, penanda perubahan ditemukan di `.next/server`.

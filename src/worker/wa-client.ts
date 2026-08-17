@@ -22,9 +22,9 @@ import {
   phoneFromAddress,
   type PesanKeluarBerid,
 } from '@/core/waAddress';
-import { catatPesanMasuk } from './inboundLog';
+import { catatPesanKeluarManual, catatPesanMasuk } from './inboundLog';
 import { ackBolehMenimpa, isTingkatAck, labelAck } from '@/core/waAck';
-import { pilihBarisTertaut } from '@/core/tautPesanKeluar';
+import { layakCatatSebagaiBalasanManual, pilihBarisTertaut } from '@/core/tautPesanKeluar';
 import { resolveMediaPath } from '@/lib/mediaStorage';
 
 /**
@@ -820,6 +820,24 @@ async function catatIdPesanKeluar(pesan: Message): Promise<void> {
       const jejak = { tujuan: jejakId(tujuan), kandidat: kandidat.length, panjangTeks: body.length, sebab: hasil.sebab };
       if (hasil.sebab === 'tanpa-kandidat') {
         logger.debug(jejak, 'pesan keluar tanpa baris outbox -- diketik manusia dari nomor ini, bukan kiriman sistem');
+        /**
+         * Dan justru INILAH balasan yang sebenarnya dipakai rumah sakit ini.
+         *
+         * Sampai sini keadaan itu cuma dicatat lalu dilepas, karena `outbox`
+         * satu-satunya sumber sisi keluar percakapan -- padahal `outbox` hanya
+         * memuat pesan yang lahir di sini. Terukur 17 Agustus 2026: tombol balas
+         * di dashboard NOL baris selamanya, sementara 19 balasan manusia dalam 4
+         * hari lewat begitu saja. Halaman percakapan karena itu menampilkan
+         * pertanyaan pasien berderet tanpa satu pun jawaban, padahal jawabannya
+         * sudah diberikan -- dari ponsel.
+         *
+         * Keputusan LAYAK/TIDAK tinggal di `core/tautPesanKeluar.ts` supaya bisa
+         * diuji tanpa database maupun Chromium; ia yang menyingkirkan unggahan
+         * status, saluran, dan alamat yang belum dikenal.
+         */
+        if (layakCatatSebagaiBalasanManual(tujuan, hasil.sebab)) {
+          await catatPesanKeluarManual(pesan, id);
+        }
       } else {
         logger.warn(
           jejak,

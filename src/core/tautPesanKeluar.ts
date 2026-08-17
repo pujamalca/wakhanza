@@ -57,7 +57,7 @@
  * daftar kandidat.
  */
 
-import { isGroupAddress, isLidAddress, parseWaAddress } from './waAddress';
+import { isGroupAddress, isIndividualAddress, isLidAddress, parseWaAddress } from './waAddress';
 
 /** Bentuk minimal sebuah baris `outbox` yang dibutuhkan untuk mencocokkan tujuannya. */
 export interface BarisTujuan {
@@ -120,4 +120,48 @@ export function pilihBarisTertaut<T extends BarisTujuan>(kandidat: readonly T[],
   if (peroranganTunggal) return { baris: peroranganTunggal };
   if (perorangan.length > 1) return { baris: null, sebab: 'ambigu' };
   return { baris: null, sebab: 'tak-cocok' };
+}
+
+/**
+ * Apakah pesan keluar yang GAGAL ditautkan layak dicatat sebagai balasan yang
+ * diketik manusia dari ponsel nomor rumah sakit.
+ *
+ * ## Kenapa ini perlu ada
+ *
+ * Sisi keluar sebuah percakapan dibaca dari `outbox`, dan `outbox` adalah
+ * antrean kirim -- ia hanya memuat pesan yang lahir DI SINI. Balasan yang
+ * diketik petugas di aplikasi WhatsApp tidak pernah melewatinya, jadi ia tidak
+ * tersimpan di mana pun. Terukur 17 Agustus 2026, dan angkanya membalik
+ * dugaan: `BALAS_MANUAL` (tombol balas di dashboard) **nol baris selamanya**,
+ * sementara dalam 4 hari ada 19 pesan keluar manusia yang dibuang -- 10
+ * perorangan, 9 grup. Jadi bukan fitur balas yang kurang dipakai; balasan
+ * sungguhannya memang lahir di luar jangkauan sistem ini.
+ *
+ * Pendengar `message_create` sebenarnya SUDAH menerima semuanya. Diskriminator
+ * yang membedakan "buatan mesin" dari "diketik orang" pun sudah dihitung untuk
+ * keperluan lain -- `sebab` dari `pilihBarisTertaut()`. Yang kurang cuma
+ * keputusan untuk menyimpannya.
+ *
+ * ## Dua pagar, dan keduanya menggigit
+ *
+ * 1. **Hanya `tanpa-kandidat`.** `tak-cocok` dan `ambigu` berarti barisnya ADA
+ *    di `outbox` -- pesannya buatan mesin dan sudah tampil di sisi keluar
+ *    percakapan; yang gagal cuma penautan id-nya. Mencatatnya lagi di sini
+ *    menggandakan gelembungnya, dan yang tergandakan justru pesan sistem ke
+ *    pasien.
+ * 2. **Hanya alamat percakapan.** Unggahan status (`@broadcast`) menghasilkan
+ *    `message_create`-nya sendiri dan jumlahnya MELEBIHI balasan sungguhan (15
+ *    dari 34 dalam 4 hari). Ia bukan percakapan dengan siapa pun. Saluran dan
+ *    server yang belum dikenal ikut ditolak dengan alasan yang sama seperti
+ *    daftar-IZIN di `core/waAddress.ts`: bentuk asing tidak boleh otomatis
+ *    diperlakukan sebagai percakapan.
+ *
+ * Pagar KETIGA tidak bisa ditaruh di sini karena ia menyentuh database, dan
+ * pemanggilnya yang memegangnya: satu baris `outbox` beridentik isi di luar
+ * jendela 30 menit (pesan yang tertahan jam tenang semalaman) juga menghasilkan
+ * `tanpa-kandidat`. Lihat `catatPesanKeluarManual()`.
+ */
+export function layakCatatSebagaiBalasanManual(tujuan: string, sebab: SebabGagalTaut): boolean {
+  if (sebab !== 'tanpa-kandidat') return false;
+  return isIndividualAddress(tujuan) || isGroupAddress(tujuan);
 }

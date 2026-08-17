@@ -43,7 +43,11 @@ export async function kirimBalasanAction(chatId: string, teks: string): Promise<
     return { error: `Balasan terlalu panjang (${isi.length} karakter, batas ${MAX_PANJANG_BALASAN}).` };
   }
 
-  const terakhir = await InboundMessage.findOne({ where: { chatId }, order: [['id', 'DESC']] });
+  // `arah: 'masuk'` wajib: yang dicari di sini bentuk dan nomor LAWAN BICARA,
+  // dan baris keluar (balasan yang diketik dari ponsel) tidak membawa keduanya
+  // -- `phone_e164`-nya kosong untuk `@lid`, sehingga baris keluar terbaru akan
+  // menolak balasan yang sebenarnya bisa dialamatkan.
+  const terakhir = await InboundMessage.findOne({ where: { chatId, arah: 'masuk' }, order: [['id', 'DESC']] });
   if (!terakhir) return { error: 'Percakapan ini tidak ada di catatan pesan masuk.' };
 
   /**

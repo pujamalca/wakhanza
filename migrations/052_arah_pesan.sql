@@ -1,0 +1,52 @@
+-- 052_arah_pesan.sql
+-- BALASAN YANG DIKETIK MANUSIA -- dan kenapa ia tidak tersimpan di mana pun.
+--
+-- Halaman percakapan (`/pesan-masuk/[chat]`) membaca sisi MASUK dari tabel ini
+-- dan sisi KELUAR dari `outbox`. Itu benar selama pesan keluar lahir di sini.
+-- Ternyata tidak: petugas membalas dari aplikasi WhatsApp di ponsel nomor
+-- rumah sakit, dan pesan itu tidak pernah melewati antrean kirim.
+--
+-- Terukur 17 Agustus 2026, dan angkanya membalik dugaan:
+--
+--   * `outbox.trigger_code = 'BALAS_MANUAL'` -- tombol balas di dashboard --
+--     NOL baris, selamanya. Fiturnya ada dan tidak pernah dipakai sekali pun.
+--   * Sementara dalam 4 hari (14-17 Agustus) log worker mencatat 19 pesan
+--     keluar manusia yang dibuang: 10 ke percakapan perorangan, 9 di grup.
+--     Ditambah 15 unggahan status, yang memang bukan percakapan.
+--
+-- Jadi bukan fitur balasnya yang kurang laku; balasan SUNGGUHAN memang lahir
+-- di luar jangkauan sistem ini. Yang terlihat petugas di halaman percakapan
+-- karena itu cuma sebelah: pertanyaan pasien berderet tanpa satu pun jawaban,
+-- padahal jawabannya sudah diberikan -- dari ponsel.
+--
+-- ==========================================================================
+-- Kenapa MENUMPANG tabel ini, bukan tabel baru
+-- ==========================================================================
+--
+-- Namanya jadi kurang tepat, dan itu ongkos yang disengaja. Yang dibeli:
+--
+--   1. `inbox.simpan_teks` dan `inbox.simpan_hari` berlaku APA ADANYA. Balasan
+--      petugas kepada pasien sama sensitifnya dengan pertanyaan pasien -- ia
+--      bisa memuat keterangan medis. Tabel terpisah menuntut kedua sakelar itu
+--      digandakan, dan dua tempat yang menafsirkan sendiri satu aturan privasi
+--      yang sama adalah bentuk kegagalan yang sudah berkali-kali dibayar di
+--      proyek ini (`respectsOptOut()`, `core/outboxStatus.ts`).
+--   2. Pemangkasan berkala tetap satu `DELETE`, bukan dua.
+--   3. `ix_chat (chat_id, created_at)` sudah persis indeks yang dibutuhkan
+--      halaman percakapan, dan kedua arah memakai `chat_id` yang SAMA --
+--      terukur: pesan masuk perorangan seluruhnya `@lid`, dan `message.to`
+--      pantulan pesan keluar juga `@lid`. Identitas LID stabil per orang.
+--   4. Halaman percakapan tinggal membaca satu tabel lagi, bukan dua.
+--
+-- Yang TIDAK ikut menumpang: `outbox`. Ia antrean kirim yang dibaca dispatcher,
+-- dan menyisipkan baris yang tidak pernah dienqueue siapa pun ke sana akan
+-- mengotori statistik pengiriman, halaman Log, halaman Antrean, dan masa simpan
+-- 90 harinya -- demi catatan yang tidak pernah perlu dikirim.
+
+ALTER TABLE inbound_message
+  -- Bawaannya 'masuk' supaya seluruh baris lama tetap berarti persis seperti
+  -- sebelumnya, tanpa satu pun UPDATE.
+  ADD COLUMN arah ENUM('masuk','keluar') NOT NULL DEFAULT 'masuk' AFTER jenis,
+  -- Empat penghitung di halaman Pesan masuk menyaring lewat kolom ini, dan
+  -- ketiga daftarnya mengurut waktu.
+  ADD KEY ix_arah_waktu (arah, created_at);

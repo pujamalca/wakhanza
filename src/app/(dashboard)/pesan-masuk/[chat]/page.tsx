@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { InboundMessage, Outbox } from '@/models';
-import { gabungPercakapan, type PesanMasukRingkas, type PesanKeluarRingkas } from '@/core/percakapan';
+import { gabungPercakapan, type PesanCatatanRingkas, type PesanKeluarRingkas } from '@/core/percakapan';
 import { labelAck } from '@/core/waAck';
 import {
   PageHeader,
@@ -63,11 +63,26 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
   const { chat } = await params;
   const chatId = decodeURIComponent(chat);
 
-  const masuk = await InboundMessage.findAll({
-    where: { chatId },
-    order: [['id', 'DESC']],
-    limit: BATAS_BARIS,
-  });
+  /**
+   * DUA kueri atas satu tabel, bukan satu kueri lalu disaring di memori.
+   *
+   * `LIMIT` yang dipakai bersama akan membuat arah yang ramai melaparkan yang
+   * satunya: satu grup dengan seratus balasan petugas menyisakan nol pesan
+   * masuk, tanpa satu pun tanda di layar. Halamannya memang menjanjikan
+   * "{BATAS_BARIS} terakhir TIAP ARAH", dan dua kueri itulah yang menepatinya.
+   */
+  const [masuk, keluarManual] = await Promise.all([
+    InboundMessage.findAll({
+      where: { chatId, arah: 'masuk' },
+      order: [['id', 'DESC']],
+      limit: BATAS_BARIS,
+    }),
+    InboundMessage.findAll({
+      where: { chatId, arah: 'keluar' },
+      order: [['id', 'DESC']],
+      limit: BATAS_BARIS,
+    }),
+  ]);
 
   // Percakapan yang tidak ada di catatan pesan masuk tidak bisa dibuka, dan itu
   // batas yang disengaja -- halaman ini untuk MEMBALAS, bukan untuk memulai
@@ -106,8 +121,15 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
       ? await Outbox.findAll({ where: { phoneE164: nomor }, order: [['id', 'DESC']], limit: BATAS_BARIS })
       : [];
 
-  const barisMasuk: PesanMasukRingkas[] = masuk.map((m) => ({
+  /**
+   * Kedua arah dipetakan lewat SATU fungsi. Menyalinnya jadi dua berarti
+   * "kenapa gelembung ini kosong" dijawab dua tempat yang bisa berbeda -- dan
+   * yang paling gampang terlewat adalah `inbox.simpan_teks`, sakelar privasi
+   * yang berlaku sama untuk pertanyaan pasien maupun balasan petugas.
+   */
+  const ringkas = (m: (typeof masuk)[number]): PesanCatatanRingkas => ({
     id: m.id,
+    arah: m.arah,
     waktu: m.createdAt,
     teks: m.teks,
     keterangan: m.teks
@@ -116,7 +138,9 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
         ? `(isi tidak disimpan — ${m.panjangTeks} karakter)`
         : (TIPE_LABEL[m.tipe] ?? m.tipe),
     namaPengirim: m.namaKontak,
-  }));
+  });
+
+  const barisCatatan: PesanCatatanRingkas[] = [...masuk.map(ringkas), ...keluarManual.map(ringkas)];
 
   const barisKeluar: PesanKeluarRingkas[] = keluar.map((o) => ({
     id: o.id,
@@ -128,7 +152,7 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
     triggerCode: o.triggerCode,
   }));
 
-  const lini = gabungPercakapan(barisMasuk, barisKeluar);
+  const lini = gabungPercakapan(barisCatatan, barisKeluar);
   const judul = terbaru.namaChat ?? terbaru.namaKontak ?? (keGrup ? 'Grup' : 'Perorangan');
 
   return (
@@ -138,7 +162,7 @@ export default async function PercakapanPage({ params }: { params: Promise<{ cha
         description={
           keGrup
             ? 'Percakapan grup. Balasan dari sini terbaca seluruh anggotanya.'
-            : 'Percakapan dengan satu nomor, dua arah — pesan masuk dan pesan yang dikirim sistem.'
+            : 'Percakapan dengan satu nomor, dua arah — pesan masuk, kiriman sistem, dan balasan yang diketik dari ponsel rumah sakit.'
         }
         actions={
           <LinkButton href="/pesan-masuk" variant="secondary" size="md">

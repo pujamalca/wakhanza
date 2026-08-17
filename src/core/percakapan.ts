@@ -24,12 +24,27 @@ export const MAX_PANJANG_BALASAN = 4096;
 
 export type ArahPesan = 'masuk' | 'keluar';
 
-export interface PesanMasukRingkas {
+/**
+ * Satu baris `inbound_message` -- KEDUA arahnya.
+ *
+ * Dulu bernama `PesanMasukRingkas` dan memang hanya memuat yang masuk, karena
+ * sisi keluar diandaikan selalu berasal dari `outbox`. Andaian itu salah: yang
+ * benar-benar dipakai rumah sakit ini adalah membalas dari aplikasi WhatsApp di
+ * ponsel, dan pesan itu tidak pernah melewati antrean kirim (migrations/052).
+ *
+ * **Arahnya dibawa BARIS, bukan diserahkan lewat larik ketiga.** Bentuk yang
+ * satunya -- `gabungPercakapan(masuk, keluar, manual)` -- membuat pemanggil yang
+ * lupa mengisi larik ketiga tetap lolos `tsc` dan tetap menampilkan percakapan
+ * sebelah, yaitu persis cacat yang sedang diperbaiki.
+ */
+export interface PesanCatatanRingkas {
   id: number;
+  arah: ArahPesan;
   waktu: Date;
   teks: string | null;
   /** Dipakai saat `teks` null: jenis media, atau "isi tidak disimpan". */
   keterangan: string | null;
+  /** Hanya untuk yang MASUK dari grup; balasan petugas tidak punya nama pengirim. */
   namaPengirim: string | null;
 }
 
@@ -83,15 +98,22 @@ export interface BarisPercakapan {
  *    dan di sini masukannya dua larik terpisah yang baru digabung. Karena itu
  *    seri diputus lewat kunci, bukan dibiarkan bergantung pada urutan
  *    penggabungan.
+ *
+ * 3. **Awalan kunci mengikuti TABEL asalnya (`cat-`/`out-`), bukan arahnya.**
+ *    Yang menjamin sebuah id unik adalah tabelnya; dua tabel dengan urutan id
+ *    yang berdiri sendiri bisa memberi angka yang sama, dan kunci React yang
+ *    bertabrakan membuat satu gelembung hilang dari layar tanpa satu pun galat.
+ *    Balasan manual dan pesan masuk sama-sama ber-awalan `cat-` justru karena
+ *    keduanya baris `inbound_message`.
  */
 export function gabungPercakapan(
-  masuk: PesanMasukRingkas[],
+  catatan: PesanCatatanRingkas[],
   keluar: PesanKeluarRingkas[],
 ): BarisPercakapan[] {
   const baris: BarisPercakapan[] = [
-    ...masuk.map((m) => ({
-      kunci: `in-${m.id}`,
-      arah: 'masuk' as const,
+    ...catatan.map((m) => ({
+      kunci: `cat-${m.id}`,
+      arah: m.arah,
       waktu: m.waktu,
       teks: m.teks,
       keterangan: m.keterangan,

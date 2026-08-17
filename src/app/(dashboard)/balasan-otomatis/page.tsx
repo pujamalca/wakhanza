@@ -55,7 +55,11 @@ async function kataTakTerjawab() {
   const [pesan, aturan] = await Promise.all([
     InboundMessage.findAll({
       attributes: ['teks'],
-      where: { dibalas: false, jenis: 'perorangan', createdAt: { [Op.gte]: sejak } },
+      // `arah: 'masuk'` wajib: yang dicari kata yang dipakai PENANYA. Balasan
+      // petugas yang diketik dari ponsel juga tinggal di tabel ini sejak
+      // migrations/052, dan `dibalas` pada baris keluar selalu 0 -- tanpa
+      // penyaring ini, kata-kata kita sendiri diusulkan sebagai kata kunci.
+      where: { arah: 'masuk', dibalas: false, jenis: 'perorangan', createdAt: { [Op.gte]: sejak } },
       raw: true,
     }),
     // SELURUH aturan, aktif maupun tidak. Aturan yang sedang dimatikan tetap

@@ -1,4 +1,4 @@
-import { pilihBarisTertaut, type BarisTujuan } from './tautPesanKeluar';
+import { layakCatatSebagaiBalasanManual, pilihBarisTertaut, type BarisTujuan } from './tautPesanKeluar';
 
 /**
  * Bentuk alamat yang benar-benar diamati di sesi produksi saat cacat ini
@@ -119,5 +119,52 @@ describe('pilihBarisTertaut -- daftar kosong', () => {
   it('alamat tak terbaca tidak mendapat kelonggaran apa pun', () => {
     expect(pilihBarisTertaut([pasien('6281200000001')], 'entah-apa')).toEqual({ baris: null, sebab: 'tak-cocok' });
     expect(pilihBarisTertaut([pasien('6281200000001')], '')).toEqual({ baris: null, sebab: 'tak-cocok' });
+  });
+});
+
+/**
+ * Pesan keluar yang TIDAK punya baris `outbox` adalah balasan yang diketik
+ * MANUSIA dari ponsel nomor rumah sakit -- satu-satunya bentuk balasan yang
+ * benar-benar dipakai di sini (terukur: `BALAS_MANUAL` nol baris selamanya,
+ * sementara 19 pesan keluar manusia dalam 4 hari).
+ */
+describe('layakCatatSebagaiBalasanManual', () => {
+  it('mencatat balasan perorangan yang dipantulkan sebagai @lid', () => {
+    expect(layakCatatSebagaiBalasanManual(LID, 'tanpa-kandidat')).toBe(true);
+  });
+
+  it('mencatat balasan ke nomor ber-@c.us', () => {
+    expect(layakCatatSebagaiBalasanManual(PETUGAS, 'tanpa-kandidat')).toBe(true);
+  });
+
+  it('mencatat pesan yang diketik petugas di dalam grup', () => {
+    expect(layakCatatSebagaiBalasanManual(GRUP, 'tanpa-kandidat')).toBe(true);
+  });
+
+  /**
+   * Unggahan status menghasilkan `message_create`-nya sendiri dan jumlahnya
+   * MELEBIHI balasan sungguhan (terukur 15 dari 34 dalam 4 hari). Ia bukan
+   * percakapan dengan siapa pun; mencatatnya berarti mengotori tiap daftar.
+   */
+  it('TIDAK mencatat unggahan status', () => {
+    expect(layakCatatSebagaiBalasanManual('status@broadcast', 'tanpa-kandidat')).toBe(false);
+  });
+
+  it('TIDAK mencatat saluran maupun alamat yang belum dikenal', () => {
+    expect(layakCatatSebagaiBalasanManual('123@newsletter', 'tanpa-kandidat')).toBe(false);
+    expect(layakCatatSebagaiBalasanManual('123@entah', 'tanpa-kandidat')).toBe(false);
+    expect(layakCatatSebagaiBalasanManual('', 'tanpa-kandidat')).toBe(false);
+  });
+
+  /**
+   * Pagar yang paling menentukan. `tak-cocok` dan `ambigu` berarti kandidatnya
+   * ADA -- pesannya lahir dari `outbox` dan sudah tampil di sisi keluar
+   * percakapan. Mencatatnya lagi di sini menggandakan gelembungnya, dan yang
+   * ganda justru pesan sistem ke pasien.
+   */
+  it('TIDAK mencatat bila kandidat outbox ADA tapi penautannya gagal', () => {
+    expect(layakCatatSebagaiBalasanManual(LID, 'tak-cocok')).toBe(false);
+    expect(layakCatatSebagaiBalasanManual(LID, 'ambigu')).toBe(false);
+    expect(layakCatatSebagaiBalasanManual(GRUP, 'tak-cocok')).toBe(false);
   });
 });

@@ -1,11 +1,22 @@
-import { gabungPercakapan, type PesanMasukRingkas, type PesanKeluarRingkas } from './percakapan';
+import { gabungPercakapan, type PesanCatatanRingkas, type PesanKeluarRingkas } from './percakapan';
 
-const masuk = (id: number, iso: string, teks = 'halo'): PesanMasukRingkas => ({
+const masuk = (id: number, iso: string, teks = 'halo'): PesanCatatanRingkas => ({
   id,
+  arah: 'masuk',
   waktu: new Date(iso),
   teks,
   keterangan: null,
   namaPengirim: 'Penanya',
+});
+
+/** Balasan yang diketik petugas dari ponsel: baris `inbound_message` ber-arah keluar. */
+const manual = (id: number, iso: string, teks = 'sudah kami terima'): PesanCatatanRingkas => ({
+  id,
+  arah: 'keluar',
+  waktu: new Date(iso),
+  teks,
+  keterangan: null,
+  namaPengirim: null,
 });
 
 const keluar = (id: number, iso: string, terkirim: string | null = null): PesanKeluarRingkas => ({
@@ -24,7 +35,7 @@ describe('gabungPercakapan', () => {
       [masuk(1, '2026-08-15T02:00:00Z'), masuk(2, '2026-08-15T04:00:00Z')],
       [keluar(9, '2026-08-15T03:00:00Z')],
     );
-    expect(hasil.map((b) => b.kunci)).toEqual(['in-1', 'out-9', 'in-2']);
+    expect(hasil.map((b) => b.kunci)).toEqual(['cat-1', 'out-9', 'cat-2']);
   });
 
   /**
@@ -42,7 +53,7 @@ describe('gabungPercakapan', () => {
       // Diketik 14:45 (sesudah "tanya malam"), baru terkirim 00:00 keesokan hari.
       [keluar(9, '2026-08-14T14:45:00Z', '2026-08-15T00:00:00Z')],
     );
-    expect(hasil.map((b) => b.kunci)).toEqual(['in-1', 'out-9', 'in-2']);
+    expect(hasil.map((b) => b.kunci)).toEqual(['cat-1', 'out-9', 'cat-2']);
     // Waktu terkirimnya tetap dibawa untuk ditampilkan -- ia cuma tidak
     // menentukan tempatnya.
     expect(hasil[1]!.terkirimAt).toEqual(new Date('2026-08-15T00:00:00Z'));
@@ -54,7 +65,7 @@ describe('gabungPercakapan', () => {
     // Larik masukan dibalik urutannya; hasilnya harus sama persis.
     const b = gabungPercakapan([masuk(1, t)], [keluar(9, t)]).reverse().reverse();
     expect(a.map((x) => x.kunci)).toEqual(b.map((x) => x.kunci));
-    expect(a.map((x) => x.kunci)).toEqual(['in-1', 'out-9']);
+    expect(a.map((x) => x.kunci)).toEqual(['cat-1', 'out-9']);
   });
 
   it('kunci masuk dan keluar tidak pernah bertabrakan walau id-nya sama', () => {
@@ -70,10 +81,46 @@ describe('gabungPercakapan', () => {
 
   it('membawa keterangan pesan yang isinya tidak disimpan', () => {
     const hasil = gabungPercakapan(
-      [{ id: 1, waktu: new Date('2026-08-15T02:00:00Z'), teks: null, keterangan: 'Gambar', namaPengirim: null }],
+      [{ id: 1, arah: 'masuk', waktu: new Date('2026-08-15T02:00:00Z'), teks: null, keterangan: 'Gambar', namaPengirim: null }],
       [],
     );
     expect(hasil[0]!.teks).toBeNull();
     expect(hasil[0]!.keterangan).toBe('Gambar');
+  });
+
+  /**
+   * Inilah yang dulu tidak ada sama sekali. Balasan petugas diketik di aplikasi
+   * WhatsApp, jadi tidak pernah lewat `outbox` -- dan percakapan menampilkan
+   * pertanyaan berderet tanpa satu pun jawaban, padahal jawabannya sudah
+   * diberikan.
+   */
+  it('menempatkan balasan yang diketik dari ponsel di sisi KELUAR', () => {
+    const hasil = gabungPercakapan(
+      [masuk(1, '2026-08-17T02:00:00Z'), manual(2, '2026-08-17T02:05:00Z')],
+      [],
+    );
+    expect(hasil.map((b) => [b.kunci, b.arah])).toEqual([
+      ['cat-1', 'masuk'],
+      ['cat-2', 'keluar'],
+    ]);
+  });
+
+  /**
+   * Balasan manual TIDAK punya status, konfirmasi terkirim, maupun kode pemicu
+   * -- semuanya milik `outbox`. Menampilkannya sebagai lencana kosong lebih
+   * buruk daripada tidak menampilkannya: petugas membaca ketiadaan lencana
+   * "Terkirim" sebagai pesan yang gagal.
+   */
+  it('balasan manual tidak membawa status maupun konfirmasi milik outbox', () => {
+    const [b] = gabungPercakapan([manual(3, '2026-08-17T02:00:00Z')], []);
+    expect(b).toMatchObject({ arah: 'keluar', status: null, ackLevel: null, triggerCode: null, terkirimAt: null });
+  });
+
+  it('balasan manual dan pesan sistem berbaur menurut waktu, bukan menurut sumbernya', () => {
+    const hasil = gabungPercakapan(
+      [masuk(1, '2026-08-17T01:00:00Z'), manual(2, '2026-08-17T03:00:00Z')],
+      [keluar(9, '2026-08-17T02:00:00Z')],
+    );
+    expect(hasil.map((b) => b.kunci)).toEqual(['cat-1', 'out-9', 'cat-2']);
   });
 });

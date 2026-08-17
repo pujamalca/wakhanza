@@ -45,21 +45,38 @@ type Saringan = 'semua' | 'perorangan' | 'grup' | 'belum-dibalas';
  * atas data yang sama tidak boleh memberi hasil berbeda hanya karena waktunya
  * berjalan.
  */
+// SENGAJA tanpa penyaring arah, satu-satunya kueri di halaman ini yang begitu:
+// yang dijawabnya "berapa baris akan dipangkas", dan pemangkasannya memang
+// menghapus kedua arah sekaligus.
 async function hitungBarisKedaluwarsa(hariSimpan: number): Promise<number> {
   const sejak = new Date(Date.now() - hariSimpan * 24 * 60 * 60 * 1000);
   return InboundMessage.count({ where: { createdAt: { [Op.lt]: sejak } } });
 }
 
+/**
+ * Penyaring dasar SELURUH halaman ini, dan ia wajib ikut di setiap kueri.
+ *
+ * `inbound_message` sejak migrations/052 juga memuat balasan yang diketik
+ * petugas dari ponsel (`arah = 'keluar'`). Halaman ini menjawab "apa yang MASUK
+ * hari ini" -- kueri yang lupa menyaring akan menghitung balasan kita sendiri
+ * sebagai pertanyaan pasien, dan pada saringan "Belum dibalas" ia menampilkan
+ * balasan itu sebagai pertanyaan yang menunggu jawaban. Keduanya tanpa satu pun
+ * galat.
+ *
+ * Percakapan lengkapnya dua arah, dan itu ada di `/pesan-masuk/[chat]`.
+ */
+const MASUK = { arah: 'masuk' as const };
+
 function whereUntuk(saringan: Saringan) {
-  if (saringan === 'perorangan') return { jenis: 'perorangan' as const };
-  if (saringan === 'grup') return { jenis: 'grup' as const };
+  if (saringan === 'perorangan') return { ...MASUK, jenis: 'perorangan' as const };
+  if (saringan === 'grup') return { ...MASUK, jenis: 'grup' as const };
   // "Belum dibalas" sengaja dibatasi ke perorangan: pesan grup memang TIDAK
   // pernah dibalas otomatis (lihat wa-client.ts), jadi memasukkannya akan
   // membuat daftar ini selalu penuh oleh baris yang tidak menunggu jawaban
   // siapa pun -- dan menenggelamkan pertanyaan pasien yang benar-benar
   // menunggu, yaitu satu-satunya alasan saringan ini ada.
-  if (saringan === 'belum-dibalas') return { jenis: 'perorangan' as const, dibalas: false };
-  return {};
+  if (saringan === 'belum-dibalas') return { ...MASUK, jenis: 'perorangan' as const, dibalas: false };
+  return { ...MASUK };
 }
 
 export default async function PesanMasukPage({
@@ -102,10 +119,10 @@ export default async function PesanMasukPage({
         limit: p.limit,
         offset: p.offset,
       }),
-      InboundMessage.count(),
-      InboundMessage.count({ where: { jenis: 'perorangan' } }),
-      InboundMessage.count({ where: { jenis: 'grup' } }),
-      InboundMessage.count({ where: { jenis: 'perorangan', dibalas: false } }),
+      InboundMessage.count({ where: MASUK }),
+      InboundMessage.count({ where: { ...MASUK, jenis: 'perorangan' } }),
+      InboundMessage.count({ where: { ...MASUK, jenis: 'grup' } }),
+      InboundMessage.count({ where: { ...MASUK, jenis: 'perorangan', dibalas: false } }),
       WaGroup.findAll({ order: [['nama', 'ASC']], limit: pg.limit, offset: pg.offset }),
       WaSession.findByPk(1),
       getSettingBool('inbox.simpan_teks', true),
@@ -115,7 +132,7 @@ export default async function PesanMasukPage({
   // Jumlah pesan per grup, satu kueri agregat -- bukan satu count per baris grup.
   const perGrup = await InboundMessage.findAll({
     attributes: ['chatId', [fn('COUNT', col('id')), 'jml']],
-    where: { jenis: 'grup' },
+    where: { ...MASUK, jenis: 'grup' },
     group: ['chatId'],
     raw: true,
   });

@@ -4,6 +4,15 @@ import { db } from '@/db/wakhanza';
 export type JenisChat = 'perorangan' | 'grup';
 
 /**
+ * Arah pesan dalam satu percakapan.
+ *
+ * `keluar` HANYA untuk pesan yang diketik manusia dari ponsel nomor rumah
+ * sakit -- pesan buatan sistem tinggal di `outbox` dan tidak pernah digandakan
+ * ke sini. Lihat migrations/052 untuk kenapa keduanya berbagi satu tabel.
+ */
+export type ArahChat = 'masuk' | 'keluar';
+
+/**
  * Satu baris per pesan MASUK yang diterima nomor rumah sakit.
  *
  * Ditulis SEKALI dan tidak pernah diperbarui -- `wakhanza_rw` sengaja tidak
@@ -20,6 +29,13 @@ export class InboundMessage extends Model<InferAttributes<InboundMessage>, Infer
   /** Percakapannya. Untuk grup ini GRUPNYA, bukan pengirimnya. */
   declare chatId: string;
   declare jenis: JenisChat;
+  /**
+   * SETIAP pembacaan yang berarti "pesan masuk" wajib menyaringnya ke `'masuk'`.
+   * Bawaannya sengaja `'masuk'` supaya baris lama tidak berubah arti -- tapi itu
+   * juga berarti kueri yang LUPA menyaring akan diam-diam menghitung balasan
+   * kita sendiri sebagai pertanyaan pasien.
+   */
+  declare arah: CreationOptional<ArahChat>;
   /** "id user" yang dicari orang di halaman ini. Sama dengan chatId untuk perorangan. */
   declare pengirimId: string | null;
   declare phoneE164: string | null;
@@ -39,6 +55,7 @@ InboundMessage.init(
     waMessageId: { type: DataTypes.STRING(160), allowNull: false, unique: true, field: 'wa_message_id' },
     chatId: { type: DataTypes.STRING(64), allowNull: false, field: 'chat_id' },
     jenis: { type: DataTypes.ENUM('perorangan', 'grup'), allowNull: false },
+    arah: { type: DataTypes.ENUM('masuk', 'keluar'), allowNull: false, defaultValue: 'masuk' },
     pengirimId: { type: DataTypes.STRING(64), allowNull: true, field: 'pengirim_id' },
     phoneE164: { type: DataTypes.STRING(20), allowNull: true, field: 'phone_e164' },
     namaKontak: { type: DataTypes.STRING(120), allowNull: true, field: 'nama_kontak' },

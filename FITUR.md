@@ -1707,6 +1707,43 @@ Empat hal yang menempel padanya:
 
 `VolumeChart` dibangun dari elemen HTML biasa, bukan SVG: dengan begitu tetap Server Component tanpa satu baris pun JavaScript klien, sementara tooltip per batang cukup ditangani `group-hover` CSS. Ketentuan bentuk yang menempel padanya: batang dibatasi 24px dan tidak pernah memenuhi slotnya, ujung data membulat 4px sementara pangkalnya siku di garis dasar, pemisah antar segmen adalah **celah 2px sewarna permukaan** (`gap-[2px]`) dan bukan garis tepi, hari nol tetap menyisakan jejak tipis (hari mati harus terlihat sebagai batang kosong, bukan menghilang), warna batang hanya di batang (angka dan legenda memakai token teks), dan `<details>` "Lihat sebagai tabel" adalah jalur baca yang tidak bergantung warna maupun hover. Rincian per jenis pesan sengaja berupa **tabel/meter, bukan grafik** -- di atas ~7 kelas yang semuanya bermakna, warna berhenti membedakan apa pun.
 
+### Balasan yang diketik dari ponsel: kenapa ia menumpang `inbound_message`
+
+Keluhannya satu kalimat: "di pesan masuk yang terbaca hanya chat dari orang lain, balasannya tidak tersimpan." Yang membuatnya layak dicatat di sini adalah **pengukurannya membalik dugaan pertama**.
+
+Dugaan pertama: fitur balas kurang dipakai. Yang terukur (17 Agustus 2026):
+
+```
+outbox.trigger_code = 'BALAS_MANUAL'   ->  0 baris, SELAMANYA
+pesan keluar tanpa baris outbox, 4 hari (14-17 Agt), dari log worker:
+  @lid        10   balasan ke satu nomor, diketik manusia
+  @g.us        9   diketik manusia di grup
+  @broadcast  15   unggah status WhatsApp -- bukan percakapan
+pesan masuk 7 hari: perorangan 191, grup 153, 49 percakapan
+```
+
+Jadi bukan fiturnya yang kurang laku. Tombol balas di dashboard **tidak pernah ditekan sekali pun** sejak ada, sementara balasan sungguhannya mengalir setiap hari — dari aplikasi WhatsApp di ponsel, yaitu satu-satunya tempat yang tidak pernah melewati `outbox`. Halaman percakapan karena itu menampilkan sebelah: pertanyaan pasien berderet tanpa satu pun jawaban, padahal jawabannya sudah diberikan.
+
+**Datanya bahkan sudah lewat depan mata tiap hari.** Pendengar `message_create` menerima seluruh pesan keluar termasuk yang diketik manusia, dan diskriminator yang membedakannya dari pesan mesin pun sudah dihitung untuk keperluan lain — `sebab: 'tanpa-kandidat'` dari `pilihBarisTertaut()`, yang lahir saat memperbaiki penautan konfirmasi terkirim. Yang kurang cuma keputusan menyimpannya; barisnya berakhir di `logger.debug` lalu `return`.
+
+#### Tiga bentuk yang ditolak
+
+- **Tabel sendiri (`outgoing_manual`).** Namanya jadi lebih tepat, dan itu satu-satunya yang dibelinya. Yang dibayar: `inbox.simpan_teks` dan `inbox.simpan_hari` harus digandakan — dan dua tempat yang menafsirkan sendiri satu aturan privasi yang sama adalah bentuk kegagalan yang sudah berkali-kali dibayar di proyek ini (`respectsOptOut()`, `core/outboxStatus.ts`, `kunciPesanMasuk()`). Ditambah satu `DELETE` lagi di pemangkasan berkala, satu indeks lagi, dan halaman percakapan membaca tiga tabel alih-alih dua. Balasan petugas kepada pasien sama sensitifnya dengan pertanyaan pasien; sakelar privasinya tidak boleh punya dua penafsir.
+- **Menyisipkan baris ke `outbox`.** Ia antrean kirim yang dibaca dispatcher. Baris yang tidak pernah dienqueue siapa pun akan mengotori statistik pengiriman, halaman Log, halaman Antrean, dan masa simpan 90 harinya — demi catatan yang justru tidak pernah perlu dikirim.
+- **`gabungPercakapan(masuk, keluar, manual)`.** Diff-nya paling kecil, dan justru itu jebakannya: pemanggil yang lupa mengisi larik ketiga tetap lolos `tsc` dan tetap menampilkan percakapan sebelah — cacat yang sedang diperbaiki, dibangun ulang dalam bentuk baru. Arahnya karena itu dibawa BARIS.
+
+#### Yang membuat penggabungannya mungkin
+
+Terukur sebelum ditulis, dan seandainya jawabannya lain seluruh rancangan ini gugur: `chat_id` kedua arah HARUS sama, kalau tidak balasannya tersimpan lalu mendarat di percakapan lain. Pesan masuk perorangan di mesin ini **seluruhnya `@lid`** (191 dari 191, 186 di antaranya punya nomor terpetakan), dan `message.to` pantulan pesan keluar juga `@lid`. LID adalah identitas stabil per orang, jadi keduanya bergabung lewat `ix_chat (chat_id, created_at)` yang sudah ada.
+
+#### Pagar ketiga, yang tidak terlihat dari fungsi murninya
+
+`tanpa-kandidat` berarti "tidak ada baris `outbox` beridentik isi DALAM 30 MENIT terakhir", bukan "tidak ada sama sekali". Bedanya menggigit tiap hari pada satu keadaan: pesan yang tertahan jam tenang masuk antrean pukul 22:00 dan berangkat pukul 07:00 — sembilan jam di luar jendela, sehingga pantulannya terbaca sebagai ketikan manusia dan gelembungnya muncul dua kali. Karena itu `catatPesanKeluarManual()` memeriksa isinya sekali lagi terhadap SELURUH `outbox` tanpa batas waktu. Aman justru karena kode pengiriman unik per pesan (`core/uniqueCode.ts`): dua baris tidak pernah beridentik teks.
+
+#### Temuan sampingan: `npx pm2` bukan `pm2`
+
+Saat memeriksa uptime sebelum restart, `npx pm2 list` menerbitkan `In memory PM2 version: 7.0.1 / Local PM2 version: 5.2.2` berikut anjuran `pm2 update`. Itu **kebalikan** dari yang pernah tercatat sebagai tersangka kaskade restart, dan sebabnya sederhana: `npx` mengambil salinan 5.2.2 di `node_modules`, sementara `pm2` polos adalah yang global 7.0.1 — yang sama dengan daemonnya. Kemungkinan besar inilah asal-usul dugaan "versi tidak cocok" itu. Pakai `pm2` polos; `npx pm2` juga tidak menampilkan seluruh proses.
+
 ## Yang masih perlu keputusan rumah sakit (bukan teknis)
 
 - **Daftar layanan/poli sensitif** (F4.3) dan **kode pemeriksaan sensitif**: default kosong (`[]`), diisi lewat halaman Pengaturan dashboard (`/pengaturan`, admin-only) begitu RS memutuskan. **Kandidatnya sudah diinvestigasi baca-saja** (9 Agustus 2026, `SELECT` terhadap `poliklinik`, TIDAK ditulis ke `app_setting`): dari 26 baris, hanya `U0001` (Poliklinik Kandungan) dan `U0006` (Poliklinik Kulit & Kelamin) cocok kata kunci contoh PRD F4.3 (VCT/HIV, jiwa, kulit & kelamin, onkologi) -- dan keduanya **0 kunjungan tercatat** di `reg_periksa`, jadi menyalakannya sekarang tidak mengubah apa pun yang sedang berjalan. Tidak ada baris yang cocok jiwa/psikiatri/VCT/HIV/onkologi sama sekali; kemungkinan besar RS ini tidak (atau belum) punya kode poli terpisah untuk layanan itu, bukan berarti layanannya tidak ada. "Poliklinik Kandungan" ikut ketemu lewat kata kunci tapi TIDAK ada di daftar contoh PRD -- kehamilan/kandungan bisa dianggap sensitif oleh sebagian orang dan tidak oleh sebagian lain, jadi ini murni pengamatan untuk dipertimbangkan, bukan rekomendasi.
