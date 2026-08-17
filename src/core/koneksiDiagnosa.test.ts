@@ -1,5 +1,6 @@
 import {
   diagnosaKoneksi,
+  tindakanKoneksi,
   AMBANG_MENAUTKAN_LAMA_DTK,
   AMBANG_PERCOBAAN_BERULANG,
   type DiagnosaInput,
@@ -61,5 +62,53 @@ describe('diagnosaKoneksi', () => {
     // diberi tahu pada detik worker menyerah -- tiga menit sesudah mereka mulai
     // bertanya-tanya.
     expect(AMBANG_MENAUTKAN_LAMA_DTK).toBeLessThan(180 / 2);
+  });
+});
+
+describe('tindakanKoneksi', () => {
+  /**
+   * Inti keluhan 17 Agustus 2026: ketiga jalan keluar diam sekaligus, dan
+   * halaman tidak mengatakan apa pun. Yang dipatok di sini bukan bunyi
+   * kalimatnya melainkan KEPUTUSANNYA -- mana yang bisa ditekan, mana yang
+   * tidak, dan apakah ada langkah yang diberikan.
+   */
+  it('penautan tersangkut: keluar sesi DIMATIKAN, karena ia menuntut halaman yang belum jadi', () => {
+    for (const d of ['menautkan-lama', 'menautkan-berulang'] as const) {
+      expect(tindakanKoneksi(d).keluarSesi.bisa).toBe(false);
+      expect(tindakanKoneksi(d).keluarSesi.catatan).toBeTruthy();
+    }
+  });
+
+  it('penautan tersangkut: sambung ulang TETAP bisa, tapi membawa peringatan akibatnya', () => {
+    const t = tindakanKoneksi('menautkan-berulang');
+    expect(t.sambungUlang.bisa).toBe(true);
+    expect(t.sambungUlang.catatan).toMatch(/membatalkan/i);
+  });
+
+  /**
+   * Tanpa langkah, halaman kembali jadi apa yang dikeluhkan: menyebutkan
+   * masalahnya lalu berhenti di situ.
+   */
+  it('penautan tersangkut: memberi langkah yang berurutan, dan QR ulang yang TERAKHIR', () => {
+    const l = tindakanKoneksi('menautkan-lama').langkah;
+    expect(l.length).toBeGreaterThanOrEqual(3);
+    expect(l[l.length - 1]).toMatch(/QR/i);
+    // Langkah pertama tidak boleh menyuruh menekan apa pun -- itu justru yang
+    // memperpanjang gangguannya.
+    expect(l[0]).toMatch(/jangan tekan/i);
+  });
+
+  it('menunggu pindai: sambung ulang dimatikan, keluar sesi tetap boleh, tanpa langkah darurat', () => {
+    const t = tindakanKoneksi('menunggu-pindai');
+    expect(t.sambungUlang.bisa).toBe(false);
+    expect(t.keluarSesi.bisa).toBe(true);
+    expect(t.langkah).toHaveLength(0);
+  });
+
+  it('normal: tidak ada yang dimatikan dan tidak ada langkah yang ditawarkan', () => {
+    const t = tindakanKoneksi('normal');
+    expect(t.sambungUlang.bisa).toBe(true);
+    expect(t.keluarSesi.bisa).toBe(true);
+    expect(t.langkah).toHaveLength(0);
   });
 });

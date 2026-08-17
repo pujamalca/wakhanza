@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { heartbeatStale } from '@/lib/health';
-import { diagnosaKoneksi } from '@/core/koneksiDiagnosa';
+import { diagnosaKoneksi, tindakanKoneksi } from '@/core/koneksiDiagnosa';
 import {
   Card,
   Badge,
@@ -100,6 +100,7 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
     percobaanMenautkan: data.percobaanMenautkan,
   });
   const menautkanBermasalah = diagnosa === 'menautkan-lama' || diagnosa === 'menautkan-berulang';
+  const tindakan = tindakanKoneksi(diagnosa);
 
   return (
     <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
@@ -142,6 +143,23 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
               Selama ini berlangsung tidak ada pesan yang terkirim, tapi tidak ada yang hilang: semuanya menunggu di
               antrean dan berangkat begitu sesi hidup.
             </p>
+
+            {/* Menyebutkan masalahnya lalu berhenti di situ adalah persis yang
+                dikeluhkan 17 Agustus 2026: staf menunggu, menekan Sambung
+                ulang, lalu Keluar sesi -- ketiganya diam, dan halaman ini tidak
+                mengatakan satu pun alasannya. Langkahnya datang dari
+                `tindakanKoneksi()` supaya yang tertulis di layar dan yang
+                dipatok uji adalah daftar yang SAMA. */}
+            {tindakan.langkah.length > 0 && (
+              <div className="mt-2 pl-6">
+                <p className="font-medium">Yang harus dikerjakan, berurutan:</p>
+                <ol className="mt-1 list-decimal space-y-1 pl-4 text-muted-foreground">
+                  {tindakan.langkah.map((l, i) => (
+                    <li key={i}>{l}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
           </div>
         )}
 
@@ -207,7 +225,7 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
                * `processSessionCommand`), jadi ini lapis kedua -- tapi lapis
                * yang menjelaskan, sementara yang di worker cuma mendiamkan.
                */
-              disabled={commandMutation.isPending || data.status === 'qr_pending'}
+              disabled={commandMutation.isPending || !tindakan.sambungUlang.bisa}
               onClick={() => commandMutation.mutate('reconnect')}
             >
               <IconRefresh className="h-4 w-4" />
@@ -216,7 +234,16 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
             <Button
               variant="destructive"
               size="md"
-              disabled={commandMutation.isPending}
+              /**
+               * Dimatikan saat penautan tersangkut, dan itu bukan kehati-hatian
+               * melainkan kejujuran: `logout()` menuntut halaman WhatsApp yang
+               * sudah jadi, sementara loop `session-command` sengaja tidak
+               * dinaikkan ke atas `initWaClient()`. Perintahnya akan tersimpan
+               * lalu menunggu sesi hidup -- yang justru tidak akan pernah
+               * terjadi pada keadaan itu. Sebelum ini tombolnya bisa ditekan dan
+               * TIDAK melakukan apa pun, tanpa satu pun keterangan.
+               */
+              disabled={commandMutation.isPending || !tindakan.keluarSesi.bisa}
               onClick={() => {
                 if (confirm('Yakin keluar dari sesi WhatsApp? Semua notifikasi berhenti sampai QR dipindai ulang.')) {
                   commandMutation.mutate('logout');
@@ -227,10 +254,20 @@ export function KoneksiClient({ isAdmin }: { isAdmin: boolean }) {
               Keluar sesi
             </Button>
             </div>
-            {data.status === 'qr_pending' && (
+
+            {/* Tombol yang mati tanpa keterangan sama membingungkannya dengan
+                tombol yang hidup tapi tidak berbuat apa-apa -- keduanya membuat
+                orang menekan lagi. Catatannya ikut ditampilkan untuk tombol
+                yang MASIH bisa ditekan tapi punya akibat, bukan cuma yang mati. */}
+            {tindakan.sambungUlang.catatan && (
               <p className="mt-2 text-xs text-muted-foreground">
-                &ldquo;Sambung ulang&rdquo; dimatikan selama QR menunggu dipindai — menekannya akan menerbitkan kode
-                baru dan membatalkan yang sedang tampil.
+                <span className="font-medium text-foreground">Sambung ulang:</span>{' '}
+                {tindakan.sambungUlang.catatan}
+              </p>
+            )}
+            {tindakan.keluarSesi.catatan && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Keluar sesi:</span> {tindakan.keluarSesi.catatan}
               </p>
             )}
           </div>
