@@ -18,32 +18,49 @@ sensitif §F4.3, jam kirim H-1) dan dasar hukum persetujuan pasien (PRD §9 poin
 
 Angka-angka ini **diukur, bukan diingat**, dan yang paling penting yang pertama.
 
-**Fase 5 DIMULAI 17 Agustus 2026, lewat satu pemicu dan kuota lima orang sehari.**
-Sampai hari itu tidak satu pun pasien pernah menerima pesan: keempat baris
-`template` yang aktif seluruhnya bermode `tujuan` (hanya ke grup staf), delapan
-sisanya `is_active = 0`, dan `template.batas_pasien_harian` yang dibuat
-`migrations/036` persis untuk memulai bertahap masih `0` di kedua belas baris —
-belum pernah dipakai sekali pun.
+**Fase 5 DIBUKA lalu DITUTUP lagi pada hari yang sama, 17 Agustus 2026 — dan
+penutupannya keputusan RS, bukan kegagalan teknis.** Sampai pagi itu tidak satu
+pun pasien pernah menerima pesan: keempat baris `template` yang aktif seluruhnya
+bermode `tujuan` (hanya ke grup staf), delapan sisanya `is_active = 0`, dan
+`template.batas_pasien_harian` yang dibuat `migrations/036` persis untuk memulai
+bertahap masih `0` di kedua belas baris.
 
-Sekarang `QUEUE_REG` bermode **`pasien_dan_tujuan`** dengan
-**`batas_pasien_harian = 5`**. Grup Pendaftaran TETAP menerima salinan penuh
-(itu sebabnya modenya bukan `pasien`), jadi staf bisa membandingkan apa yang
-diterima pasien dengan apa yang mereka lihat sendiri. Sisanya belum disentuh:
-`BOOK_REMIND`, `KONTROL_TERBIT`, `KONTROL_ULANG` masih `tujuan`.
+Urutannya, terbaca dari `audit_log`:
 
-**Isi pesannya WAJIB ditulis ulang lebih dulu, dan itu temuan yang nyaris
-menggigit.** Body `QUEUE_REG` berbunyi `Ada Pasien Dok, Nama : {nama_pasien}` —
-menyapa DOKTER, tanpa frasa berhenti. Ia satu-satunya dari keenam template
-pasien yang begitu; kelima lainnya sudah bersuara pasien (`Bpk/Ibu
-{nama_pasien}, ...`), jelas karena yang ini ditulis ulang waktu dipakai
-grup-saja. Memindahkan modenya tanpa menyentuh isinya akan mengirim pesan yang
-memberitahu pasien bahwa ada pasien. Sekarang ia mengikuti bentuk
-`KONTROL_TERBIT` dan diakhiri frasa berhenti yang sama persis.
+| WIB | oleh | apa |
+|---|---|---|
+| 08:57 | `cli:audit-…` | body ditulis ulang bersuara pasien, `batas_pasien_harian = 5` |
+| 08:57 | `cli:audit-…` | `tujuan_mode` → `pasien_dan_tujuan` |
+| ~09:0x | — | **dua pasien dikirimi**; satu `ack_level = 2` (sampai ke HP), satu ditolak benar karena nomornya tidak terdaftar di WhatsApp |
+| 09:35 | `puja` | `tujuan_mode` → **`tujuan`** kembali |
+| 12:53 | `puja` | body dikembalikan ke bentuk yang menyapa dokter |
 
-**Menariknya kembali satu baris**, dan pesan yang telanjur terkirim tidak ikut
-tertarik:
+**Keadaan sekarang: `QUEUE_REG` bermode `tujuan`, hanya ke grup Pendaftaran.**
+`batas_pasien_harian = 5` tetap tersimpan tapi tidak berlaku apa pun selama
+modenya `tujuan`. Body-nya `Ada Pasien Dok {nama_pasien}-{no_antrian}-…` tanpa
+frasa berhenti — dan itu **BENAR untuk grup staf**, bukan sisa yang belum
+dirapikan. `BOOK_REMIND`, `KONTROL_TERBIT`, `KONTROL_ULANG` juga masih `tujuan`.
+
+Jadi sampai ada keputusan RS berikutnya, **nol pesan otomatis ke pasien** —
+dengan pengecualian dua pesan pada 17 Agustus pagi yang tidak bisa ditarik.
+
+**Yang WAJIB dikerjakan bila suatu saat dinyalakan lagi**, dan ini pelajaran
+yang sudah dibayar sekali: body untuk grup staf dan body untuk pasien BUKAN
+teks yang sama, dan kolomnya cuma satu. `Ada Pasien Dok` menyapa DOKTER;
+memindahkan `tujuan_mode` tanpa menyentuh isinya mengirimi pasien pesan yang
+memberitahunya bahwa ada pasien. Ia satu-satunya dari keenam template pasien
+yang begitu — kelima lainnya sudah bersuara pasien (`Bpk/Ibu {nama_pasien},
+...`). Jadi tiap kali modenya dipindahkan, **isinya harus ikut dipindahkan**,
+kedua arah, dan yang bersuara pasien wajib berakhiran frasa berhenti.
+
+**Memindahkannya satu baris**, tanpa restart worker — `tujuan_mode` dan
+`batas_pasien_harian` dibaca ulang tiap siklus, dan pesan yang telanjur terkirim
+tidak ikut tertarik:
 
 ```sql
+-- MENYALAKAN ke pasien (isi body wajib ditulis ulang bersuara pasien LEBIH DULU):
+UPDATE template SET tujuan_mode = 'pasien_dan_tujuan' WHERE trigger_code = 'QUEUE_REG';
+-- MENUTUP kembali ke grup staf saja:
 UPDATE template SET tujuan_mode = 'tujuan' WHERE trigger_code = 'QUEUE_REG';
 ```
 
@@ -73,11 +90,14 @@ pipeline. Aman diabaikan; jangan bingung dengan data pasien sungguhan.
 
 ### Yang masih terbuka dan sudah terukur
 
-- **Pemicu pasien baru menyala SEBAGIAN** — `QUEUE_REG` saja, kuota 5/hari,
-  sejak 17 Agustus 2026. Menaikkan kuotanya atau menyalakan pemicu berikutnya
-  keputusan RS, bukan teknis; yang WAJIB diperiksa lebih dulu tiap kali adalah
-  apakah isi template pemicu itu memang bersuara pasien dan berakhiran frasa
-  berhenti — `QUEUE_REG` ternyata tidak, dan itu baru ketahuan saat dibaca.
+- **Tidak ada satu pun pemicu pasien yang menyala.** `QUEUE_REG` sempat dibuka
+  17 Agustus 2026 pagi lalu ditutup lagi hari itu juga atas keputusan RS
+  (`audit_log`, `puja`, 09:35 WIB); dua pesan telanjur terkirim dan tidak bisa
+  ditarik. Menyalakannya lagi keputusan RS, bukan teknis — dan yang WAJIB
+  dikerjakan bersamaan tiap kali adalah **menukar isi templatenya**, karena
+  body untuk grup staf dan body untuk pasien bukan teks yang sama sementara
+  kolomnya cuma satu. `QUEUE_REG` sekarang berbunyi `Ada Pasien Dok ...` tanpa
+  frasa berhenti, dan itu benar selama modenya `tujuan`.
 - **`resume_pasien` COUNT(\*) = 0** dan surat kontrol praktis kosong di
   produksi, jadi dua angka di rekap bulanan administrasi akan selalu nol.
 - **`npm run audit` tidak akan pernah 0** tanpa perubahan yang memutus:
