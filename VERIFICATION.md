@@ -1714,6 +1714,26 @@ Hasil lab dibuktikan **tidak ikut berubah**: tabelnya tetap `class="identitas"` 
 
 Gerbang: `tsc --noEmit` 0 galat, `eslint .` 0, **64 suite / 1.154 uji** hijau (4 uji baru).
 
+**Worker dimulai ulang 15:22 WIB**, sesudah keenam pemeriksaan lolos: `status: ready`, denyut **17 detik**,
+antrean **0**, uptime **36 menit** (di atas ambang 30), `hapus_sesi_saat_mulai` **0**, Chromium
+**1.287 MB / 12 proses**. Ditempuh `pm2 stop` lalu `pm2 start`, bukan `pm2 restart`:
+
+```
+"wakhanza-worker berhenti..."  exitCode 0     <- handler shutdown benar-benar jalan
+"sesi WhatsApp ditutup rapi"
+sisa chrome.exe pemegang sesi: 0              <- diukur sesudah stop
+
+mulai   1787041378849  "wakhanza-worker memulai..."
+  +68ms fase:"menautkan" status:null          <- watchdog menolak status basi
+siap    1787041385872  "WhatsApp siap"        <- 7,0 detik, tanpa QR
+```
+
+Bahwa yang berjalan memang kode barunya dibuktikan dua stempel waktu, bukan disimpulkan dari commit: proses mulai
+**15:22:57**, `src/core/cetakHtml.ts` terakhir ditulis **15:13:08**. Worker menjalankan TypeScript-nya langsung
+(`node --import tsx`), jadi berkas itulah yang dibaca saat start -- tidak ada build perantara yang bisa tertinggal.
+
+Sesudahnya: `status: ready`, denyut **14 detik**, `last_error` NULL, antrean **0**.
+
 ### Nota tanpa harga per item, dan contoh berkas untuk jenis yang belum pernah terjadi (18 Agustus 2026)
 
 **Radiologi memang kosong -- di KEDUA database.** Dihitung lewat kolam `sik` milik aplikasi (`sikSelect`), bukan CLI `mysql`:
