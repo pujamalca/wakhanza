@@ -398,6 +398,71 @@ async function kerjakanHapusSesiTertunda(): Promise<void> {
   }
 }
 
+/**
+ * Menautkan sesi dari nol TANPA menyalakan ulang worker, supaya QR terbit
+ * beberapa detik sesudah "Keluar sesi" ditekan.
+ *
+ * ===========================================================================
+ * Kenapa ini boleh ada, padahal "minta restart" dulu dipilih dengan sengaja
+ * ===========================================================================
+ *
+ * Keberatan aslinya benar dan MASIH benar: penautan yang dikerjakan dari dalam
+ * `sessionCommand.ts` tidak dijaga siapa pun, karena batas waktunya hidup di
+ * berkas ini. Yang keliru adalah kesimpulannya -- keberatan itu menolak TEMPAT
+ * pemanggilannya, bukan penautan ulang di dalam proses yang sama. Dipanggil
+ * dari sini, kedua bendera yang dibaca `putusanWatchdog()` bisa disetel ulang,
+ * dan penautannya jatuh persis ke jalur pengawasan yang sudah ada.
+ *
+ * Tiga hal yang membuatnya setara dengan restart, bukan penghematan yang
+ * mengorbankan sesuatu:
+ *
+ *   1. **Chromium tetap segar.** `client.logout()` sudah menutup peramban lama
+ *      di langkah keduanya, jadi `initWaClient()` di bawah meluncurkan proses
+ *      Chromium yang baru sama sekali -- termasuk melepas kembungnya memori
+ *      yang jadi sebab insiden 17 Agustus 2026. Yang hilang cuma kematian
+ *      proses Node-nya.
+ *   2. **Direktori sesinya sudah kosong.** Pemanggil hanya mengembalikan
+ *      `'tautkan-ulang'` sesudah penghapusannya terbukti berhasil; yang gagal
+ *      tetap lewat `'minta-restart'`.
+ *   3. **Pengawasannya sama persis.** `initSelesai = false` membuat
+ *      `sessionWatchdog()` masuk cabang `menautkan`, dan penautan yang
+ *      menggantung dijatuhkan `BATAS_INIT_MS` lewat `shutdown()` -- bukan
+ *      dibiarkan sampai `protocolTimeout` puppeteer.
+ *
+ * Dan yang DIBELI sepadan: restart adalah operasi yang paling sering
+ * menciptakan masalah sesi di mesin ini (penautan tersangkut, kaskade PM2).
+ * Menjadikannya syarat untuk MEMULIHKAN sesi berarti menaruh mode kegagalan
+ * paling mahal tepat di jalur pemulihan.
+ *
+ * Loop `session-command` memang tertahan selama fungsi ini berjalan, dan itu
+ * dapat diterima justru karena berbatas: satu-satunya perintah yang berarti
+ * selama QR menunggu adalah `reconnect`, yang memang sudah diabaikan saat
+ * `qr_pending` supaya kode yang sedang dipindai petugas tidak dibatalkan.
+ */
+async function tautkanUlangSesi(): Promise<void> {
+  // Disetel SEBELUM `initWaClient()`, bukan sesudah: begitu Chromium meluncur,
+  // `initSelesai` yang masih `true` mengirim watchdog memeriksa kesehatan klien
+  // yang belum jadi -- perangkap yang sama yang sudah dibayar `core/watchdog.ts`.
+  initSelesai = false;
+  initMulaiAt = Date.now();
+  logger.warn('menautkan ulang sesi di tempat, tanpa menyalakan ulang worker');
+
+  try {
+    await initWaClient();
+    initSelesai = true;
+    logger.info('penautan ulang selesai, QR siap dipindai di /koneksi');
+  } catch (err) {
+    // Sengaja TIDAK dibiarkan jatuh ke penangkap milik `loop()`: di sana ia cuma
+    // tercatat, `initSelesai` tinggal `false` selamanya, dan yang menyudahinya
+    // baru watchdog tiga menit kemudian. Keluar sekarang lewat `shutdown()`
+    // memberi hasil yang sama dengan biaya tiga menit lebih murah -- dan
+    // `shutdown()` yang menutup Chromium rapi itulah yang menjaga state sesi
+    // tetap utuh untuk proses pengganti.
+    logger.fatal(safeError(err), 'penautan ulang di tempat gagal, keluar supaya proses disupervisi ulang');
+    await shutdown('penautan ulang sesi gagal', 1);
+  }
+}
+
 async function main(): Promise<void> {
   logger.info('wakhanza-worker memulai...');
 
@@ -490,7 +555,12 @@ async function main(): Promise<void> {
       // `initSelesai` dibaca SAAT DIPANGGIL, bukan ditangkap sekali saat loopnya
       // dipasang -- kalau tidak, ia selamanya bernilai false.
       const hasil = await processSessionCommand(initSelesai ? 'siap' : 'menautkan');
-      if (hasil === 'minta-restart') {
+      if (hasil === 'tautkan-ulang') {
+        // Jalur NORMAL sesudah "Keluar sesi": direktori sesinya sudah bersih,
+        // jadi QR bisa diterbitkan proses ini juga. Restart di bawah tinggal
+        // jadi cadangan untuk berkas yang tetap terkunci.
+        await tautkanUlangSesi();
+      } else if (hasil === 'minta-restart') {
         // Lewat `shutdown()`, BUKAN `process.exit()`: keluar tanpa menutup
         // Chromium meninggalkan state sesi setengah tertulis, dan proses
         // penggantinya mewarisi kerusakannya. Pelajaran yang sama sudah dibayar

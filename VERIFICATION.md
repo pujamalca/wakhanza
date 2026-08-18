@@ -7852,3 +7852,69 @@ ada berarti mengembalikan keadaan yang sedang diperbaiki, diam-diam.
 
 **Gerbang**: `tsc --noEmit` 0, `eslint` 0, `npm test` 63 suite / 1143 uji,
 `npm run build` lolos, migrasi `054` diterapkan ke produksi.
+
+## "Keluar sesi" menerbitkan QR TANPA menyalakan ulang worker
+
+Bukti untuk seksi berjudul sama di `FITUR.md`.
+
+### Apa yang salah, terbaca dari kode lama
+
+Cabang `logout` di `sessionCommand.ts` punya SATU `return` untuk seluruh
+cabangnya, dan isinya `'minta-restart'` -- jalur yang penghapusan direktorinya
+berhasil pun tetap melewatinya. Jadi tidak ada satu pun jalan dari tombol
+"Keluar sesi" menuju QR yang tidak melewati matinya proses.
+
+### `logout()` menutup Chromium di langkah KEDUA -- dibaca dari sumbernya
+
+Klaim "saat baris itu tercapai tidak ada peramban yang hidup" tidak
+diperkirakan, melainkan dibaca dari `node_modules/whatsapp-web.js/src/Client.js`:
+
+```js
+async logout() {
+    await this.pupPage.evaluate(() => {
+        return window.require('WAWebSocketModel').Socket.logout();
+    });
+    await this.pupBrowser.close();          // <-- langkah 2
+
+    let maxDelay = 0;
+    while (this.pupBrowser.isConnected() && maxDelay < 10) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        maxDelay++;
+    }
+
+    await this.authStrategy.logout();       // <-- langkah 4, EPERM di Windows
+}
+```
+
+Itu yang membuat penautan ulang di tempat setara dengan restart: Chromium yang
+diluncurkan `initWaClient()` sesudahnya adalah proses yang benar-benar baru,
+bukan yang lama dipakai ulang.
+
+### Pengawasannya jalur yang SUDAH ADA, bukan mekanisme baru
+
+`putusanWatchdog()` (`core/watchdog.ts`) menerima `initSelesai`/`msSejakInitMulai`
+sebagai ARGUMEN, dan `sessionWatchdog()` membacanya dari variabel modul **saat
+dipanggil** -- bukan menangkapnya sekali saat loopnya dipasang. Karena itu
+`initSelesai = false` di `tautkanUlangSesi()` cukup untuk melempar penautan ulang
+ke cabang `menautkan`, tanpa satu baris pun perubahan di `core/watchdog.ts`.
+Cabang itu sendiri sudah dipatok uji yang ada (63 suite / 1143 uji, seluruhnya
+lulus sesudah perubahan ini).
+
+### Gerbang
+
+`npm run typecheck` 0 galat; `npm run lint` 0; `npm test` 63 suite / 1143 uji
+lulus.
+
+### Yang BELUM dibuktikan di produksi, dan kenapa
+
+Perilaku ujungnya -- tekan "Keluar sesi", QR terbit tanpa restart -- **belum
+dijalankan terhadap sesi sungguhan**, dan itu disengaja: menjalankannya berarti
+melepas perangkat nomor rumah sakit dari WhatsApp, yang menuntut ponsel nomor itu
+ada di tangan untuk memindai QR berikutnya. Ia keputusan pemilik sistem, bukan
+langkah verifikasi yang boleh diambil sendiri.
+
+Kodenya juga belum dimuat proses yang berjalan pada saat commit ini: keempat
+proses PM2 baru menyala **7 menit** sebelumnya, dan aturan tercatat di `CLAUDE.md`
+("uptime di bawah ~30 menit berarti tunggu dulu") melarang restart kedua yang
+berdekatan. Keadaan sesi saat itu diukur dan sehat: `status: ready`, umur denyut
+**22 detik**, `hapus_sesi_saat_mulai = 0`, `last_error` NULL, antrean **0**.

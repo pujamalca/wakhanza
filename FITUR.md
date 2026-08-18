@@ -673,6 +673,33 @@ Menulis baris riwayat HANYA saat status benar-benar BERUBAH: pemanggil yang cuma
 
 Grant `DELETE` (tanpa `UPDATE`, karena baris tidak pernah ditulis ulang) diterapkan manual lewat root, dan sekali lagi terbukti tidak diwarisi dari grant skema-lebar (`ERROR 1142` sebelum, berhasil sesudah) -- dibuktikan lewat percobaan INSERT/SELECT/DELETE/UPDATE empiris, bukan diasumsikan: ketiga yang pertama berhasil, `UPDATE` ditolak `ER_TABLEACCESS_DENIED_ERROR` sesuai rancangan.
 
+### "Keluar sesi" menerbitkan QR TANPA menyalakan ulang worker
+
+Sampai perbaikan ini, cabang `logout` di `sessionCommand.ts` mengembalikan `'minta-restart'` pada **semua** jalurnya -- termasuk jalur yang sepenuhnya berhasil, tempat berkas sesinya sudah terhapus dan tidak ada apa pun lagi yang perlu dilepas. Akibatnya menekan "Keluar sesi" selalu berarti: worker mati, PM2 melahirkan penggantinya, penggantinya menautkan dari nol, barulah QR terbit.
+
+**Ongkosnya besar justru di instalasi ini, dan itu tercatat di CLAUDE.md sendiri**: restart BUKAN operasi rutin di sini. Ia punya kemungkinan nyata berakhir tersangkut `menautkan` (tiga kali dalam tiga hari pada 14-15 Agustus 2026), dan sekali tersangkut, pemulihannya menuntut ponsel nomor RS di tangan. Jadi rancangan lama menaruh mode kegagalan paling mahal di mesin ini tepat di tengah jalur yang ada UNTUK memulihkan sesi.
+
+**Yang membuat penautan ulang di tempat aman adalah `logout()` itu sendiri.** Keempat langkahnya berurutan, dan langkah KEDUA menutup Chromium:
+
+```
+1. Socket.logout() di halaman   -> perangkat lepas di sisi server
+2. pupBrowser.close()           -> Chromium DITUTUP        <-- ini yang menentukan
+3. tunggu isConnected -- maks 1 detik
+4. authStrategy.logout()        -> hapus direktori sesi    <-- EPERM di Windows
+```
+
+Jadi saat penghapusan direktorinya berhasil, keadaan prosesnya **identik dengan keadaan sesudah restart**: tidak ada peramban hidup, direktori sesi kosong. `initWaClient()` meluncurkan Chromium yang baru sama sekali -- termasuk melepas kembung memori yang jadi sebab insiden 17 Agustus 2026. Yang hilang cuma kematian proses Node-nya, dan tidak satu pun manfaat menggantung padanya.
+
+**Keberatan lama tidak dicabut, ia dipindahkan tempatnya.** Komentar lama menolak `await client.initialize()` di dalam `sessionCommand.ts` dengan alasan yang masih sepenuhnya benar: penautan yang dikerjakan dari sana tidak dijaga watchdog mana pun, karena `BATAS_INIT_MS` mengawasi `initSelesai`/`initMulaiAt` yang hidup di `index.ts` -- terukur 15 Agustus 2026, tombolnya tampak menggantung lima menit sampai `protocolTimeout`. Yang keliru adalah kesimpulannya: keberatan itu menolak **tempat** pemanggilannya, bukan penautan ulang di dalam proses yang sama.
+
+Karena itu `sessionCommand.ts` hanya **melaporkan** `'tautkan-ulang'`, dan yang memanggil `initWaClient()` tetap `index.ts` -- satu-satunya tempat kedua bendera itu bisa disetel ulang. `putusanWatchdog()` membacanya SAAT DIPANGGIL, bukan menangkapnya sekali, jadi `initSelesai = false` cukup untuk melempar penautan ulang ke cabang `menautkan` yang sudah ada: yang menggantung dijatuhkan pada detik ke-180 lewat `shutdown()`, persis seperti penautan pertama. **Tidak ada mekanisme pengawasan baru yang ditambahkan** -- itu bagian dari alasan perubahan ini bisa dipertanggungjawabkan.
+
+Tiga hal lain yang menempel:
+
+- **Restart TETAP ada sebagai cadangan, dan di sana ia syarat bukan pilihan.** Bila `bersihkanDirektoriSesi()` menyerah sesudah ~45 detik, yang memegang handle-nya adalah proses ini sendiri; tidak ada yang bisa dikerjakan sampai ia mati. Jalur itu tetap menitipkan bendera `hapus_sesi_saat_mulai` (`migrations/054`) dan mengembalikan `'minta-restart'` seperti sebelumnya.
+- **Loop `session-command` memang tertahan selama penautan ulang berjalan, dan itu bisa diterima justru karena berbatas.** Satu-satunya perintah yang berarti selama QR menunggu adalah `reconnect`, dan ia memang sudah diabaikan saat `qr_pending` supaya kode yang sedang dipindai petugas tidak dibatalkan.
+- **Kegagalan penautan ulang keluar lewat `shutdown()` segera, bukan dibiarkan jatuh ke penangkap `loop()`.** Di sana ia cuma tercatat, `initSelesai` tinggal `false` selamanya, dan yang menyudahinya baru watchdog tiga menit kemudian -- hasil yang sama dengan ongkos tiga menit lebih mahal, dan tanpa jaminan Chromium ditutup rapi.
+
 ### Panel pertanyaan tak terjawab (`/balasan-otomatis`)
 
 **207 dari 218** pesan masuk 30 hari terakhir (95%) tidak pernah dibalas apa pun. Angka "Tidak ada aturan yang cocok" sudah menunjukkan MASALAHNYA sejak lama tapi berhenti di situ -- ia tidak pernah mengatakan aturan APA yang perlu ditulis.

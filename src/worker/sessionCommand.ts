@@ -150,13 +150,19 @@ export type FaseSesi = 'menautkan' | 'siap';
 /**
  * Apa yang harus dikerjakan PEMANGGIL sesudahnya.
  *
- * Perintah yang menuntut sesi lahir kembali dijawab dengan meminta restart,
- * bukan dengan memanggil `client.initialize()` dari sini -- lihat alasannya di
- * cabang `logout`. Bentuk nilai balik dipilih supaya `shutdown()` tetap tinggal
- * di `index.ts`: mengimpornya ke sini membuat lingkaran impor antara dua berkas
+ * Perintah yang menuntut sesi lahir kembali TIDAK memanggil
+ * `client.initialize()` dari sini -- lihat alasannya di cabang `logout`. Bentuk
+ * nilai balik dipilih supaya `shutdown()` dan `initWaClient()` tetap tinggal di
+ * `index.ts`: mengimpornya ke sini membuat lingkaran impor antara dua berkas
  * yang sama-sama dimuat saat worker menyala.
+ *
+ * `tautkan-ulang` vs `minta-restart` -- bedanya bukan gaya, melainkan siapa yang
+ * masih memegang direktori sesi. Yang pertama berarti direktorinya sudah bersih
+ * sehingga penautan ulang bisa dikerjakan proses ini juga (QR terbit beberapa
+ * detik kemudian); yang kedua berarti hanya kematian proses ini yang akan
+ * melepas berkasnya.
  */
-export type HasilPerintah = 'tidak-ada' | 'dikerjakan' | 'minta-restart' | 'ditunda';
+export type HasilPerintah = 'tidak-ada' | 'dikerjakan' | 'tautkan-ulang' | 'minta-restart' | 'ditunda';
 
 /**
  * ARCHITECTURE §1: dashboard menitip perintah lewat wa_session.command;
@@ -247,55 +253,89 @@ export async function processSessionCommand(fase: FaseSesi = 'siap'): Promise<Ha
       const { direktoriTerkunci } = await lepasPerangkat();
       await catatTransisiStatus({ status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null });
 
-      if (direktoriTerkunci && !(await bersihkanDirektoriSesi())) {
-        /**
-         * DITITIPKAN ke start berikutnya, bukan dilaporkan sebagai pekerjaan
-         * rumah untuk manusia (054).
-         *
-         * Kalimat yang dulu ditulis di sini -- "Hentikan worker, hapus folder
-         * .wwebjs_auth\session, lalu jalankan worker lagi" -- BENAR dan tidak
-         * bisa dikerjakan orang yang membacanya: ia muncul di dashboard,
-         * sementara jalan keluarnya menuntut shell server plus PM2. Pesan galat
-         * yang jalan keluarnya di luar jangkauan pembacanya adalah kegagalan
-         * rancangan, bukan keterangan.
-         *
-         * Mengulang lebih gigih juga bukan jawabannya: selama proses ini hidup,
-         * sebagian handle memang tidak akan pernah dilepas. Yang menentukan
-         * bukan lamanya menunggu melainkan KAPAN -- dan ada satu momen yang
-         * dijamin bersih, yaitu saat worker MULAI sebelum Chromium meluncur.
-         *
-         * Jalur ke sana sudah ada: cabang ini mengembalikan `'minta-restart'`
-         * di bawah. Yang hilang cuma niatnya bertahan melewati restart itu, dan
-         * itulah yang dititipkan bendera ini.
-         *
-         * Statusnya di atas tetap `qr_pending` dan tidak diubah lagi di sini --
-         * perangkatnya memang sudah lepas.
-         */
-        await WaSession.update(
-          {
-            hapusSesiSaatMulai: true,
-            lastError:
-              'Perangkat sudah dilepas dari WhatsApp. Berkas sesi lama masih dikunci Windows, jadi akan dihapus otomatis saat worker menyala ulang beberapa detik lagi — tidak ada yang perlu dikerjakan.',
-          },
-          { where: { id: 1 } },
-        );
+      /**
+       * ==================================================================
+       * JALUR NORMAL: tautkan ulang DI TEMPAT, QR terbit tanpa restart
+       * ==================================================================
+       *
+       * Versi sebelumnya mengembalikan `'minta-restart'` pada SEMUA jalur --
+       * termasuk saat direktorinya sudah bersih. Akibatnya menekan "Keluar
+       * sesi" selalu berarti mematikan worker lalu menunggu PM2 melahirkan
+       * penggantinya sebelum QR muncul, padahal tidak ada satu pun berkas yang
+       * masih perlu dilepas. Ongkosnya tidak kecil di instalasi ini: restart
+       * BUKAN operasi rutin di sini (lihat CLAUDE.md "Operasi produksi"), ia
+       * punya kemungkinan nyata berakhir tersangkut `menautkan` -- jadi jalan
+       * memulihkan sesi justru dibuat melewati satu-satunya operasi yang paling
+       * sering menciptakan masalah sesi.
+       *
+       * Yang membuat penautan di tempat aman justru `logout()` itu sendiri:
+       * langkah 2-nya MENUTUP Chromium (lihat `lepasPerangkat()`). Jadi saat
+       * baris ini tercapai tidak ada peramban yang hidup, dan `initWaClient()`
+       * meluncurkan Chromium SEGAR di atas direktori kosong -- persis keadaan
+       * yang diberikan restart, dikurangi kematian prosesnya.
+       *
+       * `direktoriTerkunci === false` berarti pustaka sudah menghapusnya
+       * sendiri; sisanya dikerjakan `bersihkanDirektoriSesi()`. Keduanya sama
+       * artinya di sini: tidak ada lagi yang perlu ditunggu.
+       *
+       * Yang MENGAWASI penautan ulangnya tetap watchdog yang sudah ada, bukan
+       * mekanisme baru -- `index.ts` menyetel ulang `initSelesai`/`initMulaiAt`
+       * sebelum memanggil `initWaClient()`, dan `putusanWatchdog()` membaca
+       * keduanya SAAT DIPANGGIL. Jadi penautan ulang yang menggantung dijatuhkan
+       * `BATAS_INIT_MS` lewat `shutdown()` sama seperti penautan pertama.
+       */
+      if (!direktoriTerkunci || (await bersihkanDirektoriSesi())) {
+        return 'tautkan-ulang';
       }
 
       /**
-       * MINTA RESTART, bukan `await client.initialize()` di sini.
+       * DITITIPKAN ke start berikutnya, bukan dilaporkan sebagai pekerjaan
+       * rumah untuk manusia (054).
        *
-       * Baris itu dulu menahan loop perintah selama seluruh penautan ulang --
-       * dan penautan yang menggantung tidak dijaga watchdog mana pun dari sini,
-       * karena `BATAS_INIT_MS` hanya mengawasi `initWaClient()` di `main()`.
-       * Terukur pada gangguan 15 Agustus 2026, penautan yang gagal menggantung
-       * sampai `protocolTimeout` 300 detik: tombol "Keluar sesi" karena itu
-       * tampak menggantung lima menit, padahal perangkatnya sudah lepas dan
-       * statusnya sudah dikoreksi pada baris-baris di atas.
+       * Kalimat yang dulu ditulis di sini -- "Hentikan worker, hapus folder
+       * .wwebjs_auth\session, lalu jalankan worker lagi" -- BENAR dan tidak
+       * bisa dikerjakan orang yang membacanya: ia muncul di dashboard,
+       * sementara jalan keluarnya menuntut shell server plus PM2. Pesan galat
+       * yang jalan keluarnya di luar jangkauan pembacanya adalah kegagalan
+       * rancangan, bukan keterangan.
        *
-       * Proses baru mengerjakan penautannya di bawah pengawasan penuh, dan
-       * jalur itu sudah teruji tiap kali PM2 menyalakan ulang worker. Jadi yang
-       * dibuang bukan kemampuan, melainkan satu jalur init kedua yang tidak
-       * terjaga.
+       * Mengulang lebih gigih juga bukan jawabannya: selama proses ini hidup,
+       * sebagian handle memang tidak akan pernah dilepas. Yang menentukan
+       * bukan lamanya menunggu melainkan KAPAN -- dan ada satu momen yang
+       * dijamin bersih, yaitu saat worker MULAI sebelum Chromium meluncur.
+       *
+       * Jalur ke sana sudah ada: cabang ini mengembalikan `'minta-restart'`
+       * di bawah. Yang hilang cuma niatnya bertahan melewati restart itu, dan
+       * itulah yang dititipkan bendera ini.
+       *
+       * Statusnya di atas tetap `qr_pending` dan tidak diubah lagi di sini --
+       * perangkatnya memang sudah lepas.
+       */
+      await WaSession.update(
+        {
+          hapusSesiSaatMulai: true,
+          lastError:
+            'Perangkat sudah dilepas dari WhatsApp. Berkas sesi lama masih dikunci Windows, jadi akan dihapus otomatis saat worker menyala ulang beberapa detik lagi — tidak ada yang perlu dikerjakan.',
+        },
+        { where: { id: 1 } },
+      );
+
+      /**
+       * CADANGAN, dan satu-satunya jalur yang masih menuntut restart: berkas
+       * sesi lama TETAP terkunci sesudah ~45 detik. Di sini restart bukan
+       * pilihan melainkan syarat -- yang memegang handle-nya adalah proses ini
+       * sendiri, jadi tidak ada yang bisa dikerjakan sampai ia mati.
+       *
+       * Tetap BUKAN `await client.initialize()` dari sini, dan alasan aslinya
+       * masih berlaku sepenuhnya: baris itu menahan loop perintah selama seluruh
+       * penautan, dan penautan yang menggantung DI SINI tidak dijaga watchdog
+       * mana pun -- `BATAS_INIT_MS` mengawasi `initSelesai`/`initMulaiAt` yang
+       * hidup di `index.ts`. Terukur pada gangguan 15 Agustus 2026: tombol
+       * "Keluar sesi" tampak menggantung lima menit sampai `protocolTimeout`.
+       *
+       * Itu pula sebabnya jalur normal di atas mengembalikan `'tautkan-ulang'`
+       * alih-alih menautkan sendiri: yang memanggil `initWaClient()` tetap
+       * `index.ts`, satu-satunya tempat kedua bendera itu bisa disetel ulang.
        */
       return 'minta-restart';
     } else if (command === 'reconnect') {
