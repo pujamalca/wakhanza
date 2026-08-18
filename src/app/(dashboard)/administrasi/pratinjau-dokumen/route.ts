@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { requireRole } from '@/lib/authz';
-import { contohPermintaanDokumen, muatDokumen, dokumenKeHtml, dokumenKeBerkas } from '@/lib/dokumen';
+import {
+  contohPermintaanDokumen,
+  contohDokumenKarangan,
+  muatDokumen,
+  dokumenKeHtml,
+  dokumenKeBerkas,
+} from '@/lib/dokumen';
 import { namaBerkasDokumen, type JenisDokumen } from '@/core/dokumenDoc';
 import { lolos } from '@/core/cetakHtml';
 import { logger } from '@/lib/logger';
@@ -83,20 +89,29 @@ export async function GET(request: Request): Promise<Response> {
   if (!jenis || !JENIS_SAH.includes(jenis)) return galat(400, 'Jenis dokumen tidak dikenali.');
 
   try {
+    /**
+     * Belum pernah ada kejadian jenis ini -> dokumen KARANGAN, bukan halaman
+     * galat.
+     *
+     * Keadaannya nyata di instalasi ini (radiologi: nol baris), dan jawaban
+     * lamanya membuat sakelar yang mengirim berkas ke pasien harus diputuskan
+     * tanpa seorang pun pernah melihat bentuk berkasnya. Yang tidak boleh
+     * hilang justru pembedaannya: halaman contoh MENGATAKAN dirinya contoh
+     * (`contoh: true` -> pita di atas badan), jadi "belum pernah ada" tetap
+     * terbaca berbeda dari "ini punya pasien sungguhan".
+     *
+     * Yang TETAP dijawab galat adalah kunjungan yang tidak ketemu di bawah:
+     * itu bukan "belum ada data" melainkan tanda ada yang rusak, dan
+     * menggantinya dengan contoh karangan akan menguburnya.
+     */
     const permintaan = await contohPermintaanDokumen(jenis);
-    if (!permintaan) {
-      // DIBEDAKAN dari kegagalan render: "belum pernah ada" adalah keterangan
-      // yang berguna (fiturnya belum akan menghasilkan apa pun kalau dinyalakan
-      // hari ini), sementara "gagal" berarti ada yang rusak. Keduanya terbaca
-      // sama bila dijawab dengan halaman kosong yang sama.
-      return galat(404, 'Belum ada kejadian jenis ini di Khanza, jadi belum ada yang bisa dijadikan contoh.');
-    }
+    const karangan = permintaan === null;
 
-    const isi = await muatDokumen(permintaan);
+    const isi = karangan ? await contohDokumenKarangan(jenis) : await muatDokumen(permintaan);
     if (!isi) return galat(404, 'Kunjungan untuk contoh ini tidak ditemukan di Khanza.');
 
     if (!sebagaiPdf) {
-      const html = await dokumenKeHtml(isi);
+      const html = await dokumenKeHtml(isi, { contoh: karangan });
       return new NextResponse(html, {
         headers: {
           'content-type': 'text/html; charset=utf-8',
@@ -109,7 +124,7 @@ export async function GET(request: Request): Promise<Response> {
 
     // Berkasnya dirakit `dokumenKeBerkas()` yang SAMA dipakai worker -- yang
     // dilihat staf memang berkas yang akan diterima pasien.
-    const hasil = await dokumenKeBerkas(isi);
+    const hasil = await dokumenKeBerkas(isi, { contoh: karangan });
     const nama = namaBerkasDokumen(jenis, isi.kepala.tanggalRingkas.split('-').reverse().join('-'));
 
     return new NextResponse(new Uint8Array(hasil.isi), {

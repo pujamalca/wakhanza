@@ -66,8 +66,9 @@ const ISI: Record<JenisDokumen, React.ReactNode> = {
   ),
   nota: (
     <>
-      Daftar rinci layanan berikut tarif, jumlah, subtotal per kelompok, dan totalnya. Termasuk{' '}
-      <strong>nama obat</strong>, kecuali diringkas lewat sakelar di bawah.
+      Daftar nama layanan dan obat berikut banyaknya — <strong>tanpa harga per item</strong>. Yang bernilai rupiah
+      hanya subtotal tiap kelompok dan total tagihan, dan keduanya tetap menghitung seluruh item. Nama obat ikut,
+      kecuali diringkas lewat sakelar di bawah.
     </>
   ),
 };
@@ -75,24 +76,42 @@ const ISI: Record<JenisDokumen, React.ReactNode> = {
 function TombolPratinjau({ jenis, adaContoh }: { jenis: JenisDokumen; adaContoh: boolean }) {
   const [buka, setBuka] = useState(false);
 
-  if (!adaContoh) {
-    return (
-      <p className="mt-3 text-xs text-muted-foreground">
-        Belum ada kejadian jenis ini di Khanza, jadi belum ada yang bisa dijadikan contoh pratinjau.
-      </p>
-    );
-  }
-
+  /**
+   * Tombolnya ADA sekalipun Khanza belum pernah mencatat kejadian jenis ini.
+   *
+   * Sebelumnya yang tampil cuma kalimat "belum ada yang bisa dijadikan contoh",
+   * dan itu keadaan NYATA untuk radiologi di rumah sakit ini. Akibatnya sakelar
+   * yang mengirim berkas berisi narasi dokter ke pasien harus diputuskan tanpa
+   * seorang pun pernah melihat bentuk berkasnya. Contohnya lalu memakai data
+   * karangan -- dan halaman itu mengatakan dirinya karangan, di berkasnya
+   * maupun di sini.
+   */
   return (
     <>
       <Button variant="secondary" size="sm" className="mt-3" onClick={() => setBuka(true)}>
-        Lihat contoh berkas
+        {adaContoh ? 'Lihat contoh berkas' : 'Lihat contoh berkas (data karangan)'}
       </Button>
+
+      {!adaContoh && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Belum ada satu pun kejadian jenis ini di Khanza. Contohnya memakai <strong>data karangan</strong>: bentuk
+          halamannya sama persis dengan yang akan terkirim, isinya bukan pasien mana pun.
+        </p>
+      )}
 
       <Modal open={buka} onClose={() => setBuka(false)} size="xl" title={`Contoh ${JUDUL[jenis].toLowerCase()}`}>
         <p className="mb-2 text-xs text-muted-foreground">
-          Contohnya diambil dari <strong>kejadian terbaru yang sungguhan</strong> di Khanza, bukan data karangan — itu
-          satu-satunya cara memastikan bentuknya benar. Jangan dibiarkan terbuka di layar bersama.
+          {adaContoh ? (
+            <>
+              Contohnya diambil dari <strong>kejadian terbaru yang sungguhan</strong> di Khanza, bukan data karangan —
+              itu satu-satunya cara memastikan bentuknya benar. Jangan dibiarkan terbuka di layar bersama.
+            </>
+          ) : (
+            <>
+              Belum ada kejadian jenis ini di Khanza, jadi isinya <strong>data karangan</strong> — bukan pasien, bukan
+              hasil pemeriksaan, dan bukan tagihan siapa pun. Yang dibuktikannya bentuk halaman, bukan bentuk data.
+            </>
+          )}
         </p>
         {/* Lebar dipaku 794 px (A4 pada 96 dpi) dan digulir menyamping bila
             layar sempit. Membiarkannya melar mengikuti modal mengubah

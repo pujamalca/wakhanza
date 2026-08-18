@@ -154,7 +154,8 @@ export interface IsiDokumenRadiologi {
  *
  *   `seksi`       judul kelompok ("Obat & BHP"). Kadang membawa angkanya
  *                 sendiri -- baris "Registrasi" menyimpan tarifnya di situ.
- *   `item`        satu layanan/barang berikut tarif, jumlah, dan totalnya.
+ *   `item`        satu layanan/obat berikut BANYAKNYA -- tanpa satu pun
+ *                 angka rupiah; lihat `BarisNotaDokumen`.
  *   `subtotal`    jumlah kelompok di atasnya.
  *   `keterangan`  baris teks tanpa angka, mis. nama dokter di bawah "Dokter :".
  *   `total`       jumlah SELURUH baris di atasnya -- dihitung di sini, karena
@@ -162,11 +163,30 @@ export interface IsiDokumenRadiologi {
  */
 export type JenisBarisNota = 'seksi' | 'item' | 'subtotal' | 'keterangan' | 'total';
 
+/**
+ * TIDAK ADA rupiah pada baris `item`, dan ketiadaannya disengaja.
+ *
+ * Nota Khanza mencetak tarif satuan DAN jumlah rupiah untuk tiap layanan;
+ * berkas ini sengaja tidak. Yang dijawab sebuah nota yang beredar lewat
+ * WhatsApp adalah "berapa yang harus saya bayar" plus "untuk apa saja" --
+ * bukan daftar harga satuan rumah sakit, yang begitu berpindah tangan berhenti
+ * bisa dijelaskan siapa pun dan berumur jauh lebih panjang daripada tarif yang
+ * berlaku saat itu.
+ *
+ * Karena itu `total` hanya terisi pada baris `seksi`/`subtotal`/`total`, dan
+ * kolom tarif satuan tidak ada sama sekali sebagai field -- field yang ada tapi
+ * tidak pernah dirender adalah persis cara perubahan berikutnya diam-diam
+ * mengembalikannya ke halaman.
+ *
+ * Angkanya TETAP dijumlahkan penuh (`susunNota`), jadi total tagihannya sama
+ * persis dengan yang dibayar di kasir.
+ */
 export interface BarisNotaDokumen {
   jenis: JenisBarisNota;
   label: string;
-  biaya: string;
+  /** Banyaknya layanan/obat. Bukan rupiah -- lihat catatan di atas. */
   jumlah: string;
+  /** Rupiah; KOSONG untuk baris `item` dan `keterangan`. */
   total: string;
 }
 
@@ -520,9 +540,11 @@ export function susunNota(
       hasil.push({
         jenis: 'item',
         label: isianSurat(b.nm_perawatan),
-        biaya: rupiahBertanda(b.biaya),
         jumlah: formatJumlah(b.jumlah),
-        total: rupiahBertanda(b.totalbiaya),
+        // Rupiah baris ini sengaja tidak diteruskan -- `angka` di atas sudah
+        // masuk `subtotalBerjalan` dan `totalSeluruh`, jadi yang hilang cuma
+        // tampilannya, bukan hitungannya.
+        total: '',
       });
       continue;
     }
@@ -542,7 +564,6 @@ export function susunNota(
       hasil.push({
         jenis: 'subtotal',
         label: 'Subtotal',
-        biaya: '',
         jumlah: '',
         total: rupiahBertanda(subtotalBerjalan),
       });
@@ -556,7 +577,6 @@ export function susunNota(
       hasil.push({
         jenis: 'seksi',
         label: labelSeksi,
-        biaya: '',
         jumlah: '',
         // Baris "Registrasi" membawa tarifnya sendiri di kolom total; kelompok
         // lain nol, dan nol di sini berarti "tidak ada angka", bukan "gratis".
@@ -567,11 +587,11 @@ export function susunNota(
 
     // Sisa: baris teks tanpa angka (nama dokter di bawah judul "Dokter :").
     const teks = isianSurat(b.nm_perawatan);
-    if (teks) hasil.push({ jenis: 'keterangan', label: teks, biaya: '', jumlah: '', total: '' });
+    if (teks) hasil.push({ jenis: 'keterangan', label: teks, jumlah: '', total: '' });
   }
 
   if (hasil.length > 0) {
-    hasil.push({ jenis: 'total', label: 'TOTAL', biaya: '', jumlah: '', total: rupiahBertanda(totalSeluruh) });
+    hasil.push({ jenis: 'total', label: 'TOTAL', jumlah: '', total: rupiahBertanda(totalSeluruh) });
   }
 
   return {

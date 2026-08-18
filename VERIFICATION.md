@@ -1679,6 +1679,39 @@ Sesi WhatsApp sebelum dan sesudah pemasangan: `status=ready`, umur denyut 5 deti
 
 **Worker belum dimulai ulang, dan itu disengaja.** Ketiga sakelar mati, jadi perilaku kode lama dan baru identik: `params.lampiran` `undefined` -> `runSisipCycle` tidak menghitung kunci baru dan tidak merender apa pun, dan `media: null` pada salinan tujuan tidak mengubah apa pun karena belum ada pemicu pasien yang mengisi `media`. Restart hari ini berarti mengambil risiko kaskade yang **terjadi sungguhan pada mesin ini hari ini juga** (delapan instance dalam ~45 detik dari satu `pm2 restart`) tanpa imbalan apa pun. Yang WAJIB: worker dimulai ulang sebelum sakelar pertama dinyalakan.
 
+### Nota tanpa harga per item, dan contoh berkas untuk jenis yang belum pernah terjadi (18 Agustus 2026)
+
+**Radiologi memang kosong -- di KEDUA database.** Dihitung lewat kolam `sik` milik aplikasi (`sikSelect`), bukan CLI `mysql`:
+
+```
+hasil_radiologi n   = 0        periksa_lab n = 74
+periksa_radiologi n = 0        nota_jalan  n = 12345
+contoh rad          = []       contoh periksa_rad = []
+```
+
+`information_schema` atas 22 tabel bernama `%radiologi%`: satu-satunya yang berisi adalah katalog (`jns_perawatan_radiologi` 468) dan tabel sementara; `hasil_radiologi`/`periksa_radiologi` **0 di `alca` maupun di `sik`**. Jadi "belum ada contoh" bukan keadaan sementara yang akan terisi sendiri.
+
+**Jalur pratinjaunya, dijalankan apa adanya lewat `lib/dokumen.ts`:**
+
+```
+RADIOLOGI
+  permintaan sungguhan  : TIDAK ADA -> karangan
+  pita CONTOH           : true
+  narasi bacaan         : true          (baris "Kesan:" utuh)
+NOTA (data sungguhan)
+  item membawa rupiah   : false
+  judul kolom           : Layanan / Obat
+  ada "Layanan / Barang": false
+  kalimat penjelas      : true
+  pita CONTOH           : false
+```
+
+Berkas PDF-nya benar-benar terbentuk, bukan cuma HTML-nya: `application/pdf, 212.953 bytes, 1.269 ms`, berawalan `%PDF-` -- Chromium diluncurkan lewat `dokumenKeBerkas()` yang sama dipakai worker.
+
+**Angka nota tidak bergeser.** `dokumenDoc.test.ts` menjaga subtotal `Rp3.600` dan total `Rp8.600` tetap sama seperti sebelum harga per item dihilangkan, DAN menjaga tidak ada satu pun `Rp` pada baris `item` (`JSON.stringify(baris)` diperiksa, bukan cuma satu field). Tarif satuan `Rp260` milik obat contoh dibuktikan **tidak muncul di mana pun** pada HTML-nya.
+
+Gerbang: `tsc --noEmit` 0 galat, `eslint .` 0, **64 suite / 1.150 uji** hijau (satu suite baru `dokumenContoh.test.ts` 5 uji, plus 2 uji baru di `dokumenDoc.test.ts`).
+
 ## PENGINGAT KONTROL non-BPJS (`migrations/032`) -- padanan BPJS_KONTROL dari sisi Khanza sendiri
 
 Verifikasi 8 Agustus 2026. Nama pasien, nomor telepon, dan nama dokter sungguhan

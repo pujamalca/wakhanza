@@ -11,6 +11,8 @@ import {
   teksAsalUsulDokumen,
 } from '@/core/dokumenDoc';
 import { renderDokumenHtml } from '@/core/dokumenHtml';
+import { contohIsiDokumen } from '@/core/dokumenContoh';
+import { tanggalLokal } from '@/core/bpjs';
 import { htmlKePdf } from '@/lib/pdf';
 import {
   ambilIdentitasKunjungan,
@@ -170,18 +172,45 @@ export async function bacaCatatanKakiDokumen(kop: Awaited<ReturnType<typeof baca
  * berhenti bisa dijamin sama dengan yang diterbitkan rumah sakit, dan itu
  * persis jaminan yang membuat berkas ini ada gunanya.
  */
-export async function dokumenKeBerkas(isi: IsiDokumen): Promise<{ isi: Buffer; mime: string }> {
-  return { isi: await htmlKePdf(await dokumenKeHtml(isi)), mime: 'application/pdf' };
+export async function dokumenKeBerkas(
+  isi: IsiDokumen,
+  opsi: OpsiRenderDokumen = {},
+): Promise<{ isi: Buffer; mime: string }> {
+  return { isi: await htmlKePdf(await dokumenKeHtml(isi, opsi)), mime: 'application/pdf' };
+}
+
+export interface OpsiRenderDokumen {
+  /**
+   * Isinya data karangan (`core/dokumenContoh.ts`) -- halamannya wajib
+   * mengatakannya. Diteruskan apa adanya ke `renderDokumenHtml`; lihat
+   * alasannya di sana.
+   */
+  contoh?: boolean;
 }
 
 /** Satu jalur dari isi dokumen ke HTML, dipakai pratinjau MAUPUN pengiriman. */
-export async function dokumenKeHtml(isi: IsiDokumen): Promise<string> {
+export async function dokumenKeHtml(isi: IsiDokumen, opsi: OpsiRenderDokumen = {}): Promise<string> {
   const kop = await bacaKopSurat();
   const [catatanKaki, qrDataUri] = await Promise.all([
     bacaCatatanKakiDokumen(kop),
     buatQrAsalUsul(teksAsalUsulDokumen(kop, isi.kepala)),
   ]);
-  return renderDokumenHtml(isi, kop, { catatanKaki, qrDataUri });
+  return renderDokumenHtml(isi, kop, { catatanKaki, qrDataUri, contoh: opsi.contoh });
+}
+
+/**
+ * Isi dokumen KARANGAN untuk jenis yang belum pernah terjadi di Khanza.
+ *
+ * Tinggal di sini, bukan di rutenya, semata karena satu hal yang harus ikut:
+ * `rincianObatAktif()`. Contoh nota yang mengabaikan sakelar itu memperlihatkan
+ * bentuk yang BUKAN bentuk yang akan terkirim -- yaitu satu-satunya cacat yang
+ * membuat sebuah pratinjau lebih buruk daripada tidak ada.
+ */
+export async function contohDokumenKarangan(jenis: JenisDokumen): Promise<IsiDokumen> {
+  return contohIsiDokumen(jenis, {
+    tanggal: tanggalLokal(new Date()),
+    rincianObat: await rincianObatAktif(),
+  });
 }
 
 /**

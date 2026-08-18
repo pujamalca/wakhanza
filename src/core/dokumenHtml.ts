@@ -66,11 +66,26 @@ table.data td.indent { padding-left: 12px; }
   font-size: 9.5pt; line-height: 1.4; font-family: Arial, Helvetica, sans-serif;
 }
 .kosong { color: #666; font-style: italic; }
+.pita-contoh {
+  margin: 0 0 10px; padding: 8px 10px; border: 2px solid #000; background: #eee;
+  font-size: 10pt; line-height: 1.4; font-family: Arial, Helvetica, sans-serif; text-align: center;
+}
+.pita-contoh b { letter-spacing: 0.5px; }
 `;
 
 export interface OpsiDokumen {
   catatanKaki: string;
   qrDataUri: string;
+  /**
+   * Halaman ini berisi data KARANGAN (`core/dokumenContoh.ts`).
+   *
+   * Wajib diteruskan oleh siapa pun yang merender contoh: berkasnya bisa
+   * diunduh dan diteruskan seperti berkas sungguhan, dan dokumen rumah sakit
+   * berisi angka karangan yang tidak menyebut dirinya karangan adalah dokumen
+   * palsu -- apa pun niat pembuatnya. Ditaruh di ATAS badan, sebelum satu pun
+   * angka terbaca, bukan di catatan kaki.
+   */
+  contoh?: boolean;
 }
 
 /**
@@ -90,6 +105,15 @@ const PERINGATAN_HASIL =
   'Angka di luar nilai rujukan tidak selalu berarti penyakit, dan angka di dalam rentang tidak selalu berarti sehat. ' +
   'Silakan bawa hasil ini saat kontrol agar dibaca bersama dokter yang merawat Anda.';
 
+/**
+ * Pita "contoh" -- satu-satunya penanda yang membedakan halaman karangan dari
+ * dokumen sungguhan, jadi ia sengaja di ATAS badan dan berbingkai tebal.
+ */
+const PITA_CONTOH =
+  '<div class="pita-contoh"><b>CONTOH BENTUK DOKUMEN</b><br>' +
+  'Seluruh nama, angka, dan keterangan di halaman ini KARANGAN -- bukan pasien, bukan hasil pemeriksaan, ' +
+  'dan bukan tagihan siapa pun. Dipakai karena belum ada satu pun kejadian jenis ini di Khanza.</div>';
+
 export function renderDokumenHtml(isi: IsiDokumen, kop: KopSurat, opsi: OpsiDokumen): string {
   const judul = JUDUL_DOKUMEN[isi.jenis];
   const badan =
@@ -103,6 +127,7 @@ ${kopHtml(kop)}
 
 <h1>${lolos(judul)}</h1>
 <div style="height:10px"></div>
+${opsi.contoh ? PITA_CONTOH : ''}
 
 ${badan}
 
@@ -220,6 +245,21 @@ ${bacaan}
 // NOTA / TAGIHAN
 // ---------------------------------------------------------------------------
 
+/**
+ * Kalimat yang WAJIB menemani nota, karena berkas ini memang berbeda dari
+ * lembar yang dicetak di loket.
+ *
+ * Nota tanpa harga per item, berikut satu angka TOTAL di kakinya, terbaca
+ * sebagai nota yang rusak atau dipotong bila tidak ada yang menjelaskannya --
+ * dan pasien yang mencoba menjumlahkan sendiri lalu tidak bisa akan menelepon.
+ * Alasan yang sama persis dengan `CATATAN_OBAT_DIRINGKAS` di bawahnya: yang
+ * sengaja tidak dicantumkan harus DIKATAKAN, bukan dihilangkan diam-diam.
+ */
+const CATATAN_TANPA_HARGA_ITEM =
+  'Harga per item sengaja tidak dicantumkan pada berkas ini. Yang tercantum adalah subtotal tiap kelompok ' +
+  'dan total tagihan, dan keduanya sudah menghitung seluruh item di atasnya. ' +
+  'Rincian harga per item dapat diminta di loket rumah sakit.';
+
 const CATATAN_OBAT_DIRINGKAS =
   'Rincian nama obat sengaja tidak dicantumkan pada berkas ini. Totalnya tetap terhitung penuh; ' +
   'rincian lengkapnya dapat diminta di loket rumah sakit.';
@@ -237,25 +277,27 @@ function badanNota(isi: IsiDokumenNota): string {
   }
 
   /**
-   * Baris ITEM memakai keempat kolom; keempat jenis lainnya membentang tiga
-   * kolom pertama lalu menaruh angkanya di kolom Jumlah.
+   * TIGA kolom, dan kolom rupiahnya KOSONG pada baris item.
    *
-   * Sejajarnya kolom angka itu yang membuat nota bisa dijumlahkan dengan mata:
-   * subtotal dan total yang tercetak di kolom lain memaksa pembacanya mencari,
+   * Baris item menyebut apa yang diberikan berikut banyaknya; yang membawa
+   * angka hanya baris kelompok, subtotal, dan total (lihat `BarisNotaDokumen`).
+   * Kolom rupiahnya tetap ada dan tetap di ujung kanan justru karena itu:
+   * subtotal dan total yang tercetak sejajar bisa dijumlahkan dengan mata,
+   * sementara angka yang mengambang di kolom lain memaksa pembacanya mencari --
    * dan yang dicari pada sebuah tagihan adalah persis angka yang harus
    * dipercaya.
    */
   const baris = isi.baris
     .map((b) => {
       if (b.jenis === 'item') {
-        return `<tr><td class="indent">${lolos(b.label)}</td><td class="num">${lolos(
-          b.biaya,
-        )}</td><td class="mid">${lolos(b.jumlah)}</td><td class="num">${lolos(b.total)}</td></tr>`;
+        return `<tr><td class="indent">${lolos(b.label)}</td><td class="mid">${lolos(
+          b.jumlah,
+        )}</td><td class="num"></td></tr>`;
       }
       const kelas =
         b.jenis === 'seksi' ? ' class="judul"' : b.jenis === 'keterangan' ? '' : ' class="tegas"';
       const sel = b.jenis === 'keterangan' ? ' class="indent"' : '';
-      return `<tr${kelas}><td colspan="3"${sel}>${lolos(b.label)}</td><td class="num">${lolos(
+      return `<tr${kelas}><td colspan="2"${sel}>${lolos(b.label)}</td><td class="num">${lolos(
         b.total,
       )}</td></tr>`;
     })
@@ -271,9 +313,10 @@ function badanNota(isi: IsiDokumenNota): string {
 
   return `${kepala}
 <table class="data">
-<thead><tr><th style="width:52%">Layanan / Barang</th><th style="width:16%">Biaya</th><th style="width:10%">Jml</th><th style="width:22%">Jumlah</th></tr></thead>
+<thead><tr><th style="width:66%">Layanan / Obat</th><th style="width:12%">Jml</th><th style="width:22%">Jumlah</th></tr></thead>
 <tbody>${baris}</tbody>
 </table>
 ${pembayaran}
+<div class="peringatan">${lolos(CATATAN_TANPA_HARGA_ITEM)}</div>
 ${isi.obatDiringkas ? `<div class="peringatan">${lolos(CATATAN_OBAT_DIRINGKAS)}</div>` : ''}`;
 }

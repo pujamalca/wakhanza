@@ -156,7 +156,7 @@ async function main() {
       for (const b of isi.baris) {
         const sisip = b.jenis === 'item' || b.jenis === 'keterangan' ? '    ' : '  ';
         console.log(
-          `${sisip}${`[${b.jenis}] ${b.label}`.padEnd(46)} ${b.biaya.padStart(11)} ${b.jumlah.padStart(4)} ${b.total.padStart(12)}`,
+          `${sisip}${`[${b.jenis}] ${b.label}`.padEnd(58)} ${b.jumlah.padStart(4)} ${b.total.padStart(12)}`,
         );
       }
       if (isi.pembayaran.length) {

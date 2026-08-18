@@ -284,9 +284,38 @@ describe('susunNota', () => {
   });
 
   it('menulis nilai negatif sebagai -Rp5.000, bukan Rp-5.000', () => {
+    // Diuji lewat baris yang memang MEMBAWA rupiah -- baris item tidak lagi
+    // membawanya sama sekali (uji berikutnya). Nota berisi potongan saja
+    // menjadikan TOTAL-nya negatif.
+    const hanyaPotongan: BarisNotaMasuk[] = [
+      { no_baris: 'Potongan Biaya', nm_perawatan: ':', pemisah: '', biaya: 0, jumlah: 0, totalbiaya: 0, status: 'Potongan' },
+      { no_baris: '', nm_perawatan: 'Potongan Contoh', pemisah: ':', biaya: 5000, jumlah: 1, totalbiaya: -5000, status: 'Potongan' },
+    ];
+    const isi = susunNota(IDENTITAS, hanyaPotongan, [], 'N/1', '2026-01-02', { rincianObat: true });
+    expect(isi.baris.find((b) => b.jenis === 'total')!.total).toBe('-Rp5.000');
+  });
+
+  /**
+   * Nota yang beredar lewat WhatsApp menjawab "berapa" dan "untuk apa saja",
+   * BUKAN daftar harga satuan rumah sakit -- yang begitu berpindah tangan
+   * berhenti bisa dijelaskan siapa pun dan berumur jauh lebih panjang daripada
+   * tarif yang berlaku saat itu.
+   *
+   * Yang dijaga di sini bukan tampilannya melainkan DATANYA: baris item tidak
+   * boleh membawa rupiah sama sekali, sehingga tidak ada yang bisa dirender
+   * kembali tanpa perubahan yang disengaja.
+   */
+  it('tidak membawa satu pun rupiah pada baris item, sementara totalnya utuh', () => {
     const isi = susunNota(IDENTITAS, NOTA, [], 'N/1', '2026-01-02', { rincianObat: true });
-    const potongan = isi.baris.find((b) => b.label === 'Potongan Contoh')!;
-    expect(potongan.total).toBe('-Rp5.000');
+    const item = isi.baris.filter((b) => b.jenis === 'item');
+    expect(item.length).toBeGreaterThan(0);
+    for (const b of item) {
+      expect(b.total).toBe('');
+      expect(JSON.stringify(b)).not.toContain('Rp');
+    }
+    // Hitungannya TIDAK ikut hilang -- ini yang membedakannya dari membuang baris.
+    expect(isi.baris.find((b) => b.jenis === 'subtotal')!.total).toBe('Rp3.600');
+    expect(isi.baris.find((b) => b.jenis === 'total')!.total).toBe('Rp8.600');
   });
 
   it('tidak menempelkan baris TOTAL pada nota yang memang kosong', () => {
@@ -366,6 +395,27 @@ describe('renderDokumenHtml', () => {
     });
     expect(lab).toContain('BUKAN diagnosis');
     expect(nota).not.toContain('BUKAN diagnosis');
+  });
+
+  /**
+   * Tiga hal sekaligus, dan ketiganya soal apa yang DIBACA pasien pada nota:
+   * judul kolomnya menyebut obat (bukan "Barang" yang tidak dipakai siapa pun),
+   * tidak ada satu pun rupiah per item, dan halamannya MENGATAKAN kenapa.
+   */
+  it('mencetak nota tanpa harga per item, berikut kalimat yang menjelaskannya', () => {
+    const html = renderDokumenHtml(susunNota(IDENTITAS, NOTA, [], 'N/1', '2026-01-02', { rincianObat: true }), KOP, {
+      catatanKaki: '',
+      qrDataUri: '',
+    });
+    expect(html).toContain('Layanan / Obat');
+    expect(html).not.toContain('Layanan / Barang');
+    expect(html).toContain('Harga per item sengaja tidak dicantumkan');
+
+    // Tarif satuan "Rp260" milik OBAT CONTOH A tidak boleh muncul di mana pun,
+    // sementara subtotal dan totalnya tetap ada.
+    expect(html).not.toContain('Rp260');
+    expect(html).toContain('Rp3.600');
+    expect(html).toContain('Rp8.600');
   });
 
   it('memberi tahu pembacanya saat rincian obat sengaja diringkas', () => {
