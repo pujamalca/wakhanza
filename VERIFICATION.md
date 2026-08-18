@@ -7946,11 +7946,42 @@ melepas perangkat nomor rumah sakit dari WhatsApp, yang menuntut ponsel nomor it
 ada di tangan untuk memindai QR berikutnya. Ia keputusan pemilik sistem, bukan
 langkah verifikasi yang boleh diambil sendiri.
 
-Kodenya juga belum dimuat proses yang berjalan pada saat commit ini: keempat
+Kodenya belum dimuat proses yang berjalan pada saat commit ini: keempat
 proses PM2 baru menyala **7 menit** sebelumnya, dan aturan tercatat di `CLAUDE.md`
 ("uptime di bawah ~30 menit berarti tunggu dulu") melarang restart kedua yang
 berdekatan. Keadaan sesi saat itu diukur dan sehat: `status: ready`, umur denyut
 **22 detik**, `hapus_sesi_saat_mulai = 0`, `last_error` NULL, antrean **0**.
+
+**SUDAH dimuat sejak 18 Agustus 2026 pukul 14:44 WIB.** Keempat pemeriksaan
+sebelum restart dijalankan dan seluruhnya lolos -- `status: ready`, umur denyut
+**6 detik**, antrean **0 baris** `pending`/`sending`, uptime **6 jam** (jauh di
+atas ambang 30 menit) -- ditambah dua yang khas mesin ini: `hapus_sesi_saat_mulai`
+**0** (jadi restart tidak akan menghapus sesi yang sah) dan ukuran Chromium
+**1.398 MB / 12 proses**, sepertiga dari keadaan saat insiden 17 Agustus
+(4.384 MB / 33 proses).
+
+Ditempuh `pm2 stop` lalu `pm2 start`, bukan `pm2 restart`. Keduanya berperilaku
+persis seperti yang tertulis di `CLAUDE.md`:
+
+```
+"wakhanza-worker berhenti..."        <- handler shutdown BENAR-BENAR jalan
+"sesi WhatsApp ditutup rapi"
+sisa chrome.exe pemegang sesi: 0     <- diukur sesudah stop, tidak ada yang perlu dimatikan paksa
+```
+
+Penautannya **8 detik** tanpa QR (`authenticating` 14:44:25 -> `ready` 14:44:33,
+dibaca dari `wa_session_event` lewat `CONVERT_TZ`), denyut kembali ke **1 detik**,
+bendera tetap **0**, `last_error` NULL.
+
+Bahwa yang berjalan memang kode barunya dibuktikan dua stempel waktu, bukan
+disimpulkan dari commit: proses mulai **14:44:23**, sementara
+`src/worker/wa-client.ts`, `sessionCommand.ts`, dan `index.ts` terakhir ditulis
+**08:14-08:17** hari yang sama. Worker menjalankan TypeScript-nya langsung
+(`node --import tsx`), jadi berkas itulah yang dibaca saat start -- tidak ada
+build perantara yang bisa tertinggal.
+
+Yang **tetap** belum dibuktikan: perilaku ujungnya. Alasannya tidak berubah dan
+tidak bisa diselesaikan kode -- ia menuntut ponsel nomor rumah sakit.
 
 ## KOREKSI atas `migrations/054`: premisnya terbantah di produksi
 
