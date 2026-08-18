@@ -55,3 +55,12 @@ Thumbs.db
 # tidak boleh ikut ter-commit (alasan yang sama dengan uploads/).
 tmp-dryrun-surat/
 tmp-dryrun-dokumen/
+
+# Pagar terhadap `npx skills add`, yang bawaannya memasang ke DALAM proyek
+# (`.agents/skills` + symlink `.claude/skills`) alih-alih ke `~/.claude` -- sakelar
+# globalnya `-g`, dan gampang terlupa. Skill taste dipasang GLOBAL 18 Agustus 2026,
+# jadi ketiga lintasan ini seharusnya kosong; kalau muncul lagi, itu pemasangan
+# yang lupa `-g`. Ratusan KB prosa milik orang lain tidak boleh ikut ke repo publik.
+.agents/
+.claude/
+skills-lock.json
