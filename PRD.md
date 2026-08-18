@@ -102,7 +102,7 @@ Sistem membaca `sik` secara berkala (default 60 detik) memakai koneksi **read-on
 | Kosong / `-` | 3.165 | 39,0% |
 | Diawali `08` | 3.677 | 45,3% |
 | Diawali `628` atau `+62` | 0 | 0% |
-| Format lain (`81363222286`, `2341231231`) | 1.275 | 15,7% |
+| Format lain (`81200000086`, `2341231231`) | 1.275 | 15,7% |
 
 **F2.2** Normalisasi otomatis ke E.164 (`628xxxxxxxxx`): buang non-digit, `0…` → `62…`, `8…` → `628…`, tolak sisanya.
 

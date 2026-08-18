@@ -19,7 +19,7 @@
 -- akan jadi bug diam kalau ditumpangkan:
 --
 --   1. Lebarnya tidak muat. `phone_e164` VARCHAR(20) pas untuk 628xxxxxxxxxx;
---      JID grup (`120363402118136446@g.us`) 24 karakter dan terpotong diam-diam.
+--      JID grup (`120363000000000000@g.us`) 24 karakter dan terpotong diam-diam.
 --   2. Namanya akan berbohong, dan ada kode yang memercayainya: dispatcher
 --      memakai `phone_e164` untuk mencari daftar tolak (`opt_out.phone_e164`)
 --      dan untuk `getNumberId()`. Sebuah JID grup di kolom itu akan dicari di
@@ -35,7 +35,7 @@ ALTER TABLE outbox
 -- ---------------------------------------------------------------------------
 CREATE TABLE farmasi_target (
   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  -- 'grup'     : JID grup WhatsApp, mis. 120363402118136446@g.us
+  -- 'grup'     : JID grup WhatsApp, mis. 120363000000000000@g.us
   -- 'personal' : nomor petugas, disimpan SUDAH sebagai JID (628xxx@c.us)
   --
   -- Keduanya disimpan dalam bentuk JID yang sama supaya dispatcher tidak perlu

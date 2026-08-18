@@ -14,7 +14,7 @@
  *    "tidak jalan" tanpa satu baris log pun -- karena pesannya dibuang sebelum
  *    sempat dicatat.
  * 2. Bagian `user` dari sebuah LID BUKAN nomor telepon, padahal bentuknya
- *    persis seperti nomor: `280925422235727` itu 15 digit, lolos pemeriksaan
+ *    persis seperti nomor: `205000000000015` itu 15 digit, lolos pemeriksaan
  *    "8-15 digit" apa pun. Karena itu nomor telepon HANYA boleh diambil
  *    berdasarkan SERVER-nya (`c.us`), tidak pernah berdasarkan bentuk angkanya.
  *    Salah di titik ini berarti mengirim balasan ke nomor asing, mencatat

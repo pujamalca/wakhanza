@@ -51,30 +51,30 @@ describe('turunkanKunciTujuan', () => {
     // grup 24 karakter menghasilkan 65 karakter -- satu karakter di atas batas
     // kolom, dan MariaDB non-strict memotongnya DIAM-DIAM tepat di bagian yang
     // membedakan satu tujuan dari tujuan lain.
-    const kunci = turunkanKunciTujuan(dasar, '120363402118136446@g.us');
+    const kunci = turunkanKunciTujuan(dasar, '120363000000000000@g.us');
     expect(kunci).toMatch(/^[0-9a-f]{40}$/);
     expect(kunci.length).toBeLessThanOrEqual(64);
   });
 
   it('berbeda untuk tiap tujuan, sehingga semua tujuan lolos uq_idem', () => {
-    const a = turunkanKunciTujuan(dasar, '120363402118136446@g.us');
+    const a = turunkanKunciTujuan(dasar, '120363000000000000@g.us');
     const b = turunkanKunciTujuan(dasar, '120363999999999999@g.us');
     const c = turunkanKunciTujuan(dasar, '6281234567890@c.us');
     expect(new Set([a, b, c]).size).toBe(3);
   });
 
   it('berbeda dari kunci pesan aslinya, supaya salinan tidak menabrak pesan pasien', () => {
-    expect(turunkanKunciTujuan(dasar, '120363402118136446@g.us')).not.toBe(dasar);
+    expect(turunkanKunciTujuan(dasar, '120363000000000000@g.us')).not.toBe(dasar);
   });
 
   it('deterministik -- percobaan ulang menghasilkan kunci yang sama, bukan pesan baru', () => {
-    const chat = '120363402118136446@g.us';
+    const chat = '120363000000000000@g.us';
     expect(turunkanKunciTujuan(dasar, chat)).toBe(turunkanKunciTujuan(dasar, chat));
   });
 
   it('kejadian berbeda ke tujuan yang sama tetap berbeda', () => {
     const lain = buildIdempotencyKey('QUEUE_REG', '2026/08/03/000043');
-    const chat = '120363402118136446@g.us';
+    const chat = '120363000000000000@g.us';
     expect(turunkanKunciTujuan(dasar, chat)).not.toBe(turunkanKunciTujuan(lain, chat));
   });
 });

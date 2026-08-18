@@ -20,7 +20,7 @@ export type HasilTarget = { ok: true; chatId: string; jenis: JenisTarget } | { o
 /**
  * JID grup punya DUA bentuk yang keduanya masih beredar:
  *
- *   120363402118136446@g.us          grup yang dibuat sejak ~2021
+ *   120363000000000000@g.us          grup yang dibuat sejak ~2021
  *   6281234567890-1614840000@g.us    bentuk lama: nomor pembuat + waktu dibuat
  *
  * Grup lama di rumah sakit yang sudah bertahun-tahun dipakai memakai bentuk
@@ -69,7 +69,7 @@ export function parseTargetGrup(masukan: string): HasilTarget {
       ok: false,
       error:
         `"${teks}" tidak berbentuk kode grup. Yang benar berupa deretan angka panjang seperti ` +
-        '120363402118136446@g.us. Paling aman: pakai tombol "Muat daftar grup".',
+        '120363000000000000@g.us. Paling aman: pakai tombol "Muat daftar grup".',
     };
   }
 

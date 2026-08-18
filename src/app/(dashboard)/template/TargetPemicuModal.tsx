@@ -402,7 +402,7 @@ function TargetForm({
                   name="nilai"
                   value={nilai}
                   onChange={(e) => setNilai(e.target.value)}
-                  placeholder="120363402118136446@g.us"
+                  placeholder="120363000000000000@g.us"
                   className="w-full font-mono"
                   fieldSize="sm"
                 />

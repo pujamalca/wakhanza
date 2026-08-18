@@ -163,6 +163,8 @@ Aturan proses dari `IMPLEMENTATION_PLAN.md` yang tetap berlaku untuk pekerjaan l
 npm run dev               # Next.js dev server, port 3100
 npm run worker            # proses worker (poller + dispatcher + sesi WhatsApp) -- perlu scan QR pertama kali
 npm run migrate           # terapkan migrations/*.sql yang belum jalan (skema wakhanza)
+npm run preflight         # 10 pemeriksaan STATIS (tanpa database, 1,4 dtk) atas aturan yang pelanggarannya TIDAK menghasilkan galat
+npm run preflight -- nomor        # satu pemeriksaan saja; `-- --daftar` melihat daftarnya
 npm run verify:db         # buktikan sik menolak tulisan, dan audit_log append-only tertegak
 npm run verify:plans      # EXPLAIN tiap query poller; gagal bila ada type:ALL selain booking_registrasi
 npm run poll:dryrun       # cetak pesan yang AKAN terkirim untuk SEMUA pemicu tanpa mengirim/menulis apa pun
@@ -187,7 +189,8 @@ npm run users -- disable <username>  # juga: enable / unlock / passwd <username>
 npm run users -- delete <username>   # permanen; pakai disable kalau akunnya mungkin dipakai lagi
 npm run harden:permissions  # icacls .env + .wwebjs_auth ke akun saat ini + SYSTEM (jalankan ulang tiap sesi WA baru)
 powershell -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1   # daftarkan cadangan harian (lihat di bawah)
-powershell -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1    # pasang hook pre-push (typecheck+lint+test, ~16 dtk)
+powershell -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1    # pasang hook pre-push (preflight+typecheck+lint+test, ~18 dtk)
+powershell -ExecutionPolicy Bypass -File scripts/restart-worker.ps1       # keenam pemeriksaan sebelum restart worker; BAWAANNYA memeriksa saja, tambahkan -Jalankan
 npm test                  # semua test unit (fungsi murni, TIDAK butuh database); `npm test -- core/phone` untuk satu suite
 npm run test:int          # uji integrasi enqueueMessage() -- BUTUH MariaDB hidup, lihat di bawah
 npm run typecheck         # tsc --noEmit
@@ -197,6 +200,21 @@ npm run audit             # npm audit --omit=dev; lihat "Penyesuaian Implementas
 ```
 
 `npm run worker:dev` = `npm run worker` + tsx watch. **Jangan dipakai saat sesi WhatsApp hidup** -- tiap penulisan berkas menyalakan ulang proses, dan restart beruntun adalah persis yang merusak state sesi (lihat "Operasi produksi" di bawah).
+
+**`npm run preflight` menegakkan sepuluh aturan yang selama ini hanya tertulis.**
+Semuanya statis (tanpa database, 1,4 detik) dan sudah terpasang di hook `pre-push`,
+karena yang dijaga bukan kebenaran sebuah fungsi melainkan aturan LINTAS BERKAS yang
+tidak punya pemilik: nomor pasien yang ikut ter-commit ke repo publik, pemicu baru
+yang lupa didaftarkan ke keputusan opt-out, `PollCursor` yang ditulis di luar
+`advanceCursor()` sehingga melewati pagar watermark, `CONVERT_TZ` di jalur Sequelize,
+primitif UI yang ditimpa lewat `className`, halaman yang menunggu database tanpa batas
+galat. Tidak satu pun dari itu menggagalkan build, lint, atau uji. Yang menuntut
+database hidup SENGAJA tidak ikut -- itu tetap `verify:db` dan `verify:plans`.
+
+Kesepuluhnya dibuktikan MENGGIGIT lewat `.tmp-gigit.mts` (rusak sengaja -> harus
+merah -> pulihkan), dan dua di antaranya ternyata tidak pernah bisa merah sampai
+diuji begitu. Alasan tiap pemeriksaan ditulis di berkasnya sendiri; kalau sebuah
+temuan ternyata sah, DAFTARKAN pengecualiannya alih-alih melonggarkan polanya.
 
 `verify:db` dan `verify:plans` bukan pemeriksaan opsional — keduanya menegakkan dua batasan paling gampang dilanggar tanpa sadar: menulis ke `sik`, dan query yang diam-diam berubah dari index seek menjadi full table scan. Jalankan keduanya setiap kali koneksi atau query poller disentuh.
 
@@ -459,7 +477,7 @@ Sampai suatu titik `message.from` selalu `<nomor>@c.us`, jadi penyaringnya cukup
 Tiga hal yang menempel di sini:
 
 - **Penyaringnya daftar-IZIN (`c.us`, `lid`), bukan daftar-tolak grup.** Server baru yang belum dikenal ditolak sampai ada yang memutuskan sadar-sadar — tapi ditolak dengan `warn`, bukan diam (lihat di bawah).
-- **Bagian `user` sebuah LID BUKAN nomor telepon, padahal bentuknya persis nomor**: `280925422235727` itu 15 digit, lolos pemeriksaan "8–15 digit" apa pun. Karena itu nomor HANYA diambil berdasarkan SERVER-nya (`phoneFromAddress` mengembalikan null untuk `@lid`), tidak pernah berdasarkan bentuk angkanya. Salah di titik ini berarti balasan terkirim ke nomor asing, daftar tolak tercatat atas nomor yang salah, dan kuota orang lain yang termakan — semuanya tanpa error. Dipatok unit test tersendiri.
+- **Bagian `user` sebuah LID BUKAN nomor telepon, padahal bentuknya persis nomor**: `205000000000015` itu 15 digit, lolos pemeriksaan "8–15 digit" apa pun. Karena itu nomor HANYA diambil berdasarkan SERVER-nya (`phoneFromAddress` mengembalikan null untuk `@lid`), tidak pernah berdasarkan bentuk angkanya. Salah di titik ini berarti balasan terkirim ke nomor asing, daftar tolak tercatat atas nomor yang salah, dan kuota orang lain yang termakan — semuanya tanpa error. Dipatok unit test tersendiri.
 - **Nomor E.164 wajib diperoleh sebelum apa pun dikerjakan**, karena semua yang di hilir berkunci pada nomor dan bukan pada identitas obrolan: `opt_out.phone_e164`, kuota `auto_reply_log`, dan pengiriman (`<nomor>@c.us`). Untuk `@lid`, `resolvePhoneE164()` di `wa-client.ts` mencoba tiga jalur berurutan (`kontak.id` → `kontak.number` → `WWebJS.enforceLidAndPnRetrieval`) dan **mencatat jalur mana yang berhasil**, supaya perubahan WhatsApp berikutnya memberi tahu jalur mana yang tumbang alih-alih cuma "tidak membalas". Gagal ketiganya = pesan **dilewati dengan peringatan**, bukan ditebak.
 
 **Level log dipilih supaya peringatan tetap berarti.** Nomor WhatsApp RS menerima status/story dari SETIAP kontaknya (`@broadcast`), ditambah grup dan saluran — mencatat semuanya sebagai `warn` membuat `warn` tidak berarti apa-apa dalam sehari. Karena itu `isKnownNonIndividualAddress()` memisahkan "bukan perorangan dan itu wajar" (`debug`) dari "server belum pernah dilihat" (`warn`). Jejak amplop (`info`) hanya untuk lalu lintas perorangan — jenis, akhiran alamat, panjang teks; **tidak pernah isinya** (§9.7, alasan yang sama dengan `autoreply.log_inbound_text` yang default mati). Jejak inilah yang absen dan membuat bug ini butuh berjam-jam plus tiga pesan pasien yang hilang untuk ditemukan.

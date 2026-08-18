@@ -8,14 +8,14 @@ import {
 
 describe('parseTargetGrup', () => {
   it('menerima JID grup bentuk baru, dengan maupun tanpa akhiran', () => {
-    expect(parseTargetGrup('120363402118136446@g.us')).toEqual({
+    expect(parseTargetGrup('120363000000000000@g.us')).toEqual({
       ok: true,
-      chatId: '120363402118136446@g.us',
+      chatId: '120363000000000000@g.us',
       jenis: 'grup',
     });
-    expect(parseTargetGrup('120363402118136446')).toEqual({
+    expect(parseTargetGrup('120363000000000000')).toEqual({
       ok: true,
-      chatId: '120363402118136446@g.us',
+      chatId: '120363000000000000@g.us',
       jenis: 'grup',
     });
   });
@@ -31,11 +31,11 @@ describe('parseTargetGrup', () => {
   });
 
   it('membuang spasi di tepi -- menempel dari clipboard hampir selalu membawanya', () => {
-    expect(parseTargetGrup('  120363402118136446@g.us \n')).toMatchObject({ ok: true });
+    expect(parseTargetGrup('  120363000000000000@g.us \n')).toMatchObject({ ok: true });
   });
 
   it('akhiran @g.us dikenali tanpa peduli huruf besar-kecil', () => {
-    expect(parseTargetGrup('120363402118136446@G.US')).toMatchObject({ ok: true, chatId: '120363402118136446@g.us' });
+    expect(parseTargetGrup('120363000000000000@G.US')).toMatchObject({ ok: true, chatId: '120363000000000000@g.us' });
   });
 
   it('TAUTAN UNDANGAN ditolak dengan menyebut jalan keluarnya', () => {
@@ -80,7 +80,7 @@ describe('parseTargetPersonal', () => {
   });
 
   it('menolak kode grup yang tersasar ke kotak nomor', () => {
-    expect(parseTargetPersonal('120363402118136446@g.us')).toMatchObject({ ok: false });
+    expect(parseTargetPersonal('120363000000000000@g.us')).toMatchObject({ ok: false });
   });
 
   it('menolak terlalu pendek', () => {
@@ -90,7 +90,7 @@ describe('parseTargetPersonal', () => {
 
 describe('parseTarget', () => {
   it('memilih pemeriksa sesuai jenisnya', () => {
-    expect(parseTarget('grup', '120363402118136446')).toMatchObject({ jenis: 'grup' });
+    expect(parseTarget('grup', '120363000000000000')).toMatchObject({ jenis: 'grup' });
     expect(parseTarget('personal', '081234567890')).toMatchObject({ jenis: 'personal' });
   });
 });
@@ -98,13 +98,13 @@ describe('parseTarget', () => {
 describe('tampilkanChatId', () => {
   it('nomor personal ditampilkan sebagai nomor lagi, grup apa adanya', () => {
     expect(tampilkanChatId('6281234567890@c.us')).toBe('6281234567890');
-    expect(tampilkanChatId('120363402118136446@g.us')).toBe('120363402118136446@g.us');
+    expect(tampilkanChatId('120363000000000000@g.us')).toBe('120363000000000000@g.us');
   });
 });
 
 describe('isChatIdValid', () => {
   it('meloloskan kedua bentuk yang sah', () => {
-    expect(isChatIdValid('120363402118136446@g.us')).toBe(true);
+    expect(isChatIdValid('120363000000000000@g.us')).toBe(true);
     expect(isChatIdValid('6281234567890@c.us')).toBe(true);
   });
 
@@ -114,7 +114,7 @@ describe('isChatIdValid', () => {
     // pengiriman ke jenis alamat yang tidak pernah diputuskan siapa pun.
     expect(isChatIdValid('628123456789@lid')).toBe(false);
     expect(isChatIdValid('status@broadcast')).toBe(false);
-    expect(isChatIdValid('120363402118136446')).toBe(false);
+    expect(isChatIdValid('120363000000000000')).toBe(false);
     expect(isChatIdValid('')).toBe(false);
   });
 });

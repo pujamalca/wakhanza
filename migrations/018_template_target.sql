@@ -50,7 +50,7 @@ CREATE TABLE template_target (
   -- lewat aplikasi: halaman /template hanya menawarkan ketujuh kode yang ada.
   trigger_code VARCHAR(32) NOT NULL,
 
-  -- 'grup'     : JID grup WhatsApp, mis. 120363402118136446@g.us
+  -- 'grup'     : JID grup WhatsApp, mis. 120363000000000000@g.us
   -- 'personal' : nomor petugas, disimpan SUDAH sebagai JID (628xxx@c.us)
   --
   -- Sama seperti `farmasi_target`: keduanya disimpan sebagai JID lengkap supaya

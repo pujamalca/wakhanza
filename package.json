@@ -12,6 +12,7 @@
     "worker": "tsx src/worker/index.ts",
     "worker:dev": "tsx watch src/worker/index.ts",
     "migrate": "tsx scripts/migrate.ts",
+    "preflight": "tsx scripts/preflight.ts",
     "verify:db": "tsx scripts/verify-db.ts",
     "verify:plans": "tsx scripts/verify-plans.ts",
     "poll:dryrun": "tsx scripts/poll-dryrun.ts",

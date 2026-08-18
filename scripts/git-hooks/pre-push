@@ -3,7 +3,7 @@
 #
 # Rekomendasi teknis 9 Agustus 2026 (R6): tidak ada CI, tidak ada git hook --
 # 606 uji yang selesai dalam 1,72 detik tidak dijalankan siapa pun kecuali
-# diingat. Sengaja HANYA tiga langkah ini, dan ketiganya tidak butuh database
+# diingat. Sengaja HANYA empat langkah ini, dan keempatnya tidak butuh database
 # hidup: verify:db/verify:plans SENGAJA TIDAK ikut, karena keduanya menuntut
 # MariaDB hidup + kredensial .env -- sesuatu yang tidak semua clone repo ini
 # punya. Jalankan keduanya terjadwal di server produksi (lihat CLAUDE.md),
@@ -11,6 +11,17 @@
 #
 # Dipasang lewat scripts/install-git-hooks.ps1 -- .git/hooks/ tidak ikut git,
 # jadi berkas ini adalah SUMBERnya, bukan hook yang benar-benar git baca.
+
+# preflight DULUAN, sebelum typecheck yang lebih lambat: satu-satunya langkah
+# di sini yang menjaga sesuatu yang TIDAK BISA DIBATALKAN. Nomor pasien yang
+# terlanjur ter-push ke repo publik tidak bisa ditarik oleh commit berikutnya;
+# kode yang tidak lolos typecheck bisa diperbaiki kapan saja.
+echo "[pre-push] preflight ..."
+npx tsx scripts/preflight.ts
+if [ $? -ne 0 ]; then
+  echo "[pre-push] preflight GAGAL -- push dibatalkan."
+  exit 1
+fi
 
 echo "[pre-push] typecheck ..."
 npm run typecheck
@@ -33,5 +44,5 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-echo "[pre-push] typecheck + lint + test lolos."
+echo "[pre-push] preflight + typecheck + lint + test lolos."
 exit 0

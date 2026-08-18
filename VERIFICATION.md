@@ -445,7 +445,7 @@ siklus pengadaan selesai  dari:2026-08-07 sampai:2026-08-14 terbaca:1 baru:1 ter
 ```
           id: 30091
       status: sent
-     chat_id: 6282283082916@c.us
+     chat_id: 6281200000016@c.us
     attempts: 1
   dibuat_wib: 2026-08-07 18:41:29
 terkirim_wib: 2026-08-07 18:41:33
@@ -692,13 +692,13 @@ dan jendela diserahkan langsung -- **nol tulisan ke `app_setting`, nol tulisan k
 
 ```
 database Khanza : sik-dev-alca
-tujuan uji      : 6282283082916@c.us  (grup apotek sungguhan TIDAK disentuh)
+tujuan uji      : 6281200000016@c.us  (grup apotek sungguhan TIDAK disentuh)
 baris hibah terbaca: 3
 memakai HO20260702001 (2 barang, 1 pesan)
 baris outbox FARMASI_HIBAH: 0 -> 1
 sesudah pengulangan : 1 (idempoten OK)
 
-id: 31273  status: sent  chat_id: 6282283082916@c.us  attempts: 1  last_error: NULL
+id: 31273  status: sent  chat_id: 6281200000016@c.us  attempts: 1  last_error: NULL
 dibuat_wib: 2026-08-08 08:18:22   terkirim_wib: 2026-08-08 08:18:27
 ```
 
@@ -1678,6 +1678,109 @@ Gerbang autentikasi lewat instance PM2 sungguhan (port 3100):
 Sesi WhatsApp sebelum dan sesudah pemasangan: `status=ready`, umur denyut 5 detik (dibaca lewat `CONVERT_TZ(heartbeat_at,'+00:00','+07:00')` -- angka mentahnya UTC dan meleset 7 jam).
 
 **Worker belum dimulai ulang, dan itu disengaja.** Ketiga sakelar mati, jadi perilaku kode lama dan baru identik: `params.lampiran` `undefined` -> `runSisipCycle` tidak menghitung kunci baru dan tidak merender apa pun, dan `media: null` pada salinan tujuan tidak mengubah apa pun karena belum ada pemicu pasien yang mengisi `media`. Restart hari ini berarti mengambil risiko kaskade yang **terjadi sungguhan pada mesin ini hari ini juga** (delapan instance dalam ~45 detik dari satu `pm2 restart`) tanpa imbalan apa pun. Yang WAJIB: worker dimulai ulang sebelum sakelar pertama dinyalakan.
+
+### `npm run preflight` dan restart worker berpagar (18 Agustus 2026)
+
+Sepuluh pemeriksaan statis, **1,35 detik**, nol database:
+
+```
+  OK   nomor            Tidak ada nomor telepon sungguhan di berkas terlacak
+  OK   alamat-wa        Tidak ada JID grup / alamat WhatsApp sungguhan di berkas terlacak
+  OK   token            Tidak ada token bot Telegram di berkas terlacak
+  OK   tulis-khanza     Query ke Khanza hanya SELECT
+  OK   skema            Skema wakhanza hanya lahir dari migrations/*.sql
+  OK   kursor           poll_cursor hanya dimajukan lewat worker/cursor.ts
+  OK   zona-waktu       CONVERT_TZ tidak dipakai di jalur Sequelize
+  OK   opt-out          Tiap pemicu punya keputusan opt-out yang tertulis
+  OK   primitif         Primitif UI tidak ditimpa warna/padding/ukuran lewat className
+  OK   batas-rute       Halaman yang menunggu database punya rangka muat DAN batas galat
+preflight: 10 pemeriksaan lolos.        real 0m1.350s
+```
+
+**Kesepuluhnya dibuktikan MENGGIGIT** lewat `.tmp-gigit.mts`: tiap pemeriksaan dijalankan,
+dirusak sengaja, dijalankan lagi, dipulihkan, dijalankan sekali lagi. Yang dituntut bukan
+"gagal" melainkan pola `lolos -> gagal -> lolos`:
+
+```
+  MENGGIGIT  nomor          awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  alamat-wa      awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  token          awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  tulis-khanza   awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  skema          awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  kursor         awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  zona-waktu     awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  opt-out        awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  primitif       awal=lolos dirusak=gagal dipulihkan=lolos
+  MENGGIGIT  batas-rute     awal=lolos dirusak=gagal dipulihkan=lolos
+SEMUA pemeriksaan terbukti menggigit.
+```
+
+**Percobaan PERTAMA tidak begitu, dan itu bagian yang layak dicatat**: `tulis-khanza` dan
+`primitif` melaporkan `dirusak=lolos`. Keduanya cacat, keduanya hijau, keduanya tampak
+bekerja. `tulis-khanza` menulis `UPDATE\s+\w` dengan `\b` di ujung alternasinya -- `\b`
+sesudah SATU huruf menuntut batas kata tepat di situ, sementara `reg_periksa` berlanjut,
+jadi ia tidak pernah bisa cocok. `primitif` memindai lewat `git ls-files`, yang hanya
+melihat berkas TERLACAK -- sementara berkas yang baru ditulis (yang paling mungkin membawa
+nilai hasil salin-tempel dari database) belum terlacak. Perbaikannya masing-masing
+`UPDATE\s+[A-Za-z_]\w*` dan `git ls-files --cached --others --exclude-standard`.
+
+Percobaan KEDUA menemukan yang ketiga: `skema` berubah jadi merah di garis dasar, karena
+berkas pemeriksa itu sendiri memuat `.sync()` di dalam kalimat yang menerangkan kenapa
+`.sync()` dilarang. Pengecualian dirinya naik ke `berkasTerlacak()` -- satu tempat, bukan
+disalin ke tiap pemeriksa.
+
+#### Nomor pasien yang ikut ter-commit
+
+Pemeriksaan `nomor` menemukan **tiga nomor berpola sungguhan** di berkas terlacak repo
+PUBLIK, ditambah satu JID grup dan satu LID. Bukan dugaan: `waAddress.test.ts` menuliskannya
+sendiri sebagai `/** LID sungguhan yang ditangkap dari sesi produksi ... */`.
+
+| di mana | apa |
+|---|---|
+| `src/core/phone.test.ts` | dua nomor, dipakai sebagai nilai uji normalisasi |
+| `src/core/waAddress.test.ts` | satu nomor + satu LID |
+| `ARCHITECTURE.md`, `IMPLEMENTATION_PLAN.md`, `VERIFICATION.md` | nomor yang sama, sebagai contoh bentuk data |
+| `FITUR.md`, `migrations/016`, `migrations/018`, 5 berkas UI | satu JID grup -- seluruhnya di KOMENTAR, nol `INSERT` |
+
+Diganti nilai sintetis berpanjang dan berawalan operator yang sama: **61 kemunculan di 17
+berkas**. Bahwa penggantiannya tidak mengubah makna satu uji pun dibuktikan angka, bukan
+pembacaan: **64 suite / 1.154 uji tetap hijau** sesudahnya.
+
+Yang TIDAK diselesaikan ini, dan harus disebut apa adanya: riwayat git tetap menyimpan
+nilai lamanya. Berkasnya bersih sekarang; commit lamanya tidak. Menariknya menuntut
+penulisan ulang riwayat, dan itu keputusan pemilik sistem -- bukan keputusan teknis.
+
+#### Restart worker berpagar
+
+Dijalankan terhadap produksi, bawaannya memeriksa saja:
+
+```
+    OK  status sesi        ready
+    OK  umur denyut        23 detik
+    OK  bendera hapus sesi 0
+    OK  antrean aktif      0
+  OK    status PM2         online (restart ke-70)
+  OK    uptime             70 menit
+  OK    Chromium           1242 MB / 11 proses
+Keenam pemeriksaan aman.
+Tidak ada yang diubah. Tambahkan -Jalankan untuk benar-benar memulai ulang.
+```
+
+Pagarnya dibuktikan MENAHAN, dan dibuktikan pada jalur yang berbahaya: salinan skrip dengan
+ambang uptime 99.999 menit dijalankan **dengan `-Jalankan`**, dan hasilnya `TAHAN uptime`
+berikut `exit=1` tanpa satu pun `pm2 stop` dijalankan. Butir `uptime` dipilih untuk diuji
+karena persis itulah yang terlewat pada 16 Agustus 2026.
+
+#### `.gitignore` dua arah
+
+Skill proyek harus IKUT repo sementara pemasangan pihak ketiga tetap ditolak. Keduanya
+dibuktikan lewat `git check-ignore`, bukan lewat pembacaan pola:
+
+```
+.claude/skills/wakhanza/SKILL.md        -> ikut repo   (benar)
+.claude/skills/uji-pihak-ketiga/...     -> .gitignore:75:.claude/skills/*   (benar)
+```
+
 
 ### Kepala nota dua kolom (18 Agustus 2026)
 

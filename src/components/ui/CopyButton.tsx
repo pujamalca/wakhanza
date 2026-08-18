@@ -7,7 +7,7 @@ import { IconCheck, IconCopy } from './icons';
  * Menyalin sebuah ID ke papan klip.
  *
  * Ada karena satu-satunya cara memakai id grup / id pengguna adalah
- * MENEMPELKANNYA di tempat lain, dan `120363402118136446@g.us` adalah persis
+ * MENEMPELKANNYA di tempat lain, dan `120363000000000000@g.us` adalah persis
  * bentuk yang paling gampang salah saat diketik ulang -- satu digit meleset
  * menghasilkan tujuan yang diterima WhatsApp tanpa keluhan dan tidak pernah
  * sampai ke siapa pun.

@@ -26,8 +26,14 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
 
 // Dipakai bersama oleh Button (<button>) dan LinkButton (<Link>) supaya
 // keduanya selalu identik secara visual tanpa duplikasi daftar class.
+//
+// `active:translate-y-px` sengaja TIDAK ikut `transition-colors`: dorongan satu
+// piksel saat ditekan harus terjadi seketika, bukan diinterpolasi. Yang dibeli
+// bukan hiasan melainkan kepastian -- di jaringan RS, aksi yang menulis
+// (Kirim ulang, Simpan) kerap butuh sedetik-dua sebelum halaman berubah, dan
+// tanpa tanda apa pun bahwa tekanannya masuk, tombol yang sama ditekan dua kali.
 export function buttonClassName(variant: ButtonVariant = 'secondary', size: ButtonSize = 'sm', className = ''): string {
-  return `inline-flex items-center gap-1.5 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`;
+  return `inline-flex items-center gap-1.5 rounded-md font-medium transition-colors active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`;
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

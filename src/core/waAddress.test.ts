@@ -10,14 +10,20 @@ import {
   idPesanKeluar,
 } from './waAddress';
 
-/** LID sungguhan yang ditangkap dari sesi produksi saat bug ini ditemukan. */
-const LID_NYATA = '280925422235727@lid';
-const CUS_NYATA = '6282283082916@c.us';
+/**
+ * BENTUK LID sebagaimana ditangkap dari sesi produksi saat bug ini ditemukan.
+ * Digitnya sintetis: nilai aslinya mengidentifikasi satu pengguna WhatsApp
+ * yang nyata, dan repo ini publik. Yang perlu dijaga uji ini adalah BENTUKnya
+ * -- 15 digit, jadi ia lolos pemeriksaan "8-15 digit" apa pun sementara ia
+ * bukan nomor telepon -- dan bentuk itu tidak berubah sedikit pun.
+ */
+const LID_NYATA = '205000000000015@lid';
+const CUS_NYATA = '6281200000016@c.us';
 
 describe('parseWaAddress', () => {
   it('memisahkan user dan server', () => {
-    expect(parseWaAddress(CUS_NYATA)).toEqual({ user: '6282283082916', server: 'c.us' });
-    expect(parseWaAddress(LID_NYATA)).toEqual({ user: '280925422235727', server: 'lid' });
+    expect(parseWaAddress(CUS_NYATA)).toEqual({ user: '6281200000016', server: 'c.us' });
+    expect(parseWaAddress(LID_NYATA)).toEqual({ user: '205000000000015', server: 'lid' });
   });
 
   it('menolak bentuk yang tidak utuh', () => {
@@ -44,7 +50,7 @@ describe('isIndividualAddress', () => {
 
 describe('isGroupAddress', () => {
   it('mengenali grup, dan HANYA grup', () => {
-    expect(isGroupAddress('120363402118136446@g.us')).toBe(true);
+    expect(isGroupAddress('120363000000000000@g.us')).toBe(true);
     expect(isGroupAddress('6281234567890-1614840000@g.us')).toBe(true);
   });
 
@@ -82,14 +88,14 @@ describe('isKnownNonIndividualAddress', () => {
 
 describe('phoneFromAddress', () => {
   it('mengambil nomor dari alamat c.us', () => {
-    expect(phoneFromAddress(CUS_NYATA)).toBe('6282283082916');
+    expect(phoneFromAddress(CUS_NYATA)).toBe('6281200000016');
   });
 
   it('TIDAK PERNAH memperlakukan bagian user sebuah LID sebagai nomor telepon', () => {
-    // 280925422235727 itu 15 digit -- lolos pemeriksaan bentuk angka apa pun.
+    // 205000000000015 itu 15 digit -- lolos pemeriksaan bentuk angka apa pun.
     // Kalau diambil sebagai nomor, balasan terkirim ke nomor asing, daftar
     // tolak tercatat atas nomor yang salah, dan kuota nomor lain yang termakan.
-    expect(isPhoneLike('280925422235727')).toBe(true);
+    expect(isPhoneLike('205000000000015')).toBe(true);
     expect(phoneFromAddress(LID_NYATA)).toBeNull();
     expect(isLidAddress(LID_NYATA)).toBe(true);
     expect(isLidAddress(CUS_NYATA)).toBe(false);

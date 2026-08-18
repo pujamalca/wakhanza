@@ -523,7 +523,7 @@ Kondisi nyata pada 8.117 pasien:
 | Diawali `628`/`+62` | 0 | 0% |
 | Lain-lain | 1.275 | 15,7% |
 
-Contoh nyata yang harus ditangani: `085267496048`, `81363222286` (kehilangan `0` di depan), `2341231231` (bukan nomor seluler), `-`.
+Contoh nyata yang harus ditangani: `081200000048`, `81200000086` (kehilangan `0` di depan), `2341231231` (bukan nomor seluler), `-`.
 
 Urutan aturan:
 
@@ -537,7 +537,7 @@ Urutan aturan:
 7. Validasi akhir: ^628[1-9][0-9]{7,10}$
 ```
 
-Langkah 4 adalah yang menyelamatkan sebagian besar dari 1.275 baris golongan "lain-lain" — `81363222286` menjadi `6281363222286`. Langkah 7 yang menolak `2341231231`, karena setelah langkah 6 nomor itu tidak diawali `0`, `8`, maupun `62`.
+Langkah 4 adalah yang menyelamatkan sebagian besar dari 1.275 baris golongan "lain-lain" — `81200000086` menjadi `6281200000086`. Langkah 7 yang menolak `2341231231`, karena setelah langkah 6 nomor itu tidak diawali `0`, `8`, maupun `62`.
 
 Alasan penolakan disimpan (`empty`, `too_short`, `not_mobile`, `unparseable`) supaya dashboard dapat mengelompokkan masalah, dan supaya terlihat jelas apakah masalahnya pendataan atau format.
 

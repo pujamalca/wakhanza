@@ -131,6 +131,33 @@ const OPT_OUT_TRIGGERS = new Set([
 ]);
 
 /**
+ * Pemicu yang SENGAJA tidak terikat opt-out.
+ *
+ * Daftar ini kembarannya OPT_OUT_TRIGGERS, dan hari ini ia kosong: keduabelas
+ * baris `template` yang benar-benar ada seluruhnya terikat. Ia tetap dibuat
+ * karena gunanya untuk pemicu BERIKUTNYA.
+ *
+ * Sebabnya ada di perilaku `respectsOptOut()` sendiri: kode yang tidak
+ * terdaftar dianggap TIDAK terikat. Itu bawaan yang benar -- kanal baru tidak
+ * boleh diam-diam berhenti terkirim tanpa ada yang memutuskan -- tapi ia
+ * berarti pemicu pasien baru yang LUPA didaftarkan akan mengirim ke orang yang
+ * sudah meminta berhenti, tanpa satu pun galat di mana pun.
+ *
+ * Dengan dua daftar yang harus MEMBAGI HABIS pemicu di `migrations`,
+ * `npm run preflight` bisa menuntut keputusannya tertulis. Bentuknya sama
+ * dengan `outboxStatus.test.ts` yang menuntut "aktif" dan "terminal" membagi
+ * habis enum-nya: yang baru memaksa keputusan diambil sadar-sadar alih-alih
+ * diam di celah.
+ *
+ * Yang masuk ke sini harus membawa ALASANNYA sebagai komentar, sebagaimana
+ * keempat pemicu non-template di atas (FARMASI_*, BPJS_BATAL) sudah dijelaskan
+ * di kepala berkas ini: pesan yang tidak menyebut seorang pasien pun tidak
+ * punya siapa-siapa untuk diberhentikan atas namanya.
+ */
+export const PEMICU_SENGAJA_BEBAS = new Set<string>([
+  // (kosong -- lihat alasan di atas sebelum menambah)
+]);
+/**
  * Satu-satunya sumber kebenaran untuk "apakah pemicu ini berhenti bila pasien
  * opt-out". Dipakai saat ENQUEUE dan sekali lagi tepat sebelum KIRIM -- kalau
  * kedua tempat itu menafsirkannya sendiri-sendiri, cukup satu yang lupa

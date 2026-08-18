@@ -81,8 +81,8 @@ Kerangkanya sudah jelas dari ARCHITECTURE §5.1. Yang belum diputuskan adalah **
  * Menormalkan nomor telepon Indonesia ke E.164 (628xxxxxxxxx).
  *
  * Data nyata yang harus dihadapi (dari 8.117 baris sik.pasien):
- *   '085267496048'  → jelas, 08 di depan
- *   '81363222286'   → kehilangan 0 di depan
+ *   '081200000048'  → jelas, 08 di depan
+ *   '81200000086'   → kehilangan 0 di depan
  *   '2341231231'    → bukan nomor seluler
  *   '-' / ''        → tidak diisi
  *
@@ -98,9 +98,9 @@ Kerangkanya sudah jelas dari ARCHITECTURE §5.1. Yang belum diputuskan adalah **
  * Kasus konkret yang membelah keduanya:
  *   '812345678'    9 digit — terlalu pendek untuk nomor Indonesia yang sah.
  *                  Terima sebagai 62812345678, atau tolak?
- *   '6285267496048 ' spasi di ujung — jelas aman dirapikan.
- *   '0852-6749-6048' bertanda hubung — jelas aman dirapikan.
- *   '085267496048/081234567890' dua nomor di satu kolom. Ambil yang pertama,
+ *   '6281200000048 ' spasi di ujung — jelas aman dirapikan.
+ *   '0812-0000-0048' bertanda hubung — jelas aman dirapikan.
+ *   '081200000048/081234567890' dua nomor di satu kolom. Ambil yang pertama,
  *                  atau tolak seluruhnya?
  */
 export function normalizePhone(raw: string | null): PhoneResult {
@@ -110,7 +110,7 @@ export function normalizePhone(raw: string | null): PhoneResult {
 
 Saya sarankan **ketat**, karena akibat salah kirim di konteks rumah sakit tidak sebanding dengan keuntungan menjangkau beberapa pasien tambahan — dan halaman koreksi di Fase 3 memberi jalan keluar yang aman. Tetapi Anda yang tahu seberapa sering petugas benar-benar akan membuka halaman koreksi itu. Kalau jawabannya "jarang", perhitungannya berubah.
 
-Kasus `'085267496048/081234567890'` layak diperiksa dulu ke data sungguhan sebelum diputuskan — bila polanya sering muncul, ia perlu penanganan tersendiri.
+Kasus `'081200000048/081234567890'` layak diperiksa dulu ke data sungguhan sebelum diputuskan — bila polanya sering muncul, ia perlu penanganan tersendiri.
 
 **Definition of Done**
 

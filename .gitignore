@@ -62,5 +62,15 @@ tmp-dryrun-dokumen/
 # jadi ketiga lintasan ini seharusnya kosong; kalau muncul lagi, itu pemasangan
 # yang lupa `-g`. Ratusan KB prosa milik orang lain tidak boleh ikut ke repo publik.
 .agents/
-.claude/
 skills-lock.json
+
+# `.claude/` TIDAK ditolak seluruhnya: skill milik PROYEK ini hidup di sana dan
+# memang harus ikut repo -- ia berisi aturan kerja yang berlaku untuk siapa pun
+# yang meng-clone. Yang ditolak adalah isi selebihnya, termasuk symlink yang
+# ditanam `npx skills add`. Bentuknya bertingkat karena git TIDAK bisa
+# mengembalikan sebuah berkas bila direktori induknya sudah ditolak, jadi
+# `.claude/` harus dibuka dulu (`.claude/*`) sebelum isinya disaring.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/wakhanza/
