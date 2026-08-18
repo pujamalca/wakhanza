@@ -78,6 +78,56 @@ export function barisIdentitasHtml(baris: BarisIsian[]): string {
 }
 
 /**
+ * Tabel identitas DUA KOLOM -- dua pasang "Label : Nilai" per baris.
+ *
+ * Bentuk satu kolom di atas benar untuk surat, yang badannya memang prosa
+ * pendek. Nota tagihan lain: kepalanya membawa SEPULUH baris (enam identitas
+ * pasien plus nomor nota, tanggal, unit, cara bayar) di atas tabel rincian yang
+ * sendirinya panjang, sehingga separuh halaman pertama habis sebelum satu pun
+ * angka tagihan terbaca. Yang dipasangkan di sini cuma TATA LETAKNYA -- tidak
+ * satu pun baris dibuang, dan itu syaratnya: nota yang kehilangan keterangan
+ * berhenti bisa dicocokkan dengan lembar di loket.
+ *
+ * Baris ber-`penuh` memakai satu baris sendiri selebar tabel, DAN memutus
+ * pasangan yang sedang menunggu. Tanpa pemutusan itu, alamat yang duduk di
+ * tengah daftar membuat baris sesudahnya berpasangan MENYEBERANGI pemisahnya --
+ * keterangan pasien berpasangan dengan keterangan nota, yang terbaca seperti
+ * dua kolom yang tidak berhubungan.
+ */
+export function barisIdentitasGandaHtml(baris: BarisIsian[]): string {
+  const sel = (b: BarisIsian) =>
+    `<td class="l">${lolos(b.label)}</td><td class="s">:</td><td class="v">${lolos(b.nilai)}</td>`;
+  const kosong = '<td></td><td></td><td></td>';
+
+  const hasil: string[] = [];
+  let menunggu: BarisIsian | null = null;
+
+  for (const b of barisTerisi(baris)) {
+    if (b.penuh) {
+      if (menunggu !== null) {
+        hasil.push(`<tr>${sel(menunggu)}${kosong}</tr>`);
+        menunggu = null;
+      }
+      hasil.push(
+        `<tr><td class="l">${lolos(b.label)}</td><td class="s">:</td><td class="v" colspan="4">${lolos(
+          b.nilai,
+        )}</td></tr>`,
+      );
+      continue;
+    }
+    if (menunggu !== null) {
+      hasil.push(`<tr>${sel(menunggu)}${sel(b)}</tr>`);
+      menunggu = null;
+    } else {
+      menunggu = b;
+    }
+  }
+  if (menunggu !== null) hasil.push(`<tr>${sel(menunggu)}${kosong}</tr>`);
+
+  return hasil.join('');
+}
+
+/**
  * Gaya cetak A4 -- DASAR, dipakai apa adanya oleh surat maupun dokumen hasil.
  *
  * `@page { margin: 0 }` plus padding pada body, bukan margin milik Chromium --
@@ -118,6 +168,13 @@ h1 { font-size: 13.5pt; text-align: center; text-decoration: underline; letter-s
 table.identitas { border-collapse: collapse; margin: 0 0 12px 8mm; }
 table.identitas td { padding: 1.5px 0; vertical-align: top; }
 td.l { width: 38mm; }
+/* Dua kolom: label dipersempit supaya KEDUA nilainya tetap muat pada satu
+   baris A4. Lebarnya dipatok lewat table-layout: fixed, bukan diserahkan ke
+   isinya -- kolom kanan yang bergeser tiap baris membuat kepala dokumen
+   terbaca sebagai tabel yang rusak. */
+table.identitas.ganda { width: 100%; margin-left: 0; table-layout: fixed; }
+table.identitas.ganda td.l { width: 29mm; }
+table.identitas.ganda td.s { width: 3mm; }
 td.s { width: 5mm; }
 td.v { font-weight: bold; }
 .isi { margin: 0 0 10px; text-align: justify; }

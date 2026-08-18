@@ -35,7 +35,15 @@ import {
   JUDUL_DOKUMEN,
 } from './dokumenDoc';
 import type { KopSurat } from './suratDoc';
-import { GAYA_CETAK, lolos, kopHtml, ttdHtml, catatanHtml, barisIdentitasHtml } from './cetakHtml';
+import {
+  GAYA_CETAK,
+  lolos,
+  kopHtml,
+  ttdHtml,
+  catatanHtml,
+  barisIdentitasHtml,
+  barisIdentitasGandaHtml,
+} from './cetakHtml';
 
 /**
  * Gaya TAMBAHAN di atas `GAYA_CETAK` -- bukan penggantinya.
@@ -143,10 +151,21 @@ ${catatanHtml(opsi.catatanKaki)}
 </body></html>`;
 }
 
-/** Tabel identitas + baris keterangan tambahan yang berbeda per dokumen. */
-function kepalaHtml(isi: IsiDokumen, tambahan: Array<{ label: string; nilai: string }>): string {
+/**
+ * Tabel identitas + baris keterangan tambahan yang berbeda per dokumen.
+ *
+ * `ganda` memasangkan dua keterangan per baris; dipakai nota saja, dan
+ * alasannya ada di `barisIdentitasGandaHtml()`.
+ */
+function kepalaHtml(
+  isi: IsiDokumen,
+  tambahan: Array<{ label: string; nilai: string }>,
+  ganda = false,
+): string {
   const baris = [...isi.kepala.identitas, ...tambahan.filter((t) => t.nilai !== '')];
-  return `<table class="identitas">${barisIdentitasHtml(baris)}</table>`;
+  return ganda
+    ? `<table class="identitas ganda">${barisIdentitasGandaHtml(baris)}</table>`
+    : `<table class="identitas">${barisIdentitasHtml(baris)}</table>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,12 +284,19 @@ const CATATAN_OBAT_DIRINGKAS =
   'rincian lengkapnya dapat diminta di loket rumah sakit.';
 
 function badanNota(isi: IsiDokumenNota): string {
-  const kepala = kepalaHtml(isi, [
-    { label: 'No. Nota', nilai: isi.noNota },
-    { label: 'Tanggal', nilai: isi.kepala.tanggalDokumen },
-    { label: 'Unit/Poliklinik', nilai: isi.namaPoli },
-    { label: 'Cara Bayar', nilai: isi.caraBayar },
-  ]);
+  // Label dipendekkan ("Unit", bukan "Unit/Poliklinik") karena kolom labelnya
+  // separuh lebar halaman di susunan dua kolom; yang tidak muat membungkus dan
+  // mengembalikan baris yang baru saja dihemat.
+  const kepala = kepalaHtml(
+    isi,
+    [
+      { label: 'No. Nota', nilai: isi.noNota },
+      { label: 'Tanggal', nilai: isi.kepala.tanggalDokumen },
+      { label: 'Unit', nilai: isi.namaPoli },
+      { label: 'Cara Bayar', nilai: isi.caraBayar },
+    ],
+    true,
+  );
 
   if (isi.baris.length === 0) {
     return `${kepala}<p class="kosong">Rincian tagihan belum tercatat untuk kunjungan ini.</p>`;

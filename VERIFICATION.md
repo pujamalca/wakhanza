@@ -1679,6 +1679,41 @@ Sesi WhatsApp sebelum dan sesudah pemasangan: `status=ready`, umur denyut 5 deti
 
 **Worker belum dimulai ulang, dan itu disengaja.** Ketiga sakelar mati, jadi perilaku kode lama dan baru identik: `params.lampiran` `undefined` -> `runSisipCycle` tidak menghitung kunci baru dan tidak merender apa pun, dan `media: null` pada salinan tujuan tidak mengubah apa pun karena belum ada pemicu pasien yang mengisi `media`. Restart hari ini berarti mengambil risiko kaskade yang **terjadi sungguhan pada mesin ini hari ini juga** (delapan instance dalam ~45 detik dari satu `pm2 restart`) tanpa imbalan apa pun. Yang WAJIB: worker dimulai ulang sebelum sakelar pertama dinyalakan.
 
+### Kepala nota dua kolom (18 Agustus 2026)
+
+Diukur terhadap nota **sungguhan** terbaru lewat `lib/dokumen.ts` yang sama dipakai worker. Yang dicetak ke layar hanya label dan panjang karakter -- nilai identitas pasien tidak pernah ikut.
+
+```
+SEBELUM  10 baris   Nama / No. Rekam Medis / Tanggal Lahir / Jenis Kelamin / Umur /
+                    Alamat / No. Nota / Tanggal / Unit-Poliklinik / Cara Bayar
+SESUDAH   5 baris   kelas tabel: "identitas ganda"
+            Nama -> 5            |  No. RM      -> 6
+            Tanggal Lahir -> 23  |  Jenis Kelamin -> 9
+            [penuh] Alamat -> 11
+            No. Nota -> 17       |  Tanggal     -> 15
+            Unit -> 15           |  Cara Bayar  -> 4
+```
+
+**Tidak satu pun nilai membungkus**, dan itu diukur di Chromium -- dua kolom yang membungkus mengembalikan baris yang baru saja dihemat, jadi asumsinya harus dibuktikan, bukan dikira:
+
+```
+lebar tabel: 648,8 px
+  27,0 px  satu baris  Nama
+  27,0 px  satu baris  Tanggal Lahir
+  27,0 px  satu baris  Alamat
+  27,0 px  satu baris  No. Nota
+  27,0 px  satu baris  Unit
+tinggi kepala seluruhnya: 135,0 px (5 baris)   <- sebelumnya 10 x 27 = 270 px
+```
+
+PDF-nya tetap terbentuk lewat jalur yang sama: `application/pdf, 207.291 bytes, 823 ms`, berawalan `%PDF-` -- dan lebih kecil daripada 212.953 bytes sebelum kepalanya dipadatkan.
+
+Hasil lab dibuktikan **tidak ikut berubah**: tabelnya tetap `class="identitas"` (bukan `identitas ganda`), `Umur` tetap barisnya sendiri, `No. Rekam Medis` tetap bentuk panjangnya.
+
+**Pemutus pasangan pada baris `penuh` dibuktikan MENGGIGIT**, bukan diasumsikan: cabang pemutusnya dilumpuhkan (`if (menunggu !== null)` -> `if (false)`) dan hasilnya `Tests: 1 failed, 30 passed`; dipulihkan -> `31 passed`.
+
+Gerbang: `tsc --noEmit` 0 galat, `eslint .` 0, **64 suite / 1.154 uji** hijau (4 uji baru).
+
 ### Nota tanpa harga per item, dan contoh berkas untuk jenis yang belum pernah terjadi (18 Agustus 2026)
 
 **Radiologi memang kosong -- di KEDUA database.** Dihitung lewat kolam `sik` milik aplikasi (`sikSelect`), bukan CLI `mysql`:

@@ -210,6 +210,15 @@ export interface KopSurat {
 export interface BarisIsian {
   label: string;
   nilai: string;
+  /**
+   * Baris ini MELEBAR penuh dan tidak dipasangkan dengan baris lain.
+   *
+   * Hanya dibaca `barisIdentitasGandaHtml()`; penata satu kolom mengabaikannya.
+   * Dipakai untuk nilai yang memang panjang -- alamat lengkap berikut
+   * kelurahan/kecamatan/kabupaten -- yang kalau dipaksa masuk setengah lebar
+   * halaman justru membungkus jadi tiga baris dan membatalkan penghematannya.
+   */
+  penuh?: boolean;
 }
 
 export interface IsiSuratSakit {

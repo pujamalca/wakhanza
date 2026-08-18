@@ -245,23 +245,57 @@ export interface BarisIdentitasMasuk {
  * dipakai Khanza, dan dokumen yang dicetak ulang tahun depan harus tetap
  * menyebut umur yang sama.
  */
-function identitasDokumen(row: BarisIdentitasMasuk): BarisIsian[] {
+function identitasDokumen(row: BarisIdentitasMasuk, ringkas: boolean): BarisIsian[] {
+  const alamat: BarisIsian = {
+    label: 'Alamat',
+    nilai: rakitAlamat({
+      alamat: row.alamat,
+      kelurahan: row.nm_kel,
+      kecamatan: row.nm_kec,
+      kabupaten: row.nm_kab,
+    }),
+    // Melebar penuh HANYA saat dipasangkan dua kolom; penata satu kolom
+    // mengabaikannya, jadi lab dan radiologi tidak berubah sama sekali.
+    penuh: true,
+  };
+
+  if (ringkas) {
+    return [
+      { label: 'Nama', nilai: isianSurat(row.nm_pasien) },
+      { label: 'No. RM', nilai: isianSurat(row.no_rkm_medis) },
+      barisLahirUmur(row),
+      { label: 'Jenis Kelamin', nilai: jenisKelaminLengkap(row.jk) },
+      alamat,
+    ];
+  }
+
   return [
     { label: 'Nama', nilai: isianSurat(row.nm_pasien) },
     { label: 'No. Rekam Medis', nilai: isianSurat(row.no_rkm_medis) },
     { label: 'Tanggal Lahir', nilai: formatTanggalSurat(row.tgl_lahir) },
     { label: 'Jenis Kelamin', nilai: jenisKelaminLengkap(row.jk) },
     { label: 'Umur', nilai: formatUmurSurat(row.umurdaftar, row.sttsumur) },
-    {
-      label: 'Alamat',
-      nilai: rakitAlamat({
-        alamat: row.alamat,
-        kelurahan: row.nm_kel,
-        kecamatan: row.nm_kec,
-        kabupaten: row.nm_kab,
-      }),
-    },
+    alamat,
   ];
+}
+
+/**
+ * Tanggal lahir dan umur DIGABUNG jadi satu baris, dan LABELNYA ikut yang ada.
+ *
+ * Menempelkan umur di dalam kurung ("1 Januari 1990 (35 Th)") menghemat satu
+ * baris tanpa menghilangkan apa pun. Yang tidak boleh: label "Tanggal Lahir" di
+ * atas nilai yang isinya cuma umur -- itu terjadi pada pasien yang tanggal
+ * lahirnya memang tidak tercatat di Khanza, dan hasilnya dokumen yang
+ * menyebutkan tanggal lahir seseorang sebagai "35 Th".
+ *
+ * Keduanya kosong -> nilainya kosong, lalu `barisTerisi()` membuang barisnya.
+ */
+function barisLahirUmur(row: BarisIdentitasMasuk): BarisIsian {
+  const lahir = formatTanggalSurat(row.tgl_lahir);
+  const umur = formatUmurSurat(row.umurdaftar, row.sttsumur);
+  if (lahir && umur) return { label: 'Tanggal Lahir', nilai: `${lahir} (${umur})` };
+  if (lahir) return { label: 'Tanggal Lahir', nilai: lahir };
+  return { label: 'Umur', nilai: umur };
 }
 
 function susunKepala(
@@ -284,7 +318,16 @@ function susunKepala(
     noRawat: row.no_rawat,
     noRm: row.no_rkm_medis,
     namaPasien: isianSurat(row.nm_pasien),
-    identitas: identitasDokumen(row),
+    /**
+     * Nota memakai bentuk RINGKAS, dua dokumen lainnya tidak.
+     *
+     * Bukan selera: kepala nota membawa empat keterangan tambahan (nomor
+     * nota, tanggal, unit, cara bayar) DI ATAS tabel rincian yang sendirinya
+     * panjang. Hasil lab dan radiologi tidak, dan susunan identitasnya
+     * sengaja mengikuti lembar Khanza baris per baris supaya bisa ditaruh
+     * bersebelahan dengan cetakan loket saat pasien kontrol.
+     */
+    identitas: identitasDokumen(row, jenis === 'nota'),
     tanggalDokumen: formatTanggalSurat(tanggal),
     tanggalRingkas: formatTanggalRingkas(tanggal),
     namaDokter: isianSurat(opsi.namaDokter),

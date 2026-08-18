@@ -11,6 +11,7 @@ import {
   type BarisNotaMasuk,
 } from './dokumenDoc';
 import { renderDokumenHtml } from './dokumenHtml';
+import { barisIdentitasGandaHtml } from './cetakHtml';
 import type { KopSurat } from './suratDoc';
 
 /**
@@ -425,6 +426,105 @@ describe('renderDokumenHtml', () => {
       { catatanKaki: '', qrDataUri: '' },
     );
     expect(html).toContain('sengaja tidak dicantumkan');
+  });
+
+  /**
+   * Kepala nota dipadatkan jadi DUA KOLOM: sepuluh baris jadi lima.
+   *
+   * Yang dijaga bukan jumlah barisnya melainkan bahwa yang hilang cuma
+   * BARISNYA, bukan keterangannya -- nota yang kehilangan keterangan berhenti
+   * bisa dicocokkan dengan lembar di loket, dan itu satu-satunya alasan
+   * susunan Khanza ditiru sejak awal.
+   */
+  it('memadatkan kepala nota jadi dua kolom tanpa membuang satu pun keterangan', () => {
+    const html = renderDokumenHtml(
+      susunNota(IDENTITAS, NOTA, [], 'N/1', '2026-01-02', { rincianObat: true }),
+      KOP,
+      { catatanKaki: '', qrDataUri: '' },
+    );
+    const tabel = /<table class="identitas ganda">([\s\S]*?)<\/table>/.exec(html);
+    expect(tabel).not.toBeNull();
+
+    const kepala = tabel![1]!;
+    expect(kepala.match(/<tr>/g) ?? []).toHaveLength(5);
+
+    for (const label of [
+      'Nama',
+      'No. RM',
+      'Tanggal Lahir',
+      'Jenis Kelamin',
+      'Alamat',
+      'No. Nota',
+      'Tanggal',
+      'Unit',
+      'Cara Bayar',
+    ]) {
+      expect(kepala).toContain(`>${label}</td>`);
+    }
+
+    // Umur tidak dibuang, cuma menumpang baris tanggal lahir.
+    expect(kepala).toContain('(30 Tahun)');
+    // Alamat melebar penuh; ia satu-satunya yang tidak dipasangkan.
+    expect(kepala).toContain('colspan="4"');
+  });
+
+  /**
+   * Hasil lab TIDAK ikut dipadatkan, dan itu keputusan yang sama umurnya
+   * dengan susunan kolomnya: lembar ini ditaruh bersebelahan dengan cetakan
+   * loket saat pasien kontrol, jadi susunan yang berbeda memaksa pembacanya
+   * mencocokkan ulang tiap baris.
+   */
+  it('membiarkan kepala hasil lab tetap satu kolom', () => {
+    const html = renderDokumenHtml(susunHasilLab(IDENTITAS, [], '2026-01-03'), KOP, {
+      catatanKaki: '',
+      qrDataUri: '',
+    });
+    expect(html).toContain('<table class="identitas">');
+    expect(html).not.toContain('identitas ganda');
+    expect(html).toContain('>Umur</td>');
+    expect(html).toContain('>No. Rekam Medis</td>');
+  });
+});
+
+describe('barisIdentitasGandaHtml', () => {
+  /**
+   * Tanpa pemutusan ini, baris sesudah alamat berpasangan MENYEBERANGI
+   * pemisahnya: keterangan pasien duduk sebaris dengan keterangan nota, dan
+   * kepala dokumen terbaca sebagai dua kolom yang tidak berhubungan.
+   */
+  it('memutus pasangan pada baris penuh, bukan memasangkannya menyeberang', () => {
+    const html = barisIdentitasGandaHtml([
+      { label: 'A', nilai: '1' },
+      { label: 'B', nilai: '2' },
+      { label: 'C', nilai: '3' },
+      { label: 'D', nilai: '4', penuh: true },
+      { label: 'E', nilai: '5' },
+    ]);
+    const baris = html.split('</tr>').filter((x) => x.includes('<tr'));
+
+    expect(baris).toHaveLength(4);
+    expect(baris[0]).toContain('>A</td>');
+    expect(baris[0]).toContain('>B</td>');
+    expect(baris[1]).toContain('>C</td>');
+    expect(baris[1]).not.toContain('>E</td>');
+    expect(baris[2]).toContain('colspan="4"');
+    expect(baris[3]).toContain('>E</td>');
+  });
+
+  /**
+   * Baris kosong dibuang SEBELUM dipasangkan, bukan sesudah -- kalau tidak,
+   * satu nilai yang kebetulan kosong menggeser seluruh pasangan sesudahnya.
+   */
+  it('membuang baris kosong sebelum memasangkan', () => {
+    const html = barisIdentitasGandaHtml([
+      { label: 'A', nilai: '1' },
+      { label: 'B', nilai: '' },
+      { label: 'C', nilai: '3' },
+    ]);
+    expect(html.split('</tr>').filter((x) => x.includes('<tr'))).toHaveLength(1);
+    expect(html).not.toContain('>B</td>');
+    expect(html).toContain('>A</td>');
+    expect(html).toContain('>C</td>');
   });
 });
 
