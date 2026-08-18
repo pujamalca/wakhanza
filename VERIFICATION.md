@@ -7918,3 +7918,83 @@ proses PM2 baru menyala **7 menit** sebelumnya, dan aturan tercatat di `CLAUDE.m
 ("uptime di bawah ~30 menit berarti tunggu dulu") melarang restart kedua yang
 berdekatan. Keadaan sesi saat itu diukur dan sehat: `status: ready`, umur denyut
 **22 detik**, `hapus_sesi_saat_mulai = 0`, `last_error` NULL, antrean **0**.
+
+## KOREKSI atas `migrations/054`: premisnya terbantah di produksi
+
+Seksi `migrations/054` di atas bersandar pada satu kalimat: "saat worker MULAI,
+sebelum Chromium meluncur, tidak ada yang memegang direktori sesi." **Kalimat itu
+KELIRU**, dan yang membantahnya log produksi dari percobaan pertamanya.
+
+### Urutan yang terbaca dari `logs/pm2-worker.out-7.log`
+
+```
+perintah logout diterima dari dashboard, memutus sesi WhatsApp
+perangkat sudah dilepas dari WhatsApp, berkas sesinya menyusul
+direktori sesi TIDAK bisa dihapus -- perlu dibersihkan manual     <-- 45 detik, gagal
+wakhanza-worker berhenti...
+sesi WhatsApp ditutup rapi
+wakhanza-worker memulai...
+direktori sesi dititipkan untuk dihapus, dikerjakan sebelum Chromium menyala
+direktori sesi TIDAK bisa dihapus -- perlu dibersihkan manual     <-- GAGAL LAGI
+direktori sesi tertunda TETAP gagal dihapus, bendera dibiarkan menyala
+QR baru terbit
+```
+
+Baris kedua dari bawah adalah pembantahannya: proses itu baru lahir dan belum
+meluncurkan Chromium sama sekali.
+
+`perintah logout diterima` muncul **tiga kali** di berkas yang sama -- tombolnya
+ditekan berulang karena tidak ada satu pun tanda bahwa yang pertama sedang
+dikerjakan.
+
+### Sebabnya balapan, dan dua angka menguncinya
+
+Jadwal percobaan `bersihkanDirektoriSesi()` (jeda menaik 1..9 detik) jatuh di
+detik ke-**0, 1, 3, 6, 10, 15, 21, 28, 36**, lalu menyerah di detik ke-45.
+
+Pengukuran proses pada uptime worker **43 detik** -- yaitu DI DALAM jendela itu,
+sesudah percobaan terakhir:
+
+```
+proses yang menyebut wwebjs_auth: 0
+```
+
+Jadi handle-nya memang dilepas, beberapa detik sesudah percobaan terakhir.
+Pemegangnya proses anak Chromium milik worker SEBELUMNYA, yang teardown-nya
+berjalan berbarengan dengan start ini.
+
+### Yang digugurkan sepanjang jalan, supaya tidak ditelusuri lagi
+
+| Dugaan | Cara mengujinya | Hasil |
+|---|---|---|
+| Chromium yatim memegangnya | `Get-CimInstance Win32_Process` disaring `CommandLine -like "*wwebjs_auth*"` | **gugur** -- 0 proses saat gagal; 9 saat sesi hidup normal (1 induk, 1 crashpad, 1 gpu, 2 utility, 4 renderer) |
+| Lintasan Windows > 260 karakter | 603 entri disortir menurut panjang `FullName` | **gugur** -- terpanjang **183** karakter |
+| Atribut ReadOnly/System | hitung entri ber-atribut itu | **gugur** -- 0 |
+| Junction / reparse point | hitung entri `ReparsePoint` | **gugur** -- 0 |
+
+### Ranjau yang ditemukan MENYALA di produksi
+
+Sesudah gangguan di atas, petugas memindai QR dan sesinya pulih. Keadaan yang
+terukur beberapa menit kemudian:
+
+```
+status = ready      umur_denyut = 15 dtk     hapus_sesi_saat_mulai = 1
+```
+
+Bendera itu berarti "hapus direktori sesi saat worker menyala" -- terhadap
+direktori yang kini berisi sesi BARU yang sah. Restart berikutnya akan
+menghapusnya dan memaksa pemindaian QR ulang, yang menuntut ponsel nomor rumah
+sakit. Dipadamkan langsung terhadap baris produksinya, dan pemadamnya menolak
+bekerja bila statusnya bukan `ready`:
+
+```
+sebelum: { status: 'ready', hapus: true }
+sesudah: { status: 'ready', hapus: false }
+```
+
+Perbaikan permanennya di handler `ready` (`wa-client.ts`): sesi yang hidup adalah
+bukti tidak ada lagi sesi lama yang perlu dihapus.
+
+### Gerbang
+
+`npm run typecheck` 0; `npm run lint` 0; `npm test` 63 suite / 1143 uji lulus.

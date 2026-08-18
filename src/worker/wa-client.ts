@@ -263,6 +263,7 @@ export async function lepasPerangkat(): Promise<{ direktoriTerkunci: boolean }> 
  */
 export async function bersihkanDirektoriSesi(): Promise<boolean> {
   const dir = direktoriSesi();
+  let terakhir: unknown = null;
   for (let percobaan = 1; percobaan <= 9; percobaan++) {
     try {
       await fs.rm(dir, { recursive: true, force: true, maxRetries: 0 });
@@ -270,12 +271,122 @@ export async function bersihkanDirektoriSesi(): Promise<boolean> {
       return true;
     } catch (err) {
       if (!galatBerkasTerkunci(err)) throw err;
+      terakhir = err;
       logger.debug({ percobaan }, 'direktori sesi masih terkunci');
       await new Promise((r) => setTimeout(r, percobaan * 1_000));
     }
   }
-  logger.error({ direktori: dir }, 'direktori sesi TIDAK bisa dihapus -- perlu dibersihkan manual');
+  /**
+   * GALATNYA IKUT DICATAT, dan ketiadaannya sudah memakan satu diagnosis utuh.
+   *
+   * Baris ini dulu cuma menyebut direktorinya. Satu-satunya keterangan tentang
+   * SEBAB kegagalan ada di `logger.debug` di atas -- level yang tidak menyala di
+   * produksi -- jadi kegagalan yang menghabiskan 45 detik tidak meninggalkan
+   * sebutir pun petunjuk: bukan kode galatnya, bukan berkas mana yang dipegang.
+   * Yang tersisa untuk didiagnosis cuma kalimat "TIDAK bisa dihapus", dan dari
+   * situ setiap dugaan sama masuk akalnya.
+   *
+   * `safeError()` membawa `message` yang memuat kode Windows-nya (EPERM/EBUSY/
+   * ENOTEMPTY) DAN lintasan berkas yang menolak -- persis dua hal yang
+   * membedakan "Chromium belum melepas" dari "ada pemindai virus" dari "izin
+   * berkas salah", yang ketiganya menuntut tindakan berbeda.
+   */
+  logger.error(
+    { direktori: dir, percobaan: 9, ...safeError(terakhir) },
+    'direktori sesi TIDAK bisa dihapus sesudah 9 percobaan (~45 detik)',
+  );
   return false;
+}
+
+/** Awalan direktori sesi yang sudah disisihkan dan menunggu dihapus. */
+const AWALAN_SISA_SESI = 'session.bak-';
+
+/**
+ * MEMINDAHKAN direktori sesi ke samping alih-alih menghapusnya -- dan inilah
+ * yang membuat QR bisa terbit tanpa menunggu siapa pun melepas berkas.
+ *
+ * ==========================================================================
+ * Kenapa memindahkan, padahal menghapus terdengar lebih tuntas
+ * ==========================================================================
+ *
+ * Menghapus menuntut SETIAP berkas di dalam pohon bisa dibuka untuk dihapus;
+ * memindahkan cuma menyentuh SATU entri direktori. Bedanya menentukan di sini,
+ * karena yang memegang berkas-berkas itu adalah proses anak Chromium yang baru
+ * saja diperintahkan tutup dan belum selesai membereskan diri.
+ *
+ * Terukur pada gangguan 18 Agustus 2026, dan angkanya nyaris berpapasan:
+ * jadwal percobaan `bersihkanDirektoriSesi()` adalah detik ke-0, 1, 3, 6, 10,
+ * 15, 21, 28, dan **36** -- lalu menyerah di detik ke-45. Pengukuran proses
+ * pada detik ke-43 menemukan **nol** `chrome.exe` yang memegang direktori itu.
+ * Jadi handle-nya memang akhirnya dilepas, cuma beberapa detik SESUDAH
+ * percobaan terakhir. Ia tidak terkunci selamanya; ia kalah balapan.
+ *
+ * Menaikkan anggarannya adalah jawaban yang salah untuk balapan yang salah:
+ * yang ditunggu bukan syarat kebenaran apa pun. Perangkatnya sudah lepas di
+ * langkah pertama `logout()`, dan QR tetap terbit walau berkas lamanya masih
+ * ada -- terbukti tiga kali pada gangguan yang sama. Menghapusnya kebersihan,
+ * bukan prasyarat, jadi ia tidak berhak menahan apa pun.
+ *
+ * Ditaruh DI DALAM `.wwebjs_auth/` supaya `.gitignore` yang sudah ada
+ * menutupinya: isinya kredensial WhatsApp, dan pola `.wwebjs_auth.bak-*` yang
+ * ditambahkan dulu lahir justru karena sebuah cadangan 73 MB sempat terlihat
+ * git.
+ *
+ * @returns lintasan tujuannya bila berhasil, atau `null` bila pemindahannya pun
+ *          ditolak -- pemanggil masih punya jalur hapus sebagai cadangan.
+ */
+export async function sisihkanDirektoriSesi(): Promise<string | null> {
+  const dir = direktoriSesi();
+  const tujuan = path.join(path.dirname(dir), `${AWALAN_SISA_SESI}${Date.now()}`);
+  try {
+    await fs.rename(dir, tujuan);
+    logger.info({ tujuan: path.basename(tujuan) }, 'direktori sesi disisihkan, akan dihapus saat worker menyala');
+    return tujuan;
+  } catch (err) {
+    // Direktori yang memang belum pernah ada bukan kegagalan: tidak ada yang
+    // perlu disisihkan, dan pemanggilnya boleh langsung menautkan.
+    const teks = err instanceof Error ? err.message : String(err);
+    if (teks.includes('ENOENT')) {
+      logger.info('tidak ada direktori sesi yang perlu disisihkan');
+      return tujuan;
+    }
+    logger.warn({ direktori: dir, ...safeError(err) }, 'direktori sesi tidak bisa disisihkan, mencoba menghapus');
+    return null;
+  }
+}
+
+/**
+ * Menghapus direktori sesi yang sudah disisihkan.
+ *
+ * DIREKTORINYA SENDIRI yang jadi daftar pekerjaan -- bukan sebuah kolom di
+ * database. Bendera yang menunjuk pekerjaan yang sudah tidak ada, dan pekerjaan
+ * yang tidak ditunjuk bendera mana pun, adalah dua arah salah yang sama-sama
+ * mungkin begitu keduanya disimpan terpisah; di sini keberadaan direktorinya
+ * ADALAH kebenarannya, jadi keduanya mustahil menyimpang.
+ *
+ * TIDAK PERNAH melempar dan tidak pernah menghabiskan waktu: yang gagal
+ * ditinggalkan untuk start berikutnya. Sisa yang menetap satu hari lebih lama
+ * tidak merugikan siapa pun -- yang merugikan adalah worker yang tertahan
+ * menyala karenanya.
+ */
+export async function sapuSisaSesi(): Promise<void> {
+  const induk = path.dirname(direktoriSesi());
+  let isi: string[];
+  try {
+    isi = await fs.readdir(induk);
+  } catch {
+    return; // belum pernah ada sesi sama sekali
+  }
+
+  for (const nama of isi.filter((n) => n.startsWith(AWALAN_SISA_SESI))) {
+    const lintasan = path.join(induk, nama);
+    try {
+      await fs.rm(lintasan, { recursive: true, force: true });
+      logger.info({ sisa: nama }, 'sisa direktori sesi dihapus');
+    } catch (err) {
+      logger.warn({ sisa: nama, ...safeError(err) }, 'sisa direktori sesi belum bisa dihapus, dicoba lagi nanti');
+    }
+  }
 }
 
 /**
@@ -400,6 +511,24 @@ export async function initWaClient(): Promise<Client> {
       phoneNumber,
       heartbeatAt: new Date(),
       lastError: null,
+      /**
+       * BENDERA 054 DIPADAMKAN DI SINI, dan tanpa ini ia jadi ranjau.
+       *
+       * Bendera itu berarti "direktori sesi masih harus dihapus saat worker
+       * menyala". Ia dinyalakan saat penghapusan gagal -- dan bila
+       * penghapusannya gagal BERULANG (terukur 18 Agustus 2026: gagal bahkan
+       * pada proses yang baru lahir), ia TETAP menyala sementara petugas
+       * memindai QR dan mendapatkan sesi yang sehat. Restart berikutnya lalu
+       * menghapus direktori sesi yang BARU dan sah, memaksa pemindaian ulang
+       * yang menuntut ponsel nomor RS -- kerusakan yang dilahirkan justru oleh
+       * pembersihannya sendiri.
+       *
+       * Sesi yang mencapai `ready` adalah bukti bahwa tidak ada lagi sesi lama
+       * yang perlu dihapus, apa pun yang tertulis sebelumnya. Karena itu
+       * pemadamannya di sini, bukan di jalur logout: yang menentukan bukan
+       * berhasilnya penghapusan melainkan hidupnya sesi baru.
+       */
+      hapusSesiSaatMulai: false,
     }).catch((err) => logger.error(safeError(err), 'gagal update wa_session (ready)'));
   });
 

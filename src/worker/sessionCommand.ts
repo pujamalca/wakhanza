@@ -1,6 +1,6 @@
 import { WaSession, WaGroup } from '@/models';
 import { catatTransisiStatus } from './sessionHistory';
-import { getClient, lepasPerangkat, bersihkanDirektoriSesi } from './wa-client';
+import { getClient, lepasPerangkat, bersihkanDirektoriSesi, sisihkanDirektoriSesi } from './wa-client';
 import { logger, safeError } from '@/lib/logger';
 
 /**
@@ -251,7 +251,25 @@ export async function processSessionCommand(fase: FaseSesi = 'siap'): Promise<Ha
       // dikoreksi lebih dulu; menunggu berkasnya bersih berarti membiarkan
       // halaman Koneksi menampilkan sesi yang sudah tidak ada selama itu.
       const { direktoriTerkunci } = await lepasPerangkat();
-      await catatTransisiStatus({ status: 'qr_pending', phoneNumber: null, qrData: null, lastError: null });
+      /**
+       * `authenticating`, BUKAN `qr_pending` -- dan bedanya bukan istilah.
+       *
+       * `qr_pending` berarti "ada kode di layar, silakan pindai", dan halaman
+       * Koneksi memang menampilkan panel QR hanya bila `qrData` ADA. Menulisnya
+       * di sini, beberapa detik sebelum kode pertama terbit, menghasilkan
+       * halaman yang berkata sedang menunggu dipindai sambil tidak menampilkan
+       * apa pun untuk dipindai. Itu persis kebingungan yang membuat tombolnya
+       * ditekan berulang: terukur 18 Agustus 2026, `perintah logout diterima`
+       * muncul TIGA kali karena tidak ada satu pun tanda bahwa yang pertama
+       * sedang dikerjakan.
+       *
+       * `authenticating` berarti "sedang menautkan", yang memang sedang terjadi,
+       * dan ia tetap memenuhi syarat aslinya: status yang sudah tidak benar
+       * dikoreksi SEBELUM berkasnya diurus, jadi halaman berhenti menampilkan
+       * sesi yang sudah tidak ada. Event `qr` yang menuliskan `qr_pending`
+       * berikut gambarnya sekaligus, beberapa detik kemudian.
+       */
+      await catatTransisiStatus({ status: 'authenticating', phoneNumber: null, qrData: null, lastError: null });
 
       /**
        * ==================================================================
@@ -274,17 +292,36 @@ export async function processSessionCommand(fase: FaseSesi = 'siap'): Promise<Ha
        * meluncurkan Chromium SEGAR di atas direktori kosong -- persis keadaan
        * yang diberikan restart, dikurangi kematian prosesnya.
        *
-       * `direktoriTerkunci === false` berarti pustaka sudah menghapusnya
-       * sendiri; sisanya dikerjakan `bersihkanDirektoriSesi()`. Keduanya sama
-       * artinya di sini: tidak ada lagi yang perlu ditunggu.
-       *
        * Yang MENGAWASI penautan ulangnya tetap watchdog yang sudah ada, bukan
        * mekanisme baru -- `index.ts` menyetel ulang `initSelesai`/`initMulaiAt`
        * sebelum memanggil `initWaClient()`, dan `putusanWatchdog()` membaca
        * keduanya SAAT DIPANGGIL. Jadi penautan ulang yang menggantung dijatuhkan
        * `BATAS_INIT_MS` lewat `shutdown()` sama seperti penautan pertama.
+       *
+       * ==================================================================
+       * MEMINDAHKAN lebih dulu, MENGHAPUS cuma cadangan
+       * ==================================================================
+       *
+       * Versi pertama perbaikan ini menunggu `bersihkanDirektoriSesi()` selesai
+       * sebelum menautkan, dan itu terbukti keliru pada percobaan pertama di
+       * produksi: penghapusannya gagal sesudah 45 detik penuh, DAN gagal lagi
+       * pada start berikutnya walau Chromium belum menyala sama sekali -- yaitu
+       * momen yang seluruh rancangan `migrations/054` andaikan bersih.
+       *
+       * Sebabnya balapan, bukan kunci abadi: percobaan terakhir jatuh di detik
+       * ke-36 sementara proses anak Chromium baru melepas handle-nya sekitar
+       * detik ke-40. Menaikkan anggarannya berarti memperpanjang penantian yang
+       * seharusnya tidak ada -- perangkatnya sudah lepas di langkah pertama
+       * `logout()`, dan QR terbukti terbit tiga kali walau berkas lamanya masih
+       * utuh. Berkas itu kebersihan, bukan prasyarat.
+       *
+       * Karena itu urutannya dibalik: SISIHKAN (satu operasi pada satu entri
+       * direktori, tidak menuntut satu pun berkas di dalamnya bisa dibuka), lalu
+       * tautkan di atas direktori kosong. Penghapusan sisanya menyusul saat
+       * worker menyala berikutnya, tanpa menahan apa pun.
        */
-      if (!direktoriTerkunci || (await bersihkanDirektoriSesi())) {
+      if ((await sisihkanDirektoriSesi()) !== null || (await bersihkanDirektoriSesi())) {
+        logger.info({ direktoriTerkunci }, 'sesi lama disingkirkan, menautkan ulang tanpa menyalakan ulang worker');
         return 'tautkan-ulang';
       }
 

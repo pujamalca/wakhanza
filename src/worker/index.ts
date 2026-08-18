@@ -35,6 +35,7 @@ import {
   getClient,
   checkHealth,
   bersihkanDirektoriSesi,
+  sapuSisaSesi,
 } from './wa-client';
 import { processSessionCommand } from './sessionCommand';
 import { startCleanupSchedule } from './cleanup';
@@ -354,13 +355,35 @@ async function sessionWatchdog(): Promise<void> {
 }
 
 /**
- * Menghapus direktori sesi yang dititipkan `logout` (054), bila ada.
+ * Membereskan sisa direktori sesi sebelum Chromium menyala.
+ *
+ * ===========================================================================
+ * DUA daftar pekerjaan, dan yang kedua menggantikan yang pertama
+ * ===========================================================================
+ *
+ * `sapuSisaSesi()` menghapus direktori `session.bak-*` yang disisihkan jalur
+ * logout. Daftar pekerjaannya adalah direktori itu sendiri -- tidak ada bendera
+ * yang bisa menyimpang darinya, dan yang gagal hari ini otomatis tercoba lagi
+ * besok tanpa satu baris state pun.
+ *
+ * Bendera `hapus_sesi_saat_mulai` (`migrations/054`) TETAP dihormati, tapi ia
+ * peninggalan: ia hanya masih menyala pada baris yang sempat ditulis versi lama.
+ * Premisnya sendiri sudah TERBUKTI KELIRU pada 18 Agustus 2026 -- "saat worker
+ * MULAI, sebelum Chromium meluncur, tidak ada yang memegang direktori sesi"
+ * dibantah oleh log produksinya sendiri: `direktori sesi tertunda TETAP gagal
+ * dihapus` pada proses yang baru saja lahir. Yang memegangnya adalah sisa proses
+ * anak Chromium milik worker SEBELUMNYA, yang teardown-nya berjalan berbarengan
+ * dengan start ini. Karena itu jalur logout tidak lagi bersandar padanya.
  *
  * TIDAK PERNAH melempar. Kegagalannya tidak boleh menjatuhkan worker: yang
  * hilang cuma pembersihan yang bisa dicoba lagi pada start berikutnya,
  * sementara worker yang gagal menyala menghentikan seluruh notifikasi.
  */
 async function kerjakanHapusSesiTertunda(): Promise<void> {
+  // Disapu lebih dulu dan tanpa syarat: sisa yang tertinggal adalah kredensial
+  // WhatsApp di disk, jadi ia tidak boleh menunggu bendera apa pun untuk hilang.
+  await sapuSisaSesi();
+
   try {
     const row = await WaSession.findByPk(1);
     if (!row?.hapusSesiSaatMulai) return;

@@ -119,8 +119,13 @@ export function tindakanKoneksi(diagnosa: DiagnosaKoneksi): TindakanKoneksi {
     return {
       sambungUlang: {
         bisa: false,
+        // Kalimatnya WAJIB menjelaskan kenapa tombolnya MATI, bukan apa
+        // akibatnya bila ditekan -- pembacanya tidak bisa menekannya. Bentuk
+        // lamanya ("Menekannya menerbitkan kode QR BARU...") menggambarkan
+        // tindakan yang tidak tersedia, sehingga terbaca sebagai peringatan atas
+        // pilihan yang sebenarnya tidak ada. Dilaporkan langsung oleh pemakainya.
         catatan:
-          'Menekannya menerbitkan kode QR BARU dan membatalkan yang sedang ditatap petugas. Pindai dulu kode yang tampil.',
+          'Dimatikan selama kode QR menunggu dipindai, karena menekannya akan menerbitkan kode BARU dan membatalkan yang sedang ditatap petugas. Pindai dulu kode yang tampil.',
       },
       keluarSesi: TANPA_CATATAN,
       langkah: [],

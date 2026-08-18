@@ -29,6 +29,12 @@ export async function catatTransisiStatus(
     phoneNumber: string | null;
     heartbeatAt: Date;
     lastError: string | null;
+    /**
+     * Bendera 054. Ikut lewat sini, bukan lewat UPDATE tersendiri, dengan
+     * alasan yang sama seperti `status`: penulis kedua adalah cara paling rapi
+     * membuat dua tempat menyimpang.
+     */
+    hapusSesiSaatMulai: boolean;
   }>,
 ): Promise<void> {
   const sebelum = await WaSession.findByPk(1);
